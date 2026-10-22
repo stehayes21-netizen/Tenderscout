@@ -52,13 +52,15 @@ EXCLUDE_TERMS = [
     "cyber security", "telecommunications", "road construction",
     "new build", "building construction", "architectural services",
 ]
+
 NORTH_WEST_TERMS = [
-    "north west", "merseyside", "liverpool", "birkenhead", "wirral",
-    "sefton", "southport", "formby", "st helens", "knowsley",
-    "warrington", "halton", "chester", "cheshire", "manchester",
-    "salford", "bolton", "bury", "rochdale", "oldham", "stockport",
-    "tameside", "trafford", "blackburn", "blackpool", "preston",
-    "lancaster", "cumbria", "barrow-in-furness",
+    "north west", "merseyside", "liverpool",
+    "birkenhead", "wirral", "wallasey",
+    "sefton", "southport", "formby",
+    "st helens", "knowsley", "halton",
+    "warrington", "runcorn", "chester",
+    "cheshire", "widnes", "prescot",
+    "huyton", "bootle", "crosby",
 ]
 
 FIELDS = [
