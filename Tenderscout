@@ -1,0 +1,141 @@
+
+import os
+import sqlite3
+from flask import Flask, jsonify, request, Response
+
+app = Flask(__name__)
+
+DB_PATH = os.environ.get(
+    "TENDERSCOUT_DB",
+    "/data/tenderscout.db"
+    if os.path.isdir("/data")
+    else "tenderscout.db"
+)
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tenders (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            buyer TEXT,
+            location TEXT,
+            deadline TEXT,
+            url TEXT UNIQUE,
+            source TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    return conn
+
+@app.before_request
+def protect_dashboard():
+    if request.path == "/health":
+        return
+
+    username = os.getenv("DASHBOARD_USER")
+    password = os.getenv("DASHBOARD_PASSWORD")
+
+    if username and password:
+        auth = request.authorization
+        if not auth or auth.username != username or auth.password != password:
+            return Response(
+                "Authentication required",
+                401,
+                {"WWW-Authenticate": 'Basic realm="TenderScout"'}
+            )
+
+@app.get("/health")
+def health():
+    try:
+        conn = get_db()
+        conn.execute("SELECT 1")
+        conn.close()
+        return jsonify(status="ok"), 200
+    except Exception:
+        return jsonify(status="error"), 503
+
+@app.get("/")
+def dashboard():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT title, buyer, location, deadline, url, source "
+        "FROM tenders ORDER BY updated_at DESC LIMIT 200"
+    ).fetchall()
+    conn.close()
+
+    html = """
+    <!doctype html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width">
+      <title>TenderScout</title>
+      <style>
+        body { font:16px Arial; background:#101820; color:#fff;
+               max-width:1100px; margin:25px auto; padding:0 14px; }
+        h1 { color:#8df06b; }
+        button { padding:12px; background:#8df06b; border:0;
+                 border-radius:7px; font-weight:bold; }
+        table { width:100%; border-collapse:collapse; margin-top:20px; }
+        td,th { padding:9px; border-bottom:1px solid #38434b;
+                text-align:left; }
+        a { color:#8df06b; }
+      </style>
+    </head>
+    <body>
+      <h1>TenderScout</h1>
+      <p>UK public procurement opportunities</p>
+      <form method="post" action="/api/refresh">
+        <button>Find new tenders now</button>
+      </form>
+      <p>Saved opportunities: RECORD_COUNT</p>
+      <table>
+        <tr><th>Opportunity</th><th>Buyer</th><th>Location</th>
+        <th>Deadline</th><th>Source</th></tr>
+        RECORDS
+      </table>
+    </body>
+    </html>
+    """
+
+    records = []
+    for row in rows:
+        title = (row["title"] or "Untitled").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        url = (row["url"] or "#").replace('"', "&quot;")
+        buyer = row["buyer"] or ""
+        location = row["location"] or ""
+        deadline = row["deadline"] or ""
+        source = row["source"] or ""
+
+        records.append(
+            f'<tr><td><a href="{url}" target="_blank">{title}</a></td>'
+            f'<td>{buyer}</td><td>{location}</td>'
+            f'<td>{deadline}</td><td>{source}</td></tr>'
+        )
+
+    if not records:
+        records.append(
+            '<tr><td colspan="5">No saved tenders yet.</td></tr>'
+        )
+
+    return html.replace(
+        "RECORD_COUNT", str(len(rows))
+    ).replace("RECORDS", "".join(records))
+
+@app.get("/api/tenders")
+def list_tenders():
+    conn = get_db()
+    rows = [
+        dict(row) for row in conn.execute(
+            "SELECT * FROM tenders ORDER BY updated_at DESC LIMIT 500"
+        )
+    ]
+    conn.close()
+    return jsonify(count=len(rows), tenders=rows)
+
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "5000"))
+    )
