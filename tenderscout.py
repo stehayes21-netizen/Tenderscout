@@ -335,7 +335,7 @@ def classify_geography(record, region):
         "lancaster", "cumbria", "barrow-in-furness",
         "leeds", "sheffield", "nottingham", "london",
         "birmingham", "bristol", "cardiff", "edinburgh",
-        "glasgow", "newcastle", "oxford", "cambridge",
+        "glasgow", "newcastle", "oxford", "cambridge","scotland", "aberdeen", "dundee", "inverness", "perth", "stirling", "falkirk", "paisley", "ayr", "livingston", "kirkcaldy",
     ]
     out_hits = keyword_hits(location_text, out_of_area_terms)
 
