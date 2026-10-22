@@ -304,33 +304,62 @@ def keyword_hits(text, terms):
     return [term for term in terms if term in lower]
 
 
+
 def classify_geography(record, region):
-    """Classify location conservatively; never infer a confirmed site from prose alone."""
+    """Classify tenders using structured location evidence."""
     if region == "UK wide":
         return "UK-wide search", "UK-wide search"
 
     location_text = (record.get("location_text") or "").lower()
-    prose = " ".join([record.get("title", ""), record.get("description", "")]).lower()
-    nw_hits = keyword_hits(location_text, NORTH_WEST_TERMS)
-    if nw_hits:
-        return "LOCAL", "Structured delivery/site address: " + ", ".join(nw_hits[:3])
+    prose = " ".join([
+        record.get("title", ""),
+        record.get("description", "")
+    ]).lower()
 
-    # A known delivery address that has no North West evidence is outside the target.
-    # Avoid interpreting a bare country name as a specific location.
-    has_specific_location = bool(re.search(
-        r"\b(?:street|road|avenue|lane|drive|way|close|court|postcode|\w+shire|london|birmingham|bristol|leeds|sheffield|nottingham|cardiff|edinburgh|glasgow|newcastle|oxford|cambridge)\b", location_text
-    ))
-    if location_text.strip() and has_specific_location:
-        return "OUT_OF_AREA", "Structured address contains no North West location"
+    local_terms = [
+        term for term in NORTH_WEST_TERMS
+        if term != "north west"
+    ]
+    local_hits = keyword_hits(location_text, local_terms)
 
-    prose_hits = keyword_hits(prose, NORTH_WEST_TERMS)
+    if local_hits:
+        return "LOCAL", (
+            "Structured delivery/site location: "
+            + ", ".join(local_hits[:3])
+        )
+
+    out_of_area_terms = [
+        "manchester", "salford", "bolton", "bury",
+        "rochdale", "oldham", "stockport", "tameside",
+        "trafford", "blackburn", "blackpool", "preston",
+        "lancaster", "cumbria", "barrow-in-furness",
+        "leeds", "sheffield", "nottingham", "london",
+        "birmingham", "bristol", "cardiff", "edinburgh",
+        "glasgow", "newcastle", "oxford", "cambridge",
+    ]
+    out_hits = keyword_hits(location_text, out_of_area_terms)
+
+    if out_hits:
+        return "OUT_OF_AREA", (
+            "Structured delivery/site location outside "
+            "preferred area: " + ", ".join(out_hits[:3])
+        )
+
+    prose_hits = keyword_hits(prose, local_terms)
     if prose_hits:
-        return "REVIEW", "North West term appears only in title/description: " + ", ".join(prose_hits[:3])
+        return "REVIEW", (
+            "Nearby place appears only in title/description: "
+            + ", ".join(prose_hits[:3])
+        )
+
+    if location_text.strip():
+        return "REVIEW", (
+            "Structured location is too vague to confirm "
+            "preferred area"
+        )
+
     return "REVIEW", "No usable delivery/site location evidence"
-
-
-def score_record(record, services, region, min_value, max_value):
-    fulltext = " ".join([
+  fulltext = " ".join([
         record.get("title", ""), record.get("description", ""),
         record.get("buyer", ""),
     ]).lower()
