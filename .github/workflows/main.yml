@@ -1,6 +1,4 @@
-name: TenderScout Check
 
-on: [push, workflow_dispatch]
 
 
 
