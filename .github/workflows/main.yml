@@ -2,22 +2,44 @@ name: TenderScout Check
 
 on: [push, workflow_dispatch]
 
-jobs:
-check:
-runs-on: ubuntu-latest
-steps:
-- uses: actions/checkout@v4
-- uses: actions/setup-python@v5
-with:
+
+
 name: TenderScout Check
-on: [push]
+
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: read
+
 jobs:
-check:
-runs-on: ubuntu-latest
-steps:
-- uses: actions/checkout@v4
-- uses: actions/setup-python@v5
-with:
-python-version: '3.12'
-- run: python -m py_compile Tenderscout.py app.py
-- run: python -m py_compile Tenderscout.py app.py
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check Python syntax
+        run: python -m py_compile tenderscout.py app.py
+
+      - name: Collect tenders
+        run: python tenderscout.py --days 14 --region "North West" --min-score 3 --services cleaning fm
+
+      - name: Save CSV results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenderscout-results
+          path: "*.csv"
+          if-no-files-found: ignore
+          retention-days: 7
