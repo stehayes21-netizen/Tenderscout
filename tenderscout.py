@@ -351,7 +351,7 @@ def classify_geography(record, region):
             "Nearby place appears only in title/description: "
             + ", ".join(prose_hits[:3])
         )
-
+def score_record(record, services, region, min_value, max_value):
     if location_text.strip():
         return "REVIEW", (
             "Structured location is too vague to confirm "
