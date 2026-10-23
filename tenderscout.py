@@ -66,7 +66,6 @@ NORTH_WEST_TERMS = [
 ]
 
 TARGET_POSTCODE_DISTRICTS = {
-    # Liverpool (verified city-core districts, not broad boundary-crossing ranges)
     "L1": "Liverpool",
     "L2": "Liverpool",
     "L3": "Liverpool",
@@ -81,7 +80,6 @@ TARGET_POSTCODE_DISTRICTS = {
     "L17": "Liverpool",
     "L18": "Liverpool",
     "L19": "Liverpool",
-    # Knowsley (districts verified as local to Knowsley)
     "L10": "Knowsley",
     "L11": "Knowsley",
     "L12": "Knowsley",
@@ -91,7 +89,6 @@ TARGET_POSTCODE_DISTRICTS = {
     "L26": "Knowsley",
     "L27": "Knowsley",
     "L36": "Knowsley",
-    # Sefton (districts verified as local to Sefton)
     "L20": "Sefton",
     "L21": "Sefton",
     "L22": "Sefton",
@@ -102,17 +99,14 @@ TARGET_POSTCODE_DISTRICTS = {
     "L37": "Sefton",
     "L38": "Sefton",
     "L39": "Sefton",
-    # Halton
     "WA7": "Halton",
     "WA8": "Halton",
-    # St Helens
     "WA9": "St Helens",
     "WA10": "St Helens",
     "WA11": "St Helens",
     "WA12": "St Helens",
     "WA13": "St Helens",
     "WA14": "St Helens",
-    # Wirral
     "CH41": "Wirral",
     "CH42": "Wirral",
     "CH43": "Wirral",
@@ -131,54 +125,17 @@ TARGET_POSTCODE_DISTRICTS = {
     "CH66": "Wirral",
 }
 
-# Districts explicitly known to be outside the target area, used to reject confirmed
-# delivery sites outside the preferred geography without over-classifying uncertain
-# districts as out-of-area.
 OUT_OF_AREA_POSTCODE_DISTRICTS = {
     "LS1",
-    "M1",
-    "M2",
-    "M3",
-    "M4",
-    "M5",
-    "M6",
-    "M7",
-    "M8",
-    "M9",
-    "B1",
-    "NE1",
-    "BD1",
-    "PR1",
-    "BL1",
-    "OL1",
-    "HX1",
-    "WA1",
-    "WA2",
-    "WA3",
-    "WA4",
-    "WA5",
-    "WA6",
+    "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9",
+    "B1", "NE1", "BD1", "PR1", "BL1", "OL1", "HX1",
+    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6",
 }
 
-# Postcode districts that are not reliably assignable without boundary-crossing or
-# incomplete evidence; these must remain REVIEW rather than LOCAL or OUT_OF_AREA.
 AMBIGUOUS_POSTCODE_DISTRICTS = {
-    "L24",
-    "L28",
-    "L32",
-    "L33",
-    "L34",
-    "L35",
-    "CH25",
-    "CH26",
-    "CH27",
-    "CH28",
-    "CH29",
-    "CH30",
-    "CH31",
-    "CH32",
-    "CH33",
-    "CH34",
+    "L24", "L28", "L32", "L33", "L34", "L35",
+    "CH25", "CH26", "CH27", "CH28", "CH29", "CH30",
+    "CH31", "CH32", "CH33", "CH34",
 }
 
 FIELDS = [
@@ -602,7 +559,7 @@ def classify_geography(record, region):
         term for term in NORTH_WEST_TERMS
         if term not in {"north west"}
     ]
-    local_hit_terms = keyword_hits(location_text.lower(), local_terms)
+    local_hits = keyword_hits(location_text.lower(), local_terms)
     out_of_area_terms = [
         "manchester", "salford", "bolton", "bury",
         "rochdale", "oldham", "stockport", "tameside",
@@ -612,16 +569,16 @@ def classify_geography(record, region):
         "birmingham", "bristol", "cardiff", "edinburgh",
         "glasgow", "newcastle", "oxford", "cambridge", "scotland", "aberdeen", "dundee",
         "inverness", "perth", "stirling", "falkirk", "paisley", "ayr", "livingston",
-        "kirkcaldy", "warrington", "runcorn", "widnes", "chester",
+        "kirkcaldy", "halton", "warrington", "runcorn", "widnes", "chester",
         "cheshire", "lancashire", "northumberland",
     ]
-    out_term_hits = keyword_hits(location_text.lower(), out_of_area_terms)
+    out_hits = keyword_hits(location_text.lower(), out_of_area_terms)
     local_postcodes, out_postcodes, all_postcodes = _postcode_classification(location_text)
 
     if local_postcodes and out_postcodes:
         return "REVIEW", (
             "Multiple delivery site postcodes across target and non-target areas: "
-            + ", ".join(local_postcodes + out_postcodes)[:5]
+            + ", ".join(local_postcodes + out_postcodes)
         )
 
     if local_postcodes:
@@ -636,22 +593,22 @@ def classify_geography(record, region):
             + ", ".join(out_postcodes[:3])
         )
 
-    if local_hit_terms and out_term_hits:
+    if local_hits and out_hits:
         return "REVIEW", (
             "Multiple delivery/site locations across target and non-target areas: "
-            + ", ".join((local_hit_terms + out_term_hits)[:5])
+            + ", ".join((local_hits + out_hits)[:5])
         )
 
-    if local_hit_terms:
+    if local_hits:
         return "LOCAL", (
             "Structured delivery/site location: "
-            + ", ".join(local_hit_terms[:3])
+            + ", ".join(local_hits[:3])
         )
 
-    if out_term_hits:
+    if out_hits:
         return "OUT_OF_AREA", (
             "Structured delivery/site location outside preferred area: "
-            + ", ".join(out_term_hits[:3])
+            + ", ".join(out_hits[:3])
         )
 
     prose_hits = keyword_hits(prose, local_terms)
@@ -662,9 +619,9 @@ def classify_geography(record, region):
         )
     if location_text.strip():
         if all_postcodes:
-            return "REVIEW", "Malformed or unusable postcode evidence"
+            return "REVIEW", "Review: malformed or unusable postcode evidence"
         return "REVIEW", (
-            "Structured location is too vague to confirm preferred area"
+            "Review: structured location is too vague to confirm preferred area"
         )
 
     return "REVIEW", "No usable delivery/site location evidence"
@@ -825,3 +782,42 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
