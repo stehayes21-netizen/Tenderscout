@@ -26,6 +26,8 @@ jobs:
 
       - name: Check Python syntax
         run: python -m py_compile tenderscout.py app.py
+      - name: Run unit tests
+        run: python -m unittest discover -v
 
       - name: Collect tenders
         run: python tenderscout.py --days 14 --region "North West" --min-score 3 --services cleaning fm
