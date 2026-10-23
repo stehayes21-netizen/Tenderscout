@@ -71,6 +71,37 @@ FIELDS = [
     "deadline", "status", "score", "score_reasons", "notice_url", "ocid",
 ]
 
+EXPLICIT_LOCATION_KEYS = (
+    "deliveryAddress",
+    "deliveryAddresses",
+    "delivery_address",
+    "deliveryLocation",
+    "deliveryLocations",
+    "delivery_location",
+    "location",
+    "locations",
+    "address",
+    "addresses",
+    "siteAddress",
+    "site_address",
+    "site",
+    "streetAddress",
+    "street_address",
+    "addressLine",
+    "address_line",
+    "locality",
+    "region",
+    "postalCode",
+    "postal_code",
+    "countryName",
+    "country_name",
+    "town",
+    "city",
+    "county",
+    "district",
+    "suburb",
+)
+
 
 def get_json(url: str, timeout: int = 25):
     req = urllib.request.Request(
@@ -128,6 +159,36 @@ def money_value(value):
         return ""
 
 
+def add_location_values(obj, location_parts):
+    """Collect values only from explicit delivery/site location fields.
+
+    We intentionally ignore buyer addresses and other generic organisation details
+    unless they are nested inside a contract/site delivery structure.
+    """
+    if obj is None:
+        return
+    if isinstance(obj, str):
+        text = obj.strip()
+        if text:
+            location_parts.append(text)
+        return
+    if isinstance(obj, list):
+        for item in obj:
+            add_location_values(item, location_parts)
+        return
+    if not isinstance(obj, dict):
+        return
+
+    for key in EXPLICIT_LOCATION_KEYS:
+        if key in obj:
+            add_location_values(obj[key], location_parts)
+
+    # If the address/location object itself contains a nested address block, capture it.
+    for nested_key in ("address", "location", "deliveryAddress", "deliveryLocation"):
+        if nested_key in obj:
+            add_location_values(obj[nested_key], location_parts)
+
+
 def extract_records(payload, source):
     """Tolerate the common OCDS package and a few API response shapes."""
     if isinstance(payload, list):
@@ -179,27 +240,16 @@ def extract_records(payload, source):
                 release_id = as_text(first(rel, "id"))
                 if source == "Find a Tender" and re.fullmatch(r"\d{6}-\d{4}", release_id):
                     notice_url = f"https://www.find-tender.service.gov.uk/Notice/{release_id}"
-            # Prefer structured delivery/site addresses for geography. A place name
-            # appearing only in a title or description is weak evidence and must be
-            # reviewed rather than treated as proof of contract location.
+
             location_parts = []
-            def add_location(obj):
-                if isinstance(obj, dict):
-                    for key in ("streetAddress", "locality", "region", "postalCode", "countryName", "country"):
-                        val = obj.get(key)
-                        if val:
-                            location_parts.append(as_text(val))
-                elif isinstance(obj, list):
-                    for item in obj:
-                        add_location(item)
-            add_location(tender.get("deliveryAddress"))
-            add_location(tender.get("deliveryAddresses"))
-            add_location(tender.get("delivery_address"))
-            for item in (tender.get("items") or []):
-                if isinstance(item, dict):
-                    add_location(item.get("deliveryAddress") or item.get("delivery_address"))
-            contract = rel.get("contract") or {}
-            add_location(contract.get("deliveryAddress"))
+            for candidate in (
+                tender,
+                rel,
+                rel.get("contract") or {},
+                *(tender.get("items") or []),
+            ):
+                add_location_values(candidate, location_parts)
+
             output.append({
                 "source": source,
                 "location_text": ", ".join(dict.fromkeys(location_parts)),
@@ -321,13 +371,6 @@ def classify_geography(record, region):
         if term not in {"north west"}
     ]
     local_hits = keyword_hits(location_text, local_terms)
-
-    if local_hits:
-        return "LOCAL", (
-            "Structured delivery/site location: "
-            + ", ".join(local_hits[:3])
-        )
-
     out_of_area_terms = [
         "manchester", "salford", "bolton", "bury",
         "rochdale", "oldham", "stockport", "tameside",
@@ -338,14 +381,26 @@ def classify_geography(record, region):
         "glasgow", "newcastle", "oxford", "cambridge", "scotland", "aberdeen", "dundee",
         "inverness", "perth", "stirling", "falkirk", "paisley", "ayr", "livingston",
         "kirkcaldy", "halton", "warrington", "runcorn", "widnes", "chester",
-        "cheshire", "lancashire", "cumbria", "northumberland",
+        "cheshire", "lancashire", "northumberland",
     ]
     out_hits = keyword_hits(location_text, out_of_area_terms)
 
+    if local_hits and out_hits:
+        return "REVIEW", (
+            "Multiple delivery/site locations across target and non-target areas: "
+            + ", ".join((local_hits + out_hits)[:5])
+        )
+
+    if local_hits:
+        return "LOCAL", (
+            "Structured delivery/site location: "
+            + ", ".join(local_hits[:3])
+        )
+
     if out_hits:
         return "OUT_OF_AREA", (
-            "Structured delivery/site location outside "
-            "preferred area: " + ", ".join(out_hits[:3])
+            "Structured delivery/site location outside preferred area: "
+            + ", ".join(out_hits[:3])
         )
 
     prose_hits = keyword_hits(prose, local_terms)
@@ -356,8 +411,7 @@ def classify_geography(record, region):
         )
     if location_text.strip():
         return "REVIEW", (
-            "Structured location is too vague to confirm "
-            "preferred area"
+            "Structured location is too vague to confirm preferred area"
         )
 
     return "REVIEW", "No usable delivery/site location evidence"
