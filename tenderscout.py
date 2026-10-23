@@ -78,13 +78,14 @@ EXPLICIT_LOCATION_KEYS = (
     "deliveryLocation",
     "deliveryLocations",
     "delivery_location",
-    "location",
-    "locations",
-    "address",
-    "addresses",
     "siteAddress",
     "site_address",
     "site",
+    "sites",
+    "location",
+    "locations",
+)
+ADDRESS_TEXT_KEYS = (
     "streetAddress",
     "street_address",
     "addressLine",
@@ -159,18 +160,43 @@ def money_value(value):
         return ""
 
 
-def add_location_values(obj, location_parts):
-    """Collect values only from explicit delivery/site location fields.
+def _append_location_piece(value, location_parts):
+    if value is None:
+        return
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            location_parts.append(text)
+        return
+    if isinstance(value, (int, float)):
+        text = str(value).strip()
+        if text:
+            location_parts.append(text)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _append_location_piece(item, location_parts)
+        return
+    if isinstance(value, dict):
+        for key in ADDRESS_TEXT_KEYS:
+            if key in value:
+                _append_location_piece(value.get(key), location_parts)
+        for nested_key in ("address", "location", "deliveryAddress", "deliveryLocation"):
+            if nested_key in value:
+                add_location_values(value[nested_key], location_parts)
 
-    We intentionally ignore buyer addresses and other generic organisation details
-    unless they are nested inside a contract/site delivery structure.
+
+def add_location_values(obj, location_parts):
+    """Collect only verified delivery/site fields from actual OCDS items and contracts.
+
+    We intentionally ignore buyer addresses, parties, document metadata, and generic
+    organisation addresses. The actual delivery/site evidence lives in item/contract
+    delivery/site structures and their nested address objects.
     """
     if obj is None:
         return
     if isinstance(obj, str):
-        text = obj.strip()
-        if text:
-            location_parts.append(text)
+        _append_location_piece(obj, location_parts)
         return
     if isinstance(obj, list):
         for item in obj:
@@ -183,10 +209,51 @@ def add_location_values(obj, location_parts):
         if key in obj:
             add_location_values(obj[key], location_parts)
 
-    # If the address/location object itself contains a nested address block, capture it.
+    for key in ADDRESS_TEXT_KEYS:
+        if key in obj:
+            _append_location_piece(obj.get(key), location_parts)
+
     for nested_key in ("address", "location", "deliveryAddress", "deliveryLocation"):
         if nested_key in obj:
             add_location_values(obj[nested_key], location_parts)
+
+
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _iter_delivery_roots(rel):
+    """Yield only tender/contract/award item structures that can plausibly contain delivery sites."""
+    if not isinstance(rel, dict):
+        return
+
+    tender = rel.get("tender") or {}
+    if isinstance(tender, dict):
+        yield tender
+        for key in ("items", "lots"):
+            for item in _as_list(tender.get(key)):
+                if isinstance(item, (dict, list)):
+                    yield item
+
+    for key in ("contract", "contracts", "award", "awards"):
+        for node in _as_list(rel.get(key)):
+            if isinstance(node, (dict, list)):
+                yield node
+                if isinstance(node, dict):
+                    for child_key in ("items", "lots"):
+                        for item in _as_list(node.get(child_key)):
+                            if isinstance(item, (dict, list)):
+                                yield item
+
+    # Some releases store delivery info in top-level item arrays.
+    for key in ("items", "lots"):
+        for item in _as_list(rel.get(key)):
+            if isinstance(item, (dict, list)):
+                yield item
 
 
 def extract_records(payload, source):
@@ -242,17 +309,21 @@ def extract_records(payload, source):
                     notice_url = f"https://www.find-tender.service.gov.uk/Notice/{release_id}"
 
             location_parts = []
-            for candidate in (
-                tender,
-                rel,
-                rel.get("contract") or {},
-                *(tender.get("items") or []),
-            ):
+            for candidate in _iter_delivery_roots(rel):
                 add_location_values(candidate, location_parts)
+
+            unique_locations = []
+            seen = set()
+            for part in location_parts:
+                key = str(part).strip()
+                if not key or key.lower() in seen:
+                    continue
+                seen.add(key.lower())
+                unique_locations.append(key)
 
             output.append({
                 "source": source,
-                "location_text": ", ".join(dict.fromkeys(location_parts)),
+                "location_text": ", ".join(unique_locations),
                 "published_date": as_text(published),
                 "title": title.strip(),
                 "buyer": buyer_name.strip(),
@@ -265,6 +336,7 @@ def extract_records(payload, source):
                 "_raw": rel,
             })
     return output
+
 
 
 def _next_cursor(payload):
@@ -572,3 +644,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

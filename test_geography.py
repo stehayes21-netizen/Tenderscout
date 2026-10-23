@@ -52,6 +52,80 @@ class GeographyClassifierTests(unittest.TestCase):
         self.assertEqual(geo_class, "REVIEW")
         self.assertIn("title/description", reason.lower())
 
+    def test_genuine_knowsley_delivery_address_is_local(self):
+        payload = {
+            "releases": [{
+                "ocid": "ocds-knowsley-001",
+                "buyer": {"name": "Knowsley Council"},
+                "tender": {
+                    "title": "Window cleaning services",
+                    "items": [{
+                        "description": "External glass cleaning",
+                        "deliveryAddress": {
+                            "streetAddress": "1 Huyton Road",
+                            "locality": "Knowsley",
+                            "postalCode": "L36 0JX",
+                            "countryName": "United Kingdom",
+                        },
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("Knowsley", records[0]["location_text"])
+        self.assertEqual(tenderscout.classify_geography(records[0], "North West")[0], "LOCAL")
+
+    def test_manchester_buyer_without_delivery_address_is_review(self):
+        payload = {
+            "releases": [{
+                "ocid": "ocds-manchester-001",
+                "buyer": {
+                    "name": "Manchester City Council",
+                    "address": {"locality": "Manchester", "region": "Greater Manchester"},
+                },
+                "tender": {
+                    "title": "Cleaning services",
+                    "description": "Routine cleaning and janitorial support",
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["location_text"], "")
+        self.assertEqual(tenderscout.classify_geography(records[0], "North West")[0], "REVIEW")
+
+    def test_leeds_delivery_address_is_out_of_area(self):
+        payload = {
+            "releases": [{
+                "ocid": "ocds-leeds-001",
+                "buyer": {"name": "Leeds City Council"},
+                "tender": {
+                    "title": "Cleaning services",
+                    "items": [{
+                        "deliveryAddress": {
+                            "locality": "Leeds",
+                            "region": "West Yorkshire",
+                        }
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("Leeds", records[0]["location_text"])
+        self.assertEqual(tenderscout.classify_geography(records[0], "North West")[0], "OUT_OF_AREA")
+
+    def test_title_only_knowsley_reference_is_review(self):
+        record = {
+            "location_text": "",
+            "title": "Cleaning contract in Knowsley",
+            "description": "Routine cleaning services for local council operations.",
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "North West")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("title/description", reason.lower())
+
     def test_review_tenders_appear_in_review_csv_and_not_main_shortlist(self):
         review_record = {
             "source": "Find a Tender",
@@ -115,3 +189,5 @@ class GeographyClassifierTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
