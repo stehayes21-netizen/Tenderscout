@@ -65,6 +65,75 @@ NORTH_WEST_TERMS = [
     "thatto hector", "whiston",
 ]
 
+TARGET_POSTCODE_DISTRICTS = {
+    "L1": "Liverpool",
+    "L2": "Liverpool",
+    "L3": "Liverpool",
+    "L4": "Liverpool",
+    "L5": "Liverpool",
+    "L6": "Liverpool",
+    "L7": "Liverpool",
+    "L8": "Liverpool",
+    "L9": "Liverpool",
+    "L10": "Knowsley",
+    "L11": "Knowsley",
+    "L12": "Knowsley",
+    "L13": "Knowsley",
+    "L14": "Knowsley",
+    "L15": "Knowsley",
+    "L16": "Knowsley",
+    "L17": "Liverpool",
+    "L18": "Liverpool",
+    "L19": "Liverpool",
+    "L20": "Sefton",
+    "L21": "Sefton",
+    "L22": "Sefton",
+    "L23": "Sefton",
+    "L24": "Knowsley",
+    "L25": "Knowsley",
+    "L26": "Knowsley",
+    "L27": "Knowsley",
+    "L28": "Sefton",
+    "L29": "Sefton",
+    "L30": "Sefton",
+    "L31": "Sefton",
+    "L32": "Sefton",
+    "L33": "Sefton",
+    "L34": "Sefton",
+    "L35": "Sefton",
+    "L36": "Knowsley",
+    "L37": "Sefton",
+    "L38": "Sefton",
+    "L39": "Sefton",
+    "WA7": "Halton",
+    "WA8": "Halton",
+    "WA9": "St Helens",
+    "WA10": "St Helens",
+    "WA11": "St Helens",
+    "WA12": "St Helens",
+    "WA13": "St Helens",
+    "WA14": "St Helens",
+    "CH25": "Wirral",
+    "CH26": "Wirral",
+    "CH27": "Wirral",
+    "CH28": "Wirral",
+    "CH29": "Wirral",
+    "CH30": "Wirral",
+    "CH31": "Wirral",
+    "CH32": "Wirral",
+    "CH33": "Wirral",
+    "CH34": "Wirral",
+    "CH41": "Wirral",
+    "CH42": "Wirral",
+    "CH43": "Wirral",
+    "CH44": "Wirral",
+    "CH45": "Wirral",
+    "CH46": "Wirral",
+    "CH47": "Wirral",
+    "CH48": "Wirral",
+    "CH49": "Wirral",
+}
+
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
     "service_match", "region_match", "geography_reason", "estimated_value_gbp",
@@ -338,7 +407,6 @@ def extract_records(payload, source):
     return output
 
 
-
 def _next_cursor(payload):
     """Read common OCDS pagination cursor shapes without assuming page numbers."""
     if not isinstance(payload, dict):
@@ -427,12 +495,52 @@ def keyword_hits(text, terms):
     return [term for term in terms if term in lower]
 
 
+def _postcode_district_from_string(value):
+    if not value:
+        return None
+    compact = re.sub(r"[^A-Z0-9]", "", value.upper())
+    if len(compact) < 5:
+        return None
+    for district in sorted(TARGET_POSTCODE_DISTRICTS, key=len, reverse=True):
+        if compact.startswith(district):
+            return district
+    return None
+
+
+def _full_postcodes_in_text(value):
+    if not value:
+        return []
+    # UK postcode pattern: outward code + inward code, e.g. L36 0JX or WA9 3AA.
+    matches = re.findall(r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b", value.upper())
+    cleaned = []
+    for match in matches:
+        compact = re.sub(r"[^A-Z0-9]", "", match)
+        if len(compact) >= 5:
+            cleaned.append(compact)
+    return cleaned
+
+
+def _postcode_classification(location_text):
+    if not location_text:
+        return [], [], []
+    text = str(location_text)
+    local_postcodes = []
+    out_postcodes = []
+    for postcode in _full_postcodes_in_text(text):
+        district = _postcode_district_from_string(postcode)
+        if district in TARGET_POSTCODE_DISTRICTS:
+            local_postcodes.append(postcode)
+        else:
+            out_postcodes.append(postcode)
+    return local_postcodes, out_postcodes, _full_postcodes_in_text(text)
+
+
 def classify_geography(record, region):
     """Classify tenders using structured location evidence."""
     if region == "UK wide":
         return "UK-wide search", "UK-wide search"
 
-    location_text = (record.get("location_text") or "").lower()
+    location_text = (record.get("location_text") or "")
     prose = " ".join([
         record.get("title", ""),
         record.get("description", "")
@@ -442,7 +550,7 @@ def classify_geography(record, region):
         term for term in NORTH_WEST_TERMS
         if term not in {"north west"}
     ]
-    local_hits = keyword_hits(location_text, local_terms)
+    local_hit_terms = keyword_hits(location_text.lower(), local_terms)
     out_of_area_terms = [
         "manchester", "salford", "bolton", "bury",
         "rochdale", "oldham", "stockport", "tameside",
@@ -455,24 +563,43 @@ def classify_geography(record, region):
         "kirkcaldy", "halton", "warrington", "runcorn", "widnes", "chester",
         "cheshire", "lancashire", "northumberland",
     ]
-    out_hits = keyword_hits(location_text, out_of_area_terms)
+    out_term_hits = keyword_hits(location_text.lower(), out_of_area_terms)
+    local_postcodes, out_postcodes, all_postcodes = _postcode_classification(location_text)
 
-    if local_hits and out_hits:
+    if local_postcodes and out_postcodes:
+        return "REVIEW", (
+            "Multiple delivery site postcodes across target and non-target areas: "
+            + ", ".join(local_postcodes + out_postcodes)[:5]
+        )
+
+    if local_postcodes:
+        return "LOCAL", (
+            "Structured delivery/site postcode in target area: "
+            + ", ".join(local_postcodes[:3])
+        )
+
+    if out_postcodes:
+        return "OUT_OF_AREA", (
+            "Structured delivery/site postcode outside preferred area: "
+            + ", ".join(out_postcodes[:3])
+        )
+
+    if local_hit_terms and out_term_hits:
         return "REVIEW", (
             "Multiple delivery/site locations across target and non-target areas: "
-            + ", ".join((local_hits + out_hits)[:5])
+            + ", ".join((local_hit_terms + out_term_hits)[:5])
         )
 
-    if local_hits:
+    if local_hit_terms:
         return "LOCAL", (
             "Structured delivery/site location: "
-            + ", ".join(local_hits[:3])
+            + ", ".join(local_hit_terms[:3])
         )
 
-    if out_hits:
+    if out_term_hits:
         return "OUT_OF_AREA", (
             "Structured delivery/site location outside preferred area: "
-            + ", ".join(out_hits[:3])
+            + ", ".join(out_term_hits[:3])
         )
 
     prose_hits = keyword_hits(prose, local_terms)
@@ -482,6 +609,8 @@ def classify_geography(record, region):
             + ", ".join(prose_hits[:3])
         )
     if location_text.strip():
+        if all_postcodes:
+            return "REVIEW", "Malformed or unusable postcode evidence"
         return "REVIEW", (
             "Structured location is too vague to confirm preferred area"
         )
@@ -644,4 +773,315 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

@@ -126,6 +126,39 @@ class GeographyClassifierTests(unittest.TestCase):
         self.assertEqual(geo_class, "REVIEW")
         self.assertIn("title/description", reason.lower())
 
+    def test_target_area_postcodes_are_local(self):
+        for postcode in ("L3 8AA", "L24 9AB", "L20 3XX", "WA7 1AA", "WA9 3AA", "CH25 9AB"):
+            with self.subTest(postcode=postcode):
+                geo_class, reason = tenderscout.classify_geography({"location_text": postcode}, "North West")
+                self.assertEqual(geo_class, "LOCAL", postcode)
+                self.assertIn("postcode", reason.lower())
+
+    def test_outside_postcode_districts_are_out_of_area(self):
+        for postcode in ("LS1 1AA", "M1 1AE", "B1 1AA", "NE1 1AA"):
+            with self.subTest(postcode=postcode):
+                geo_class, reason = tenderscout.classify_geography({"location_text": postcode}, "North West")
+                self.assertEqual(geo_class, "OUT_OF_AREA", postcode)
+                self.assertIn("outside", reason.lower())
+
+    def test_malformed_postcodes_are_review(self):
+        for postcode in ("ABC 123", "L3", "L3 4", "WA 123"):
+            with self.subTest(postcode=postcode):
+                geo_class, reason = tenderscout.classify_geography({"location_text": postcode}, "North West")
+                self.assertEqual(geo_class, "REVIEW", postcode)
+                self.assertIn("review", reason.lower())
+
+    def test_conflicting_local_and_out_of_area_postcodes_are_review(self):
+        record = {"location_text": "L24 9AB, LS1 1AA"}
+        geo_class, reason = tenderscout.classify_geography(record, "North West")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("multiple", reason.lower())
+
+    def test_multi_site_contract_with_local_and_non_local_delivery_sites_is_review(self):
+        record = {"location_text": "WA9 3AA and LS1 1AA"}
+        geo_class, reason = tenderscout.classify_geography(record, "North West")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("multiple", reason.lower())
+
     def test_review_tenders_appear_in_review_csv_and_not_main_shortlist(self):
         review_record = {
             "source": "Find a Tender",
@@ -189,5 +222,179 @@ class GeographyClassifierTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
