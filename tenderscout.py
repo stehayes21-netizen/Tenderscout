@@ -10,6 +10,7 @@ Run:
 
 Outputs:
   tenderscout_results.csv  - filtered shortlist (opens in Excel/Google Sheets)
+  tenderscout_review.csv   - tenders with uncertain or missing locations requiring manual review
   tenderscout_all.csv      - all fetched tender-stage notices, for audit
 
 Important:
@@ -54,13 +55,14 @@ EXCLUDE_TERMS = [
 ]
 
 NORTH_WEST_TERMS = [
-    "north west", "merseyside", "liverpool",
-    "birkenhead", "wirral", "wallasey",
-    "sefton", "southport", "formby",
-    "st helens", "knowsley", "halton",
-    "warrington", "runcorn", "chester",
-    "cheshire", "widnes", "prescot",
-    "huyton", "bootle", "crosby",
+    "merseyside", "liverpool", "knowsley",
+    "prescot", "huyton", "kirkby",
+    "sefton", "southport", "formby", "crosby", "bootle",
+    "waterloo", "litherland", "maghull", "netherton",
+    "wirral", "birkenhead", "wallasey", "moreton", "heswall",
+    "bromborough", "eastham", "spital", "new brighton",
+    "st helens", "saint helens", "rainhill", "haydock", "eccleston",
+    "thatto hector", "whiston",
 ]
 
 FIELDS = [
@@ -234,7 +236,6 @@ def _next_cursor(payload):
             values = query.get("cursor")
             if values:
                 return values[0]
-            # Some OCDS feeds provide a full next URL instead of a cursor.
             return nxt
     return None
 
@@ -304,7 +305,6 @@ def keyword_hits(text, terms):
     return [term for term in terms if term in lower]
 
 
-
 def classify_geography(record, region):
     """Classify tenders using structured location evidence."""
     if region == "UK wide":
@@ -318,7 +318,7 @@ def classify_geography(record, region):
 
     local_terms = [
         term for term in NORTH_WEST_TERMS
-        if term != "north west"
+        if term not in {"north west"}
     ]
     local_hits = keyword_hits(location_text, local_terms)
 
@@ -335,7 +335,10 @@ def classify_geography(record, region):
         "lancaster", "cumbria", "barrow-in-furness",
         "leeds", "sheffield", "nottingham", "london",
         "birmingham", "bristol", "cardiff", "edinburgh",
-        "glasgow", "newcastle", "oxford", "cambridge","scotland", "aberdeen", "dundee", "inverness", "perth", "stirling", "falkirk", "paisley", "ayr", "livingston", "kirkcaldy",
+        "glasgow", "newcastle", "oxford", "cambridge", "scotland", "aberdeen", "dundee",
+        "inverness", "perth", "stirling", "falkirk", "paisley", "ayr", "livingston",
+        "kirkcaldy", "halton", "warrington", "runcorn", "widnes", "chester",
+        "cheshire", "lancashire", "cumbria", "northumberland",
     ]
     out_hits = keyword_hits(location_text, out_of_area_terms)
 
@@ -476,25 +479,40 @@ def main():
         sys.exit(2)
 
     filtered = []
+    review_rows = []
     for row in all_rows:
         scored = score_record(row, args.services, args.region, args.min_value, args.max_value)
-        if scored and scored["score"] >= args.min_score:
+        if not scored:
+            continue
+        if args.region == "North West" and scored.get("region_match") == "REVIEW":
+            review_rows.append(scored)
+            continue
+        if scored.get("region_match") == "LOCAL" and scored["score"] >= args.min_score:
             filtered.append(scored)
     filtered.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
+    review_rows.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
 
     all_path = Path("tenderscout_all.csv")
     write_csv(all_path, all_rows)
     out_path = Path(args.out)
     write_csv(out_path, filtered)
+    review_path = Path("tenderscout_review.csv")
+    write_csv(review_path, review_rows)
 
     print(f"Fetched/deduplicated notices: {len(all_rows)}")
     print(f"Matches after filters: {len(filtered)}")
+    print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
     print(f"Filtered shortlist: {out_path.resolve()}")
+    print(f"Location review file: {review_path.resolve()}")
     print("\nTop matches:")
     for row in filtered[:10]:
         print(f"- [{row['score']}] {row['title']} | {row['buyer']} | {row['deadline'] or 'deadline not found'}")
         print(f"  {row['notice_url'] or 'No official URL extracted — search title on source site'}")
+    if review_rows:
+        print("\nReview queue:")
+        for row in review_rows[:10]:
+            print(f"- [{row['score']}] {row['title']} | {row['geography_reason']}")
     print("\nAlways verify scope, geography, deadline, eligibility and documents on the official notice.")
 
 
