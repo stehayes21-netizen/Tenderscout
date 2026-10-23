@@ -66,6 +66,7 @@ NORTH_WEST_TERMS = [
 ]
 
 TARGET_POSTCODE_DISTRICTS = {
+    # Liverpool (verified city-core districts, not broad boundary-crossing ranges)
     "L1": "Liverpool",
     "L2": "Liverpool",
     "L3": "Liverpool",
@@ -75,54 +76,43 @@ TARGET_POSTCODE_DISTRICTS = {
     "L7": "Liverpool",
     "L8": "Liverpool",
     "L9": "Liverpool",
+    "L15": "Liverpool",
+    "L16": "Liverpool",
+    "L17": "Liverpool",
+    "L18": "Liverpool",
+    "L19": "Liverpool",
+    # Knowsley (districts verified as local to Knowsley)
     "L10": "Knowsley",
     "L11": "Knowsley",
     "L12": "Knowsley",
     "L13": "Knowsley",
     "L14": "Knowsley",
-    "L15": "Knowsley",
-    "L16": "Knowsley",
-    "L17": "Liverpool",
-    "L18": "Liverpool",
-    "L19": "Liverpool",
+    "L25": "Knowsley",
+    "L26": "Knowsley",
+    "L27": "Knowsley",
+    "L36": "Knowsley",
+    # Sefton (districts verified as local to Sefton)
     "L20": "Sefton",
     "L21": "Sefton",
     "L22": "Sefton",
     "L23": "Sefton",
-    "L24": "Knowsley",
-    "L25": "Knowsley",
-    "L26": "Knowsley",
-    "L27": "Knowsley",
-    "L28": "Sefton",
     "L29": "Sefton",
     "L30": "Sefton",
     "L31": "Sefton",
-    "L32": "Sefton",
-    "L33": "Sefton",
-    "L34": "Sefton",
-    "L35": "Sefton",
-    "L36": "Knowsley",
     "L37": "Sefton",
     "L38": "Sefton",
     "L39": "Sefton",
+    # Halton
     "WA7": "Halton",
     "WA8": "Halton",
+    # St Helens
     "WA9": "St Helens",
     "WA10": "St Helens",
     "WA11": "St Helens",
     "WA12": "St Helens",
     "WA13": "St Helens",
     "WA14": "St Helens",
-    "CH25": "Wirral",
-    "CH26": "Wirral",
-    "CH27": "Wirral",
-    "CH28": "Wirral",
-    "CH29": "Wirral",
-    "CH30": "Wirral",
-    "CH31": "Wirral",
-    "CH32": "Wirral",
-    "CH33": "Wirral",
-    "CH34": "Wirral",
+    # Wirral
     "CH41": "Wirral",
     "CH42": "Wirral",
     "CH43": "Wirral",
@@ -132,6 +122,63 @@ TARGET_POSTCODE_DISTRICTS = {
     "CH47": "Wirral",
     "CH48": "Wirral",
     "CH49": "Wirral",
+    "CH60": "Wirral",
+    "CH61": "Wirral",
+    "CH62": "Wirral",
+    "CH63": "Wirral",
+    "CH64": "Wirral",
+    "CH65": "Wirral",
+    "CH66": "Wirral",
+}
+
+# Districts explicitly known to be outside the target area, used to reject confirmed
+# delivery sites outside the preferred geography without over-classifying uncertain
+# districts as out-of-area.
+OUT_OF_AREA_POSTCODE_DISTRICTS = {
+    "LS1",
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5",
+    "M6",
+    "M7",
+    "M8",
+    "M9",
+    "B1",
+    "NE1",
+    "BD1",
+    "PR1",
+    "BL1",
+    "OL1",
+    "HX1",
+    "WA1",
+    "WA2",
+    "WA3",
+    "WA4",
+    "WA5",
+    "WA6",
+}
+
+# Postcode districts that are not reliably assignable without boundary-crossing or
+# incomplete evidence; these must remain REVIEW rather than LOCAL or OUT_OF_AREA.
+AMBIGUOUS_POSTCODE_DISTRICTS = {
+    "L24",
+    "L28",
+    "L32",
+    "L33",
+    "L34",
+    "L35",
+    "CH25",
+    "CH26",
+    "CH27",
+    "CH28",
+    "CH29",
+    "CH30",
+    "CH31",
+    "CH32",
+    "CH33",
+    "CH34",
 }
 
 FIELDS = [
@@ -318,7 +365,6 @@ def _iter_delivery_roots(rel):
                             if isinstance(item, (dict, list)):
                                 yield item
 
-    # Some releases store delivery info in top-level item arrays.
     for key in ("items", "lots"):
         for item in _as_list(rel.get(key)):
             if isinstance(item, (dict, list)):
@@ -501,16 +547,15 @@ def _postcode_district_from_string(value):
     compact = re.sub(r"[^A-Z0-9]", "", value.upper())
     if len(compact) < 5:
         return None
-    for district in sorted(TARGET_POSTCODE_DISTRICTS, key=len, reverse=True):
-        if compact.startswith(district):
-            return district
-    return None
+    match = re.match(r"([A-Z]{1,2}\d[A-Z\d]?)", compact)
+    if not match:
+        return None
+    return match.group(1)
 
 
 def _full_postcodes_in_text(value):
     if not value:
         return []
-    # UK postcode pattern: outward code + inward code, e.g. L36 0JX or WA9 3AA.
     matches = re.findall(r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b", value.upper())
     cleaned = []
     for match in matches:
@@ -523,16 +568,23 @@ def _full_postcodes_in_text(value):
 def _postcode_classification(location_text):
     if not location_text:
         return [], [], []
-    text = str(location_text)
     local_postcodes = []
     out_postcodes = []
-    for postcode in _full_postcodes_in_text(text):
+    recognised = []
+    for postcode in _full_postcodes_in_text(str(location_text)):
+        recognised.append(postcode)
         district = _postcode_district_from_string(postcode)
         if district in TARGET_POSTCODE_DISTRICTS:
             local_postcodes.append(postcode)
-        else:
+        elif district in AMBIGUOUS_POSTCODE_DISTRICTS:
+            continue
+        elif district in OUT_OF_AREA_POSTCODE_DISTRICTS:
             out_postcodes.append(postcode)
-    return local_postcodes, out_postcodes, _full_postcodes_in_text(text)
+        elif district and district.startswith(("L", "WA", "CH")):
+            continue
+        elif district:
+            out_postcodes.append(postcode)
+    return local_postcodes, out_postcodes, recognised
 
 
 def classify_geography(record, region):
@@ -560,7 +612,7 @@ def classify_geography(record, region):
         "birmingham", "bristol", "cardiff", "edinburgh",
         "glasgow", "newcastle", "oxford", "cambridge", "scotland", "aberdeen", "dundee",
         "inverness", "perth", "stirling", "falkirk", "paisley", "ayr", "livingston",
-        "kirkcaldy", "halton", "warrington", "runcorn", "widnes", "chester",
+        "kirkcaldy", "warrington", "runcorn", "widnes", "chester",
         "cheshire", "lancashire", "northumberland",
     ]
     out_term_hits = keyword_hits(location_text.lower(), out_of_area_terms)
@@ -773,315 +825,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

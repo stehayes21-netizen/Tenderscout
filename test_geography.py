@@ -127,7 +127,7 @@ class GeographyClassifierTests(unittest.TestCase):
         self.assertIn("title/description", reason.lower())
 
     def test_target_area_postcodes_are_local(self):
-        for postcode in ("L3 8AA", "L24 9AB", "L20 3XX", "WA7 1AA", "WA9 3AA", "CH25 9AB"):
+        for postcode in ("L15 3AA", "L16 1AA", "L25 2AB", "L30 8AA", "WA8 5AA", "WA9 3AA", "CH41 5BS", "CH60 1NX"):
             with self.subTest(postcode=postcode):
                 geo_class, reason = tenderscout.classify_geography({"location_text": postcode}, "North West")
                 self.assertEqual(geo_class, "LOCAL", postcode)
@@ -140,15 +140,15 @@ class GeographyClassifierTests(unittest.TestCase):
                 self.assertEqual(geo_class, "OUT_OF_AREA", postcode)
                 self.assertIn("outside", reason.lower())
 
-    def test_malformed_postcodes_are_review(self):
-        for postcode in ("ABC 123", "L3", "L3 4", "WA 123"):
+    def test_invalid_or_unverified_postcodes_are_review(self):
+        for postcode in ("CH25 1AA", "CH34 1AA", "L3", "ABC 123", "WA 123"):
             with self.subTest(postcode=postcode):
                 geo_class, reason = tenderscout.classify_geography({"location_text": postcode}, "North West")
                 self.assertEqual(geo_class, "REVIEW", postcode)
                 self.assertIn("review", reason.lower())
 
     def test_conflicting_local_and_out_of_area_postcodes_are_review(self):
-        record = {"location_text": "L24 9AB, LS1 1AA"}
+        record = {"location_text": "L15 3AA, M1 1AE"}
         geo_class, reason = tenderscout.classify_geography(record, "North West")
         self.assertEqual(geo_class, "REVIEW")
         self.assertIn("multiple", reason.lower())
@@ -222,179 +222,3 @@ class GeographyClassifierTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
