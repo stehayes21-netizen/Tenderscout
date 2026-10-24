@@ -1,11 +1,12 @@
-
 name: TenderScout Check
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
   schedule:
-    - cron: "17 * * * *"
+    # Every 6 hours. Tender notices do not change minute to minute.
+    - cron: "17 */6 * * *"
 
 permissions:
   contents: read
@@ -23,22 +24,39 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          
+
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
       - name: Check Python syntax
         run: python -m py_compile tenderscout.py app.py
+
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      - name: Collect tenders
-        run: python tenderscout.py --days 14 --region "North West" --min-score 3 --services cleaning fm
+      # The steps below only run on the schedule or a manual run, not on every push.
+      - name: Collect tenders (CSV for audit)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python tenderscout.py --days 14 --region "Target area" --min-score 3 --services cleaning fm
 
       - name: Save CSV results
-        if: always()
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: tenderscout-results
           path: "*.csv"
           if-no-files-found: ignore
           retention-days: 7
+
+      # Optional: refresh the live site. Needs the repository variable
+      # TENDERSCOUT_APP_URL (for example https://tenderscout-1qnz.onrender.com)
+      # and the secrets TENDERSCOUT_APP_USER / TENDERSCOUT_APP_PASSWORD.
+      - name: Refresh hosted app
+        if: ${{ vars.TENDERSCOUT_APP_URL != '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        env:
+          APP_URL: ${{ vars.TENDERSCOUT_APP_URL }}
+          APP_USER: ${{ secrets.TENDERSCOUT_APP_USER }}
+          APP_PASSWORD: ${{ secrets.TENDERSCOUT_APP_PASSWORD }}
+        run: |
+          curl --fail --show-error --silent --max-time 180 \
+            -X POST -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh"

@@ -5,7 +5,7 @@ Uses official public OCDS feeds; Python 3.10+; standard library only.
 
 Run:
   python tenderscout.py
-  python tenderscout.py --days 14 --region "North West" --min-score 3
+  python tenderscout.py --days 14 --region "Target area" --min-score 3
   python tenderscout.py --services cleaning fm --out my_tenders.csv
 
 Outputs:
@@ -15,7 +15,8 @@ Outputs:
 
 Important:
 - Public feeds may be delayed or omit fields; always open the official notice.
-- Geography matching is a keyword heuristic, not a definitive location check.
+- Geography matching uses postcode districts first, then place names. It is a heuristic,
+  not a definitive location check. Target area: Liverpool, Sefton, Wirral, St Helens, Halton.
 - This script runs when you launch it. It is not a hosted service or scheduled job.
 """
 
@@ -54,16 +55,63 @@ EXCLUDE_TERMS = [
     "new build", "building construction", "architectural services",
 ]
 
-NORTH_WEST_TERMS = [
-    "merseyside", "liverpool", "knowsley",
-    "prescot", "huyton", "kirkby",
-    "sefton", "southport", "formby", "crosby", "bootle",
-    "waterloo", "litherland", "maghull", "netherton",
-    "wirral", "birkenhead", "wallasey", "moreton", "heswall",
-    "bromborough", "eastham", "spital", "new brighton",
-    "st helens", "saint helens", "rainhill", "haydock", "eccleston",
-    "thatto hector", "whiston",
+# --- Target area ------------------------------------------------------------
+# Only tenders delivered in these five council areas are shortlisted:
+# Liverpool, Sefton, Wirral, St Helens and Halton.
+# Postcodes are the main evidence because place names are ambiguous. Royal Mail
+# postcode districts do not line up exactly with council boundaries, so
+# borderline districts go to the review queue instead of the shortlist.
+# Edit these sets to change the area.
+TARGET_AREA_LABEL = "Target area"
+
+LOCAL_POSTCODE_DISTRICTS = {
+    # Liverpool (L24 also covers Hale in Halton)
+    *(f"L{n}" for n in range(1, 20)), "L24", "L25", "L27",
+    # Sefton
+    "L20", "L21", "L22", "L23", "L29", "L30", "L31", "L37", "L38", "PR8", "PR9",
+    # Wirral
+    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
+    # St Helens
+    "WA9", "WA10", "WA11", "WA12",
+    # Halton
+    "WA7", "WA8",
+}
+# Districts that straddle the target area and its neighbours.
+REVIEW_POSTCODE_DISTRICTS = {"L35", "CH64"}
+
+LOCAL_PLACE_TERMS = [
+    "liverpool",
+    "sefton", "southport", "formby", "crosby", "bootle", "litherland",
+    "maghull", "netherton", "ainsdale", "birkdale", "aintree",
+    "wirral", "birkenhead", "wallasey", "heswall", "bromborough",
+    "new brighton", "bebington", "hoylake", "west kirby",
+    "st helens", "saint helens", "rainhill", "haydock", "newton-le-willows",
+    "billinge", "thatto hector",
+    "halton", "runcorn", "widnes",
 ]
+# Too broad to confirm the target area on their own.
+WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire", "neston"]
+# Places that clearly are not in the target area (including Knowsley, which is
+# deliberately excluded, and everything in Scotland).
+OUT_OF_AREA_TERMS = [
+    "knowsley", "kirkby", "huyton", "prescot", "whiston", "halewood",
+    "ormskirk", "skelmersdale", "ellesmere port", "warrington", "wigan",
+    "chester", "northwich", "crewe",
+    "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
+    "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
+    "lancaster", "cumbria", "barrow-in-furness", "northumberland",
+    "leeds", "sheffield", "nottingham", "london", "birmingham", "bristol",
+    "cardiff", "newcastle", "oxford", "cambridge", "wales", "northern ireland",
+    "belfast",
+    "scotland", "scottish", "glasgow", "edinburgh", "aberdeen", "dundee",
+    "inverness", "perth", "stirling", "falkirk", "paisley", "ayr",
+    "livingston", "kirkcaldy", "lanarkshire", "ayrshire", "fife", "highland",
+    "highlands", "dumfries", "argyll", "lothian", "renfrewshire",
+    "dunbartonshire", "clackmannanshire", "moray", "angus",
+]
+
+FULL_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b")
+DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
@@ -355,64 +403,93 @@ def keyword_hits(text, terms):
     return [term for term in terms if term in lower]
 
 
+def normalise_region(region):
+    """'North West' is kept as an alias so older commands keep working."""
+    return "UK wide" if region == "UK wide" else TARGET_AREA_LABEL
+
+
+def place_hits(text, terms):
+    """Whole-word matches, so 'bury' does not match 'Canterbury'."""
+    return [
+        term for term in terms
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", text)
+    ]
+
+
+def postcode_districts(text, include_bare=False):
+    """Return (full-postcode districts, bare target/review districts) found in text."""
+    upper = text.upper()
+    full = {m.group(1) for m in FULL_POSTCODE_RE.finditer(upper)}
+    bare = set()
+    if include_bare:
+        known = LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS
+        bare = {m.group(1) for m in DISTRICT_RE.finditer(upper) if m.group(1) in known}
+    return full, bare
+
+
 def classify_geography(record, region):
-    """Classify tenders using structured location evidence."""
-    if region == "UK wide":
+    """Classify a tender as LOCAL, OUT_OF_AREA or REVIEW from delivery/site evidence.
+
+    Postcode districts are checked first, then whole-word place names.
+    Anything uncertain goes to REVIEW rather than the shortlist.
+    """
+    if normalise_region(region) == "UK wide":
         return "UK-wide search", "UK-wide search"
 
     location_text = (record.get("location_text") or "").lower()
     prose = " ".join([
         record.get("title", ""),
-        record.get("description", "")
+        record.get("description", ""),
     ]).lower()
 
-    local_terms = [
-        term for term in NORTH_WEST_TERMS
-        if term not in {"north west"}
-    ]
-    local_hits = keyword_hits(location_text, local_terms)
-    out_of_area_terms = [
-        "manchester", "salford", "bolton", "bury",
-        "rochdale", "oldham", "stockport", "tameside",
-        "trafford", "blackburn", "blackpool", "preston",
-        "lancaster", "cumbria", "barrow-in-furness",
-        "leeds", "sheffield", "nottingham", "london",
-        "birmingham", "bristol", "cardiff", "edinburgh",
-        "glasgow", "newcastle", "oxford", "cambridge", "scotland", "aberdeen", "dundee",
-        "inverness", "perth", "stirling", "falkirk", "paisley", "ayr", "livingston",
-        "kirkcaldy", "halton", "warrington", "runcorn", "widnes", "chester",
-        "cheshire", "lancashire", "northumberland",
-    ]
-    out_hits = keyword_hits(location_text, out_of_area_terms)
+    full, bare = postcode_districts(location_text, include_bare=True)
+    districts = full | bare
+    pc_local = sorted(d for d in districts if d in LOCAL_POSTCODE_DISTRICTS)
+    pc_review = sorted(d for d in districts if d in REVIEW_POSTCODE_DISTRICTS)
+    pc_other = sorted(d for d in full if d not in LOCAL_POSTCODE_DISTRICTS
+                      and d not in REVIEW_POSTCODE_DISTRICTS)
 
-    if local_hits and out_hits:
+    strong_local = pc_local + place_hits(location_text, LOCAL_PLACE_TERMS)
+    strong_out = pc_other + place_hits(location_text, OUT_OF_AREA_TERMS)
+    weak = pc_review + place_hits(location_text, WEAK_AREA_TERMS)
+
+    if strong_local and strong_out:
         return "REVIEW", (
             "Multiple delivery/site locations across target and non-target areas: "
-            + ", ".join((local_hits + out_hits)[:5])
+            + ", ".join((strong_local + strong_out)[:5])
         )
-
-    if local_hits:
+    if strong_local:
         return "LOCAL", (
-            "Structured delivery/site location: "
-            + ", ".join(local_hits[:3])
+            "Structured delivery/site location: " + ", ".join(strong_local[:3])
         )
-
-    if out_hits:
+    if strong_out and weak:
+        return "REVIEW", (
+            "Delivery/site location is mixed or borderline: "
+            + ", ".join((weak + strong_out)[:5])
+        )
+    if strong_out:
         return "OUT_OF_AREA", (
             "Structured delivery/site location outside preferred area: "
-            + ", ".join(out_hits[:3])
+            + ", ".join(strong_out[:3])
+        )
+    if weak:
+        return "REVIEW", (
+            "Borderline area, cannot confirm it is in the target area: "
+            + ", ".join(weak[:3])
         )
 
-    prose_hits = keyword_hits(prose, local_terms)
+    prose_full, _ = postcode_districts(prose)
+    prose_hits = (
+        sorted(d for d in prose_full if d in LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS)
+        + place_hits(prose, LOCAL_PLACE_TERMS)
+    )
     if prose_hits:
         return "REVIEW", (
             "Nearby place appears only in title/description: "
             + ", ".join(prose_hits[:3])
         )
     if location_text.strip():
-        return "REVIEW", (
-            "Structured location is too vague to confirm preferred area"
-        )
+        return "REVIEW", "Structured location is too vague to confirm preferred area"
 
     return "REVIEW", "No usable delivery/site location evidence"
 
@@ -436,10 +513,11 @@ def score_record(record, services, region, min_value, max_value):
 
     score, reasons = 3, []
     reasons.append("service keywords: " + ", ".join((cleaning_hits + fm_hits)[:4]))
+    region = normalise_region(region)
     geo_class, geo_reason = classify_geography(record, region)
     record["region_match"] = geo_class
     record["geography_reason"] = geo_reason
-    if region == "North West":
+    if region == TARGET_AREA_LABEL:
         if geo_class == "OUT_OF_AREA":
             return None
         if geo_class == "LOCAL":
@@ -515,7 +593,9 @@ def write_csv(path, rows):
 def main():
     parser = argparse.ArgumentParser(description="TenderScout official-feed collector and filter")
     parser.add_argument("--days", type=int, default=14, help="Look-back window for publication/update date (default 14)")
-    parser.add_argument("--region", choices=["North West", "UK wide"], default="North West")
+    parser.add_argument(
+        "--region", choices=[TARGET_AREA_LABEL, "North West", "UK wide"], default=TARGET_AREA_LABEL,
+        help="'Target area' = Liverpool, Sefton, Wirral, St Helens, Halton ('North West' is an alias)")
     parser.add_argument("--services", nargs="+", choices=["cleaning", "fm"], default=["cleaning", "fm"])
     parser.add_argument("--min-value", type=float, default=None, help="Minimum estimated GBP value")
     parser.add_argument("--max-value", type=float, default=None, help="Maximum estimated GBP value")
@@ -538,7 +618,7 @@ def main():
         scored = score_record(row, args.services, args.region, args.min_value, args.max_value)
         if not scored:
             continue
-        if args.region == "North West" and scored.get("region_match") == "REVIEW":
+        if normalise_region(args.region) == TARGET_AREA_LABEL and scored.get("region_match") == "REVIEW":
             review_rows.append(scored)
             continue
         if scored.get("region_match") == "LOCAL" and scored["score"] >= args.min_score:

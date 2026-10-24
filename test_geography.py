@@ -113,5 +113,79 @@ class GeographyClassifierTests(unittest.TestCase):
                 os.chdir(original_cwd)
 
 
+class PostcodeAreaTests(unittest.TestCase):
+    def classify(self, location_text, **extra):
+        record = {"location_text": location_text, **extra}
+        return tenderscout.classify_geography(record, "Target area")[0]
+
+    def test_target_area_postcodes_are_local(self):
+        cases = {
+            "Liverpool": "Cleaning Unit, Dale St, L2 2DH",
+            "Liverpool L18": "Allerton Rd, L18 1AB",
+            "Sefton": "Lord St, Southport PR8 1AA",
+            "Sefton Bootle": "Stanley Rd, L20 3AA",
+            "Wirral": "Hamilton Sq, Birkenhead CH41 6AB",
+            "Wirral Bebington": "Port Sunlight CH62 5AA",
+            "St Helens": "Corporation St, WA10 1AA",
+            "Halton Runcorn": "Runcorn WA7 2PQ",
+            "Halton Widnes": "Widnes WA8 7AA",
+            "No space": "L18JQ",
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(self.classify(text), "LOCAL")
+
+    def test_bare_district_codes_are_recognised(self):
+        for text in ("WA9", "CH43", "PR9 area"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "LOCAL")
+
+    def test_scotland_is_out_of_area(self):
+        for text in (
+            "Edinburgh EH1 1AA",
+            "Glasgow G2 4QE",
+            "Aberdeen AB10 1AA",
+            "Perth PH1 5QA",
+            "Scotland",
+            "Fife",
+            "South Lanarkshire",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
+
+    def test_knowsley_and_neighbours_are_out_of_area(self):
+        for text in ("Kirkby L32 8XX", "Huyton L36 1AA", "Warrington WA1 1AA",
+                     "Ormskirk L39 2AA", "Ellesmere Port CH65 4AA", "Manchester M1 1AA"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
+
+    def test_borderline_postcodes_go_to_review(self):
+        for text in ("L35 5AB", "Neston CH64 3RD", "Merseyside", "Cheshire"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "REVIEW")
+
+    def test_mixed_locations_go_to_review(self):
+        self.assertEqual(self.classify("Liverpool L1 8JQ; Edinburgh EH1 1AA"), "REVIEW")
+
+    def test_county_name_does_not_override_local_postcode(self):
+        self.assertEqual(self.classify("Runcorn, Cheshire WA7 2PQ"), "LOCAL")
+
+    def test_place_names_match_whole_words_only(self):
+        # "Canterbury" contains "bury"; it must not be treated as Bury.
+        self.assertEqual(self.classify("Canterbury"), "REVIEW")
+
+    def test_postcode_in_title_only_is_review(self):
+        record = {"location_text": "", "title": "Cleaning at Civic Centre WA7 2PQ", "description": ""}
+        self.assertEqual(tenderscout.classify_geography(record, "Target area")[0], "REVIEW")
+
+    def test_north_west_is_still_accepted_as_an_alias(self):
+        record = {"location_text": "Birkenhead CH41 6AB"}
+        self.assertEqual(tenderscout.classify_geography(record, "North West")[0], "LOCAL")
+
+    def test_uk_wide_skips_the_area_filter(self):
+        record = {"location_text": "Edinburgh EH1 1AA"}
+        self.assertEqual(tenderscout.classify_geography(record, "UK wide")[0], "UK-wide search")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
