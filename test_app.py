@@ -8,13 +8,14 @@ from unittest.mock import patch
 FUTURE = "2099-12-31T00:00:00+00:00"
 
 
-def feed_record(ocid, location_text, url=None, title="Cleaning contract"):
+def feed_record(ocid, location_text, url=None, title="Cleaning contract",
+                description="Routine cleaning services."):
     return {
         "source": "Find a Tender",
         "published_date": "2026-10-01",
         "title": title,
         "buyer": "Test buyer",
-        "description": "Routine cleaning services.",
+        "description": description,
         "location_text": location_text,
         "estimated_value_gbp": 100000,
         "deadline": FUTURE,
@@ -156,6 +157,67 @@ class LoginTests(AppTestCase):
         os.environ["DASHBOARD_USER"] = "admin"
         os.environ["DASHBOARD_PASSWORD"] = "s3cret"
         self.assertEqual(self.client.get("/health").status_code, 200)
+
+
+class DashboardFeatureTests(AppTestCase):
+    def test_refresh_button_is_styled_as_a_button_with_a_loading_state(self):
+        page = self.client.get("/").data
+        self.assertIn(b'class="btn"', page)
+        self.assertIn(b"Searching", page)
+
+    def test_stage_can_be_changed_and_is_remembered(self):
+        self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
+        db = self.app_module.connect_db()
+        tender_id = db.execute("SELECT id FROM tenders").fetchone()["id"]
+        db.close()
+        r = self.client.post(f"/tender/{tender_id}/stage", data={"stage": "Bidding"})
+        self.assertEqual(r.status_code, 302)
+        self.assertIn(b"<option selected>Bidding</option>", self.client.get("/").data)
+
+    def test_unknown_stage_is_rejected(self):
+        self.client.post("/add", data={"title": "x"})
+        r = self.client.post("/tender/1/stage", data={"stage": "Hacked"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_stage_redirect_cannot_be_pointed_at_another_site(self):
+        self.client.post("/add", data={"title": "x"})
+        r = self.client.post("/tender/1/stage", data={
+            "stage": "Won", "view": "https://evil.example", "service": "//evil.example"})
+        self.assertEqual(r.headers["Location"], "/")
+
+    def test_closing_dates_are_labelled(self):
+        info = self.app_module.deadline_info
+        self.assertEqual(info("")[0], "Check official notice")
+        self.assertTrue(info("2000-01-01T00:00:00+00:00")[2])
+        self.assertTrue(info("2000-01-01T00:00:00+00:00")[0].startswith("Closed"))
+        self.assertIn("days", info("2099-12-31T00:00:00+00:00")[0])
+
+    def test_closed_tenders_sink_below_open_ones(self):
+        old = feed_record("old", "Liverpool L2 2DH")
+        open_ = feed_record("open", "Liverpool L2 2DH")
+        self.refresh_with([old, open_])
+        db = self.app_module.connect_db()
+        db.execute("UPDATE tenders SET deadline = '2000-01-01T00:00:00+00:00', score = 99 "
+                   "WHERE notice_url LIKE '%/old'")
+        db.commit()
+        db.close()
+        page = self.client.get("/").data.decode()
+        self.assertLess(page.index("example.com/open"), page.index("example.com/old"))
+        self.assertIn("Closed 1 Jan 2000", page)
+
+    def test_service_filter_only_shows_that_service(self):
+        self.refresh_with([
+            feed_record("clean", "Liverpool L2 2DH", title="Office cleaning"),
+            feed_record("fm", "Liverpool L2 2DH", title="Facilities management services",
+                        description="Hard FM and building maintenance."),
+        ])
+        cleaning = self.client.get("/?service=cleaning").data
+        self.assertIn(b"example.com/clean", cleaning)
+        self.assertNotIn(b"example.com/fm", cleaning)
+
+    def test_post_from_another_website_is_blocked(self):
+        r = self.client.post("/refresh", headers={"Origin": "https://evil.example"})
+        self.assertEqual(r.status_code, 403)
 
 
 if __name__ == "__main__":

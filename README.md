@@ -45,7 +45,8 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 `.github/workflows/main.yml` runs the tests on every push. On a schedule (every 6 hours) and on manual runs it also saves a CSV of matches and can refresh the live site. To enable the refresh, set the repository variable `TENDERSCOUT_APP_URL` and the secrets `TENDERSCOUT_APP_USER` and `TENDERSCOUT_APP_PASSWORD`.
 
 ## Pages
-- `/` confirmed tenders · `/?view=review` tenders needing a location check
+- `/` confirmed tenders · `/?view=review` tenders needing a location check · add `service=cleaning` or `service=fm` to filter
+- Each tender shows how long is left to bid (closed tenders sink to the bottom) and has a **Stage** dropdown: Reviewing, Interested, Bidding, Submitted, Won, Lost, Not for us
 - `POST /refresh` (or `/api/refresh`) fetch new tenders
 - `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)
 - `/export.csv` download everything

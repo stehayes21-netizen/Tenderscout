@@ -6,6 +6,7 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlencode, urlparse
 
 from flask import Flask, Response, redirect, request
 
@@ -20,6 +21,8 @@ DB_PATH = os.environ.get("TENDERSCOUT_DB", "tenderscout.db")
 
 MIN_SCORE = 3
 SERVICES = ["cleaning", "fm"]
+STAGES = ["Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not for us"]
+SERVICE_FILTERS = {"cleaning": "Cleaning", "fm": "Facilities management"}
 
 _schema_ready = False
 
@@ -125,6 +128,16 @@ def require_login():
     )
 
 
+@app.before_request
+def reject_cross_site_posts():
+    """Block forms submitted from other websites while you are logged in."""
+    if request.method == "POST":
+        origin = request.headers.get("Origin")
+        if origin and urlparse(origin).netloc != request.host:
+            return Response("Cross-site request blocked", 403)
+    return None
+
+
 def safe(value):
     return html.escape(str(value or ""))
 
@@ -161,38 +174,84 @@ def count_by_region(db):
     return counts
 
 
+def deadline_info(deadline):
+    """Return (label, css class, closed) for a tender deadline string."""
+    when = collector.parse_date(deadline)
+    if not when:
+        return "Check official notice", "", False
+    days = (when.date() - datetime.now(timezone.utc).date()).days
+    date_text = when.strftime("%d %b %Y").lstrip("0")
+    if days < 0:
+        return f"Closed {date_text}", "closed", True
+    if days == 0:
+        return f"Closes today ({date_text})", "soon", False
+    if days <= 7:
+        return f"Closes in {days} day{'s' if days != 1 else ''} ({date_text})", "soon", False
+    return f"Closes {date_text} ({days} days)", "", False
+
+
+def dashboard_url(view="", service=""):
+    params = {k: v for k, v in (("view", view), ("service", service)) if v}
+    return "/?" + urlencode(params) if params else "/"
+
+
 @app.route("/", methods=["GET"])
 def dashboard():
     review_view = request.args.get("view") == "review"
+    service = request.args.get("service", "")
+    service = service if service in SERVICE_FILTERS else ""
+    view = "review" if review_view else ""
+
     db = connect_db()
     condition = (
         "region_match = 'REVIEW'" if review_view
         else "region_match IN ('LOCAL', 'MANUAL')"
     )
+    params = ()
+    if service:
+        condition += " AND service_match = ?"
+        params = (SERVICE_FILTERS[service],)
     rows = db.execute(
         f"SELECT * FROM tenders WHERE {condition} "
-        "ORDER BY score DESC, published_date DESC"
+        "ORDER BY score DESC, published_date DESC",
+        params,
     ).fetchall()
     counts = count_by_region(db)
     db.close()
 
+    # Open tenders first; closed ones sink to the bottom (order is otherwise kept).
+    decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
+    decorated.sort(key=lambda item: item[3])
+
     cards = ""
-    for row in rows:
+    for row, deadline_label, deadline_class, _closed in decorated:
         link = safe(row["notice_url"])
         notice = (
             f'<a href="{link}" target="_blank" rel="noopener">View official notice</a>'
             if link.startswith("https://") else ""
         )
+        current = row["pipeline_status"] or "Reviewing"
+        options = "".join(
+            f'<option{" selected" if stage == current else ""}>{safe(stage)}</option>'
+            for stage in STAGES
+        )
         cards += f"""
         <article class="card">
           <h2>{safe(row["title"]) or "Untitled tender"}</h2>
+          <p class="deadline {deadline_class}">{safe(deadline_label)}</p>
           <p><b>Buyer:</b> {safe(row["buyer"]) or "Not listed"}</p>
           <p><b>Service:</b> {safe(row["service_match"])} · <b>Score:</b> {safe(row["score"])}</p>
           <p><b>Location:</b> {safe(row["location_text"]) or "Needs checking"}</p>
-          <p><b>Deadline:</b> {safe(row["deadline"]) or "Check official notice"}</p>
           <p><b>Source:</b> {safe(row["source"])}</p>
-          <p><b>Pipeline:</b> {safe(row["pipeline_status"] or "Reviewing")}</p>
           <p>{safe(row["geography_reason"])}</p>
+          <form method="post" action="/tender/{int(row["id"])}/stage" class="stage">
+            <input type="hidden" name="view" value="{view}">
+            <input type="hidden" name="service" value="{service}">
+            <label><b>Stage:</b>
+              <select name="stage" onchange="this.form.submit()">{options}</select>
+            </label>
+            <noscript><button type="submit">Save</button></noscript>
+          </form>
           {notice}
         </article>
         """
@@ -205,10 +264,15 @@ def dashboard():
 
     if review_view:
         heading = f"{len(rows)} tenders need a location check"
-        switch = f'<a href="/">Back to confirmed tenders ({counts["main"]})</a>'
+        switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
     else:
         heading = f"{len(rows)} saved opportunities"
-        switch = f'<a href="/?view=review">Needs a location check ({counts["review"]})</a>'
+        switch = f'<a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
+
+    filters = " · ".join(
+        f'<b>{label}</b>' if key == service else f'<a href="{dashboard_url(view, key)}">{label}</a>'
+        for key, label in (("", "All"), ("cleaning", "Cleaning"), ("fm", "Facilities management"))
+    )
 
     page = f"""<!doctype html>
     <html><head><meta name="viewport" content="width=device-width">
@@ -217,21 +281,50 @@ def dashboard():
     body{{font:16px Arial;background:#f3f6f4;color:#18251e;
     margin:0;padding:20px}}
     header{{background:#143d2a;color:white;padding:22px;border-radius:12px}}
-    button{{background:#168447;color:white;border:0;padding:13px 18px;
-    border-radius:8px;font-size:16px}}
+    .btn{{display:block;width:100%;max-width:340px;margin-top:16px;
+    padding:15px 22px;background:linear-gradient(#2fc36f,#168447);color:#fff;
+    border:0;border-radius:12px;font:bold 17px Arial;cursor:pointer;
+    box-shadow:0 5px 0 #0d5c30,0 9px 14px rgba(0,0,0,.3);
+    transition:transform .08s,box-shadow .08s}}
+    .btn:hover{{filter:brightness(1.08)}}
+    .btn:active{{transform:translateY(4px);
+    box-shadow:0 1px 0 #0d5c30,0 2px 6px rgba(0,0,0,.3)}}
+    .btn[disabled]{{opacity:.75;cursor:wait}}
     .card{{background:white;margin:16px 0;padding:18px;
     border-radius:10px;overflow-wrap:anywhere}}
+    .deadline{{font-weight:bold;color:#18251e}}
+    .deadline.soon{{color:#b45309}}
+    .deadline.closed{{color:#8a8f8c}}
+    .stage select{{font-size:16px;padding:8px;margin-left:6px}}
     a{{color:#08783c}}.note{{font-size:13px}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
     <p>Liverpool, Sefton, Wirral, St Helens and Halton</p>
-    <form method="post" action="/refresh">
-    <button type="submit">Refresh tenders</button></form></header>
+    <form method="post" action="/refresh"
+      onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
+    <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
     <p>{heading} · {switch} · <a href="/export.csv">Export CSV</a></p>
+    <p>Show: {filters}</p>
     <p class="note">Always verify eligibility, location, deadline and contract details
     on the official notice.</p>
     {cards}</body></html>"""
     return Response(page, mimetype="text/html")
+
+
+@app.route("/tender/<int:tender_id>/stage", methods=["POST"])
+def set_stage(tender_id):
+    stage = request.form.get("stage", "")
+    if stage not in STAGES:
+        return Response("Unknown stage", 400)
+    db = connect_db()
+    try:
+        db.execute("UPDATE tenders SET pipeline_status = ? WHERE id = ?", (stage, tender_id))
+        db.commit()
+    finally:
+        db.close()
+    view = "review" if request.form.get("view") == "review" else ""
+    service = request.form.get("service", "")
+    return redirect(dashboard_url(view, service if service in SERVICE_FILTERS else ""))
 
 
 def run_refresh():
