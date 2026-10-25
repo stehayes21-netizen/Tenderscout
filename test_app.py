@@ -140,12 +140,28 @@ class AppSmokeTest(AppTestCase):
         )
 
     def test_public_tenders_can_be_filtered_by_detailed_trade(self):
-        self.refresh_with([
-            feed_record("roof", "Liverpool L2 2DH", title="Roofing and roof repairs",
-                        description="Roof repair and replacement contract."),
-            feed_record("clean", "Liverpool L2 2DH", title="Office cleaning",
-                        description="Commercial cleaning services."),
-        ])
+        # Isolate the dashboard filter from feed-fetching behavior: seed two
+        # valid local records, then verify only the selected detailed trade shows.
+        self.client.post("/add", data={
+            "title": "Roofing and roof repairs", "buyer": "Test buyer",
+            "notice_url": "https://example.com/roof",
+        })
+        self.client.post("/add", data={
+            "title": "Office cleaning", "buyer": "Test buyer",
+            "notice_url": "https://example.com/clean",
+        })
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Roofing and roof repairs", "https://example.com/roof"),
+        )
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Commercial and office cleaning", "https://example.com/clean"),
+        )
+        db.commit()
+        db.close()
+
         page = self.client.get("/?trade=Roofing%20and%20roof%20repairs").data
         self.assertIn(b"example.com/roof", page)
         self.assertNotIn(b"example.com/clean", page)
