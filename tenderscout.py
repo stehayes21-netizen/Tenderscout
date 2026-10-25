@@ -332,7 +332,7 @@ def nuts_codes(text):
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
     "service_match", "region_match", "geography_reason", "estimated_value_gbp",
-    "deadline", "status", "score", "score_reasons", "notice_url", "ocid",
+    "deadline", "status", "opportunity_stage", "score", "score_reasons", "notice_url", "ocid",
 ]
 
 EXPLICIT_LOCATION_KEYS = (
