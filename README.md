@@ -37,7 +37,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 | `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Turn on password protection. **Set both before sharing the site.** If either is missing the site is open to anyone with the link. `/health` stays open for the host. |
 | `DATABASE_URL` | PostgreSQL connection string. Without it the app uses SQLite, which is wiped on every redeploy on Render's free tier. |
 | `TENDERSCOUT_DB` | SQLite file path (local use only) |
-| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES` | Look-back window (default 14 days) and pages per source (default 3) |
+| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES` | Look-back window (default 14 days) and pages per source (default 5) |
 
 ## Hosting on Render
 - Start command: `gunicorn app:app` (`gunicorn.conf.py` raises the timeout to 120 seconds so a refresh isn't cut off).
@@ -51,7 +51,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 ## Pages
 - `/` confirmed tenders · `/?view=review` tenders needing a location check · add `service=cleaning` or `service=fm` to filter
 - Each tender shows how long is left to bid (closed tenders sink to the bottom) and has a **Stage** dropdown: Reviewing, Interested, Bidding, Submitted, Won, Lost, Not for us
-- `POST /refresh` (or `/api/refresh`) fetch new tenders
+- `POST /refresh` fetch new tenders and return to the dashboard with a summary; `POST /api/refresh` does the same but replies in plain text for scheduled jobs
 - `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)
 - `/export.csv` download everything
 - `/health` readiness check

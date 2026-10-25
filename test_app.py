@@ -45,7 +45,7 @@ class AppTestCase(unittest.TestCase):
         collector = self.app_module.collector
         with patch.object(collector, "fetch_fts", return_value=records), \
              patch.object(collector, "fetch_contracts_finder", return_value=[]):
-            return self.client.post("/refresh")
+            return self.client.post("/refresh", follow_redirects=True)
 
 
 class AppSmokeTest(AppTestCase):
@@ -87,6 +87,7 @@ class RefreshTests(AppTestCase):
             feed_record("unk", ""),
         ])
         self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Refresh complete.", r.data)
         main = self.client.get("/").data
         self.assertIn(b"https://example.com/liv", main)
         self.assertNotIn(b"https://example.com/edi", main)
@@ -218,6 +219,43 @@ class DashboardFeatureTests(AppTestCase):
     def test_post_from_another_website_is_blocked(self):
         r = self.client.post("/refresh", headers={"Origin": "https://evil.example"})
         self.assertEqual(r.status_code, 403)
+
+
+class RefreshSummaryTests(AppTestCase):
+    def test_refresh_returns_to_the_dashboard_with_a_summary(self):
+        r = self.client.post("/refresh")
+        self.assertEqual(r.status_code, 502)  # nothing fetched: not shown as success
+        collector = self.app_module.collector
+        records = [
+            feed_record("liv", "Liverpool L2 2DH"),
+            feed_record("edi", "Edinburgh EH1 1AA"),
+            feed_record("unk", ""),
+            feed_record("other", "Liverpool L2 2DH", title="Software licences",
+                        description="Annual software licences."),
+        ]
+        with patch.object(collector, "fetch_fts", return_value=records), \
+             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+            r = self.client.post("/refresh")
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r.headers["Location"].startswith("/?done=1"))
+        page = self.client.get(r.headers["Location"]).data.decode()
+        self.assertIn("Refresh complete.", page)
+        self.assertIn("4 notices checked. 3 were cleaning or FM and 1 of those were outside your area.", page)
+        self.assertIn("1 confirmed in your area, 1 need a location check.", page)
+
+    def test_summary_banner_ignores_junk_values(self):
+        r = self.client.get("/?done=1&n=abc")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn(b"Refresh complete.", r.data)
+
+    def test_api_refresh_returns_plain_text_for_scheduled_jobs(self):
+        collector = self.app_module.collector
+        with patch.object(collector, "fetch_fts", return_value=[feed_record("liv", "WA8 7AA")]), \
+             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+            r = self.client.post("/api/refresh")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.mimetype, "text/plain")
+        self.assertIn(b"1 confirmed in your area", r.data)
 
 
 if __name__ == "__main__":

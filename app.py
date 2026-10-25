@@ -274,6 +274,22 @@ def dashboard():
         for key, label in (("", "All"), ("cleaning", "Cleaning"), ("fm", "Facilities management"))
     )
 
+    banner = ""
+    if request.args.get("done") == "1":
+        try:
+            counts = {k: max(0, min(int(request.args.get(k, "")), 1000000))
+                      for k in ("n", "s", "o", "l", "r")}
+        except ValueError:
+            counts = None
+        if counts:
+            banner = (
+                '<div class="banner"><b>Refresh complete.</b> '
+                + summary_text({"fetched": counts["n"], "service": counts["s"],
+                                "outside": counts["o"], "local": counts["l"],
+                                "review": counts["r"]})
+                + "</div>"
+            )
+
     page = f"""<!doctype html>
     <html><head><meta name="viewport" content="width=device-width">
     <title>Tender Scout</title>
@@ -292,6 +308,8 @@ def dashboard():
     .btn[disabled]{{opacity:.75;cursor:wait}}
     .card{{background:white;margin:16px 0;padding:18px;
     border-radius:10px;overflow-wrap:anywhere}}
+    .banner{{background:#e3f4e8;border:1px solid #168447;border-radius:10px;
+    padding:12px 14px;margin:14px 0}}
     .deadline{{font-weight:bold;color:#18251e}}
     .deadline.soon{{color:#b45309}}
     .deadline.closed{{color:#8a8f8c}}
@@ -303,6 +321,7 @@ def dashboard():
     <form method="post" action="/refresh"
       onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
+    {banner}
     <p>{heading} · {switch} · <a href="/export.csv">Export CSV</a></p>
     <p>Show: {filters}</p>
     <p class="note">Always verify eligibility, location, deadline and contract details
@@ -328,15 +347,15 @@ def set_stage(tender_id):
 
 
 def run_refresh():
-    """Fetch official feeds and save matching tenders. Returns (fetched, local, review)."""
+    """Fetch official feeds and save matching tenders. Returns a dict of counts."""
     days = env_int("TENDERSCOUT_DAYS", 14)
-    pages = env_int("TENDERSCOUT_PAGES", 3)
+    pages = env_int("TENDERSCOUT_PAGES", 5)
     records = collector.dedupe(
         collector.fetch_fts(days, pages) + collector.fetch_contracts_finder(days, pages)
     )
-    local = review = 0
+    stats = {"fetched": len(records), "service": 0, "outside": 0, "local": 0, "review": 0}
     if not records:
-        return 0, local, review
+        return stats
 
     db = connect_db()
     try:
@@ -344,6 +363,12 @@ def run_refresh():
             match = collector.score_record(
                 record, SERVICES, collector.TARGET_AREA_LABEL, None, None
             )
+            # score_record sets region_match only once a tender has passed the
+            # cleaning/FM check, so this tells the two kinds of drop apart.
+            if "region_match" in record:
+                stats["service"] += 1
+                if record["region_match"] == "OUT_OF_AREA":
+                    stats["outside"] += 1
             if not match or match.get("score", 0) < MIN_SCORE:
                 continue
             region_match = match.get("region_match")
@@ -392,46 +417,64 @@ def run_refresh():
                     "Reviewing",
                 ),
             )
-            if region_match == "LOCAL":
-                local += 1
-            else:
-                review += 1
+            stats["local" if region_match == "LOCAL" else "review"] += 1
         db.commit()
     finally:
         db.close()
-    return len(records), local, review
+    return stats
 
 
-@app.route("/refresh", methods=["POST"])
-@app.route("/api/refresh", methods=["POST"])
-def refresh():
+def refresh_or_error():
+    """Run a refresh. Returns (stats, None) or (None, error_response)."""
     try:
-        fetched, local, review = run_refresh()
+        stats = run_refresh()
     except Exception:
         app.logger.exception("Tender refresh failed")
-        return Response(
+        return None, Response(
             "Refresh failed. Check the service logs."
             '<p><a href="/">Return to dashboard</a></p>',
             status=500,
             mimetype="text/html",
         )
-
-    if fetched == 0:
+    if stats["fetched"] == 0:
         # A failed or empty feed must never be mistaken for "no tenders".
-        return Response(
+        return None, Response(
             "No records came back from the official feeds. A source may be down, "
             "so this does not mean there are no tenders."
             '<p><a href="/">Return to dashboard</a></p>',
             status=502,
             mimetype="text/html",
         )
+    return stats, None
 
-    return Response(
-        f"Refresh complete. {fetched} notices checked: {local} confirmed in the "
-        f"target area, {review} need a location check."
-        '<p><a href="/">Return to dashboard</a></p>',
-        mimetype="text/html",
+
+def summary_text(stats):
+    return (
+        f"{stats['fetched']} notices checked. {stats['service']} were cleaning or FM "
+        f"and {stats['outside']} of those were outside your area. "
+        f"{stats['local']} confirmed in your area, {stats['review']} need a location check."
     )
+
+
+@app.route("/refresh", methods=["POST"])
+def refresh():
+    stats, error = refresh_or_error()
+    if error:
+        return error
+    query = urlencode({
+        "done": 1, "n": stats["fetched"], "s": stats["service"],
+        "o": stats["outside"], "l": stats["local"], "r": stats["review"],
+    })
+    return redirect("/?" + query)
+
+
+@app.route("/api/refresh", methods=["POST"])
+def api_refresh():
+    """Plain-text version for scheduled jobs."""
+    stats, error = refresh_or_error()
+    if error:
+        return error
+    return Response("Refresh complete. " + summary_text(stats), mimetype="text/plain")
 
 
 @app.route("/add", methods=["POST"])
