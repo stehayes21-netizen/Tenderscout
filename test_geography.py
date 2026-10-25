@@ -236,6 +236,31 @@ class PostcodeAreaTests(unittest.TestCase):
         self.assertEqual(tenderscout.classify_geography(record, "UK wide")[0], "UK-wide search")
 
 
+class PostcodeCoverageTests(unittest.TestCase):
+    def classify(self, location_text):
+        return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
+
+    def test_relevant_postcode_areas_are_confirmed_local(self):
+        # Representative postcode districts across the full agreed service area:
+        # Liverpool, Sefton, Wirral, St Helens, Halton, Knowsley, Warrington,
+        # Wigan, West Lancashire and Cheshire West/Chester.
+        for postcode in (
+            "L1 1AA", "L20 1AA", "PR8 1AA", "CH41 1AA", "CH63 1AA",
+            "WA9 1AA", "WA7 1AA", "L32 1AA", "WA1 1AA", "WN1 1AA",
+            "L39 1AA", "WN8 1AA", "CH1 1AA", "CH64 1AA", "CW9 1AA",
+        ):
+            with self.subTest(postcode=postcode):
+                self.assertEqual(self.classify(postcode), "LOCAL")
+
+    def test_postcodes_outside_the_service_area_are_not_local(self):
+        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA"):
+            with self.subTest(postcode=postcode):
+                self.assertEqual(self.classify(postcode), "OUT_OF_AREA")
+
+    def test_borderline_postcode_is_sent_for_review(self):
+        self.assertEqual(self.classify("CH4 1AA"), "REVIEW")
+
+
 class RegionCodeAndCommunityTests(unittest.TestCase):
     def classify(self, location_text):
         return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
