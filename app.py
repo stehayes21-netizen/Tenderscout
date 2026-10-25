@@ -87,6 +87,18 @@ def ensure_schema(db):
         return
     id_column = "SERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
     db.execute(f"CREATE TABLE IF NOT EXISTS tenders (id {id_column}, {COLUMNS})")
+    db.execute("""CREATE TABLE IF NOT EXISTS private_leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        trade_category TEXT NOT NULL,
+        location_text TEXT NOT NULL,
+        source_name TEXT NOT NULL,
+        source_url TEXT,
+        contact_details TEXT,
+        details TEXT,
+        status TEXT DEFAULT 'New',
+        created_at TEXT NOT NULL
+    )""")
     if USE_POSTGRES:
         for name, ddl in ADDED_COLUMNS:
             db.execute(f"ALTER TABLE tenders ADD COLUMN IF NOT EXISTS {name} {ddl}")
@@ -320,6 +332,7 @@ def dashboard():
     a{{color:#08783c}}.note{{font-size:13px}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
+    <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
     <p>Liverpool, Sefton, Wirral, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West</p>
     <form method="post" action="/refresh"
       onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
@@ -597,6 +610,138 @@ def export_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=tenderscout_export.csv"},
     )
+
+
+
+TRADE_CATEGORIES = [
+    "Commercial and office cleaning", "School and college cleaning",
+    "Domestic and communal-area cleaning", "Deep cleaning", "Industrial cleaning",
+    "Window cleaning", "Gutter cleaning", "Carpet and upholstery cleaning",
+    "End-of-tenancy cleaning", "Waste removal and clearance", "Pest control",
+    "Grounds maintenance and gardening", "Landscaping", "Tree surgery",
+    "Facilities management", "Caretaking and concierge", "Security and guarding",
+    "CCTV and access control", "Fire alarms and fire safety", "Emergency lighting",
+    "Electrical installation and repairs", "Electrical testing and inspection",
+    "Plumbing", "Heating and boilers", "Gas safety and servicing",
+    "Air conditioning and ventilation", "Renewables and solar", "Roofing and roof repairs",
+    "Roofline, fascias and soffits", "Building and general maintenance",
+    "Handyman and odd jobs", "Joinery and carpentry", "Doors and windows",
+    "Glazing", "Bricklaying and masonry", "Plastering and rendering",
+    "Painting and decorating", "Tiling", "Flooring", "Kitchens and bathrooms",
+    "Damp proofing and waterproofing", "Insulation", "Scaffolding",
+    "Groundworks and excavation", "Drainage", "Roads and paving",
+    "Driveways and patios", "Fencing and gates", "Building refurbishment",
+    "Extensions and conversions", "Demolition", "Asbestos services",
+    "Lift and escalator maintenance", "Water hygiene and legionella",
+    "Building surveying", "Architecture and design", "Structural engineering",
+    "Quantity surveying", "Construction project management", "Waste management",
+    "Laundry and linen", "Catering and food services", "Furniture and equipment",
+    "IT and telecoms", "Transport and vehicle maintenance", "Other / unclassified",
+]
+LEAD_STATUSES = ["New", "Contacted", "Qualified", "Passed to trade", "Won", "Closed"]
+
+
+@app.route("/sources")
+def sources():
+    """Directory of official procurement portals and public community channels."""
+    items = [
+        ("Public-sector tenders", [
+            ("Find a Tender", "https://www.find-tender.service.gov.uk/Search", "UK government procurement notices"),
+            ("Contracts Finder", "https://www.contractsfinder.service.gov.uk/Search", "UK public-sector opportunities"),
+            ("Liverpool City Council — ProContract", "https://procontract.due-north.com/", "Liverpool Council says most of its opportunities are advertised through ProContract; some routes use other approved portals"),
+            ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
+            ("Wirral Council tender guidance", "https://www.wirral.gov.uk/business/tenders-and-contracts", "Wirral directs suppliers to The Chest"),
+        ]),
+        ("Community and private-lead channels", [
+            ("Formby Bubble Approved Trader List", "https://www.formbybubble.com/bubbleapprovedtraderlist", "Local trader directory; use as a contact/discovery source, not proof of a live job"),
+            ("Grafters Network Liverpool", "https://www.grafterssupergroups.co.uk/events/liverpoolflagship/", "Local business networking"),
+            ("Liverpool Business Forum", "https://liverpoolbusinessforum.co.uk/about-lbf/", "Local business contacts and networking"),
+            ("Facebook — Liverpool community groups", "https://www.facebook.com/search/groups/?q=Liverpool%20community", "Open group search; check each group's rules and use permitted/manual submissions"),
+            ("Facebook — Formby community groups", "https://www.facebook.com/search/groups/?q=Formby%20community", "Open group search; check each group's rules and use permitted/manual submissions"),
+            ("Nextdoor", "https://nextdoor.co.uk/", "Neighbourhood recommendations and requests; use authorised access only"),
+        ]),
+    ]
+    sections = ""
+    for heading, entries in items:
+        cards = "".join(
+            f'<li><a href="{safe(url)}" target="_blank" rel="noopener">{safe(name)}</a> — {safe(note)}</li>'
+            for name, url, note in entries
+        )
+        sections += f"<h2>{safe(heading)}</h2><ul>{cards}</ul>"
+    return Response(
+        '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Tender Scout sources</title><style>body{font:16px Arial;max-width:900px;margin:20px auto;padding:0 16px;color:#18251e}'
+        'li{margin:12px 0}a{color:#08783c}p{line-height:1.5}</style></head><body>'
+        '<h1>Council & community sources</h1><p>Public contracts and private customer leads are different opportunity types. '
+        'Council portals may require supplier registration and may not expose an open feed.</p>'
+        + sections +
+        '<p><b>Important:</b> Tender Scout does not automatically scrape Facebook, Nextdoor or gated supplier portals. '
+        'Add a private lead only when you have permission to use the information and a legitimate source link.</p>'
+        '<p><a href="/">Back to public tenders</a> · <a href="/leads">Open private leads</a></p></body></html>',
+        mimetype="text/html",
+    )
+
+
+@app.route("/leads", methods=["GET", "POST"])
+def private_leads():
+    """Separate, manually captured private customer enquiries; never mixed with tenders."""
+    db = connect_db()
+    message = ""
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        trade = (request.form.get("trade_category") or "").strip()
+        location = (request.form.get("location_text") or "").strip()
+        source_name = (request.form.get("source_name") or "").strip()
+        source_url = (request.form.get("source_url") or "").strip()
+        contact = (request.form.get("contact_details") or "").strip()
+        details = (request.form.get("details") or "").strip()
+        if not title or trade not in TRADE_CATEGORIES or not location or not source_name:
+            message = '<p style="color:#a11">Please enter a title, valid trade, location and source.</p>'
+        elif source_url and not source_url.startswith(("https://", "http://")):
+            message = '<p style="color:#a11">Source link must start with http:// or https://.</p>'
+        else:
+            db.execute(
+                "INSERT INTO private_leads (title,trade_category,location_text,source_name,source_url,contact_details,details,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (title, trade, location, source_name, source_url, contact, details, "New",
+                 datetime.now(timezone.utc).isoformat()),
+            )
+            db.commit()
+            message = '<p style="color:#08783c"><b>Private lead saved.</b></p>'
+    rows = db.execute("SELECT * FROM private_leads ORDER BY created_at DESC LIMIT 100").fetchall()
+    db.close()
+    options = "".join(f'<option value="{safe(t)}">{safe(t)}</option>' for t in TRADE_CATEGORIES)
+    cards = ""
+    for row in rows:
+        link = (f'<a href="{safe(row["source_url"])}" target="_blank" rel="noopener">Original source</a>'
+                if row["source_url"] and row["source_url"].startswith(("https://", "http://")) else "")
+        cards += (
+            f'<article><h3>{safe(row["title"])}</h3><p><b>Trade:</b> {safe(row["trade_category"])} · '
+            f'<b>Location:</b> {safe(row["location_text"])}</p><p><b>Source:</b> {safe(row["source_name"])} {link}</p>'
+            f'<p><b>Status:</b> {safe(row["status"])} · <b>Added:</b> {safe(row["created_at"][:10])}</p>'
+            f'<p>{safe(row["details"])}</p></article>'
+        )
+    if not cards:
+        cards = "<p>No private leads have been entered yet. This list is separate from public-sector tenders.</p>"
+    page = (
+        '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Tender Scout — private trade leads</title><style>body{font:16px Arial;max-width:900px;margin:20px auto;padding:0 16px;color:#18251e}'
+        'label{display:block;margin:10px 0}input,select,textarea{box-sizing:border-box;width:100%;padding:10px;font:inherit}'
+        'button{padding:12px 18px;background:#168447;color:white;border:0;border-radius:8px;font-weight:bold}'
+        'article{background:#f3f6f4;border-radius:8px;padding:12px;margin:12px 0}a{color:#08783c}</style></head><body>'
+        '<h1>Private trade leads</h1><p>Manually capture genuine customer enquiries from permitted public sources. '
+        'Do not enter private or sensitive personal information unless you have a lawful basis to do so.</p>'
+        + message +
+        '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250"></label>'
+        '<label>Trade category<select name="trade_category" required><option value="">Choose a trade</option>' + options + '</select></label>'
+        '<label>Location<input name="location_text" required maxlength="200" placeholder="e.g. Liverpool L15"></label>'
+        '<label>Source name<input name="source_name" required maxlength="200" placeholder="e.g. local community group"></label>'
+        '<label>Original source URL<input name="source_url" type="url" maxlength="1000"></label>'
+        '<label>Business contact details (only if publicly provided for this enquiry)<input name="contact_details" maxlength="500"></label>'
+        '<label>Job details<textarea name="details" rows="3" maxlength="4000"></textarea></label>'
+        '<button type="submit">Save private lead</button></form><hr><h2>Recent private leads</h2>' + cards +
+        '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></body></html>'
+    )
+    return Response(page, mimetype="text/html")
 
 
 if __name__ == "__main__":
