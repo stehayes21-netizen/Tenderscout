@@ -285,7 +285,7 @@ def dashboard():
           <form method="post" action="/tender/{int(row["id"])}/stage" class="stage">
             <input type="hidden" name="view" value="{view}">
             <input type="hidden" name="service" value="{service}">
-            <label><b>Stage:</b>
+            <label><b>Bid progress:</b>
               <select name="stage" onchange="this.form.submit()">{options}</select>
             </label>
             <noscript><button type="submit">Save</button></noscript>
