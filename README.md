@@ -7,6 +7,13 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 - `app.py` is the Flask dashboard. **Refresh tenders** runs the collector and saves matches to the database.
 - Tenders confirmed in the target area appear on the main list. Anything whose location can't be confirmed goes to **Needs a location check** instead, so unclear tenders never mix into the main list.
 
+## Opportunity types and source directory
+
+- `/sources` lists official public procurement portals and community/business discovery channels, including Liverpool City Council's ProContract route and The Chest.
+- `/leads` is a separate manual capture area for private customer enquiries. Private leads are stored in their own table and are not mixed into public-sector tenders.
+- Community sites such as Facebook and Nextdoor are **not scraped automatically**. Add only genuine enquiries from sources where access and reuse are permitted; supplier portals may require registration and may not offer a public feed.
+- Council portals are listed as sources, not falsely described as connected live feeds. Automated ingestion should be added only where an official feed/API or written permission is available.
+
 ## Trades
 Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.
 
@@ -56,7 +63,9 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 - Each tender shows how long is left to bid (closed tenders sink to the bottom) and has a **Stage** dropdown: Reviewing, Interested, Bidding, Submitted, Won, Lost, Not for us
 - `POST /refresh` fetch new tenders and return to the dashboard with a summary; `POST /api/refresh` does the same but replies in plain text for scheduled jobs
 - `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)
-- `/export.csv` download everything
+- `/export.csv` download public-sector tender records
+- `/sources` council procurement and community source directory
+- `/leads` manually capture and view private customer enquiries separately
 - `/health` readiness check
 
 ## Tests
