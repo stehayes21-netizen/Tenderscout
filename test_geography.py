@@ -8,6 +8,34 @@ from unittest.mock import patch
 import tenderscout
 
 
+class OpportunityStageTests(unittest.TestCase):
+    def test_extract_records_identifies_planning_stage(self):
+        payload = {
+            "releases": [{
+                "id": "planning-1",
+                "ocid": "ocds-test-1",
+                "tag": ["planning"],
+                "date": "2026-10-25T10:00:00Z",
+                "tender": {"title": "Planned cleaning contract", "description": "Cleaning"},
+                "buyer": {"name": "Test Council"},
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["opportunity_stage"], "Planning / upcoming")
+
+    def test_dedupe_prefers_open_tender_over_planning_for_same_process(self):
+        rows = [
+            {"ocid": "ocds-test-2", "title": "Cleaning", "buyer": "Council",
+             "opportunity_stage": "Planning / upcoming"},
+            {"ocid": "ocds-test-2", "title": "Cleaning", "buyer": "Council",
+             "opportunity_stage": "Open for bids"},
+        ]
+        result = tenderscout.dedupe(rows)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["opportunity_stage"], "Open for bids")
+
+
 class GeographyClassifierTests(unittest.TestCase):
     def test_confirmed_liverpool_location_is_local(self):
         record = {"location_text": "Liverpool"}
