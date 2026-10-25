@@ -421,10 +421,16 @@ def parse_date(value):
     if not value:
         return None
     try:
-        value = str(value).replace("Z", "+00:00")
-        dt = datetime.fromisoformat(value)
+        raw = str(value).strip()
+        # Procurement feeds sometimes publish a deadline as a date with no time.
+        # Treat that date as inclusive through the end of the day; interpreting
+        # YYYY-MM-DD as midnight would wrongly expire it at the start of that day.
+        date_only = bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw))
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        if date_only:
+            dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
         return dt
     except (ValueError, TypeError):
         return None
