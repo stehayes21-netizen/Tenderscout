@@ -384,14 +384,16 @@ def get_json(url: str, timeout: int = 25):
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
-        # Keep the feed's own explanation, so a rejected request can be understood.
+        # Never print the full cursor URL: it can be enormous and makes the
+        # mobile results page unreadable. Preserve Retry-After for diagnostics.
         try:
-            body = " ".join(exc.read().decode("utf-8", errors="replace").split())[:200]
+            body = " ".join(exc.read().decode("utf-8", errors="replace").split())[:180]
         except Exception:
             body = ""
-        query = urllib.parse.urlparse(url).query
+        retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
+        retry_note = f" Retry after {retry_after} seconds." if retry_after.isdigit() else ""
         raise RuntimeError(
-            f"HTTP {exc.code} {exc.reason}. Feed said: {body or 'nothing'}. Request: ?{query}"
+            f"HTTP {exc.code} {exc.reason}.{retry_note} Feed said: {body or 'no details returned'}"
         ) from None
 
 
@@ -664,7 +666,9 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             if len(batch) >= 100:
                 stats["full_end"] = True
             return results
-        time.sleep(0.2)
+        # Find a Tender rate-limits bursty clients. Keep requests below a
+        # conservative 10/minute cadence rather than hammering each page/window.
+        time.sleep(5.5 if source == "Find a Tender" else 0.2)
     stats["more"] = True  # used every allowed page and the feed still had more
     return results
 
@@ -676,6 +680,9 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
     for start, end in _windows(days):
         if stats["stopped"]:
             break
+        if stats["windows"]:
+            # Windows without a next-page link still count as separate API calls.
+            time.sleep(5.5)
         stats["windows"] += 1
         # Do not send the API stages filter here. Find a Tender's documented
         # filter has historically omitted many Procurement Act 2023 notices,
