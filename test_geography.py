@@ -339,6 +339,11 @@ class OverlapAndTradeTests(unittest.TestCase):
             ("Catering services", "Catering and food services"),
             ("Roofing and roof repairs", "Roofing and roof repairs"),
             ("IT and telecoms support", "IT and telecoms"),
+            ("Arboricultural services - tree planting and maintenance", "Tree surgery"),
+            ("RA360690 - Boiler Inspection", "Heating and boilers"),
+            ("Provision of Mechanical and Electrical Services", "Electrical installation and repairs"),
+            ("PA Unadopted Highways hard surface repairs", "Roads and paving"),
+            ("Provision of Project Management & Cost Consultant Services", "Construction project management"),
         ):
             with self.subTest(title=title):
                 result = self.score(title)
