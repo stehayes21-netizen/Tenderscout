@@ -204,6 +204,25 @@ class AppSmokeTest(AppTestCase):
         self.assertNotIn(b"example.com/clean", page)
         self.assertIn(b"Filter by trade (71 categories)", page)
 
+    def test_empty_trade_filter_explains_no_matches_and_offers_all_trades(self):
+        self.client.post("/add", data={
+            "title": "Office cleaning", "buyer": "Test buyer",
+            "notice_url": "https://example.com/clean",
+        })
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Commercial and office cleaning", "https://example.com/clean"),
+        )
+        db.commit()
+        db.close()
+
+        page = self.client.get("/?trade=Roofing%20and%20roof%20repairs").data
+        self.assertIn(b"No saved opportunities match the trade", page)
+        self.assertIn(b"Show all trades", page)
+        self.assertIn(b"example.com/clean", self.client.get("/").data)
+        self.assertNotIn(b"example.com/clean", page)
+
     def test_private_lead_trade_selector_uses_shared_71_category_list(self):
         import tenderscout
         page = self.client.get("/leads").data
