@@ -334,13 +334,33 @@ def dashboard():
         f'<option value="{safe(category)}"{" selected" if category == selected_trade else ""}>{safe(category)}</option>'
         for category in TRADE_CATEGORIES
     )
+    # Quick trade sections put the common categories one tap away on mobile.
+    trade_groups = {
+        "Cleaning": ["Commercial and office cleaning", "Domestic and communal-area cleaning", "Deep cleaning", "Window cleaning", "Gutter cleaning", "Carpet and upholstery cleaning", "End-of-tenancy cleaning", "Waste removal and clearance"],
+        "Property maintenance": ["Building and general maintenance", "Handyman and odd jobs", "Grounds maintenance and gardening", "Roofing and roof repairs", "Roofline, fascias and soffits", "Drainage", "Pest control"],
+        "Plumbing & electrical": ["Plumbing", "Heating and boilers", "Gas safety and servicing", "Electrical installation and repairs", "Electrical testing and inspection", "Fire alarms and fire safety"],
+        "Building trades": ["Painting and decorating", "Plastering and rendering", "Tiling", "Joinery and carpentry", "Bricklaying and masonry", "Kitchens and bathrooms", "Flooring", "Driveways and patios"],
+    }
+    quick_sections = []
+    for group_name, categories in trade_groups.items():
+        chips = "".join(
+            f'<a class="trade-chip" href="/?trade={urlencode({"trade": category})[6:]}' +
+            (f'&amp;view={safe(view)}' if view else '') +
+            f'">{safe(category)}</a>'
+            for category in categories
+        )
+        quick_sections.append(f'<section class="trade-group"><h3>{safe(group_name)}</h3><div class="trade-chips">{chips}</div></section>')
     filter_form = (
-        '<form method="get" action="/" style="margin:12px 0">'
+        '<section class="trade-browser"><h2>Find tenders by trade</h2>'
+        '<p class="note">Choose a trade to narrow the list. The refresh checks official public-sector feeds.</p>'
+        + "".join(quick_sections)
+        + '<details><summary>Browse all 71 trade categories</summary>'
+        + '<form method="get" action="/" style="margin:12px 0">'
         + (f'<input type="hidden" name="view" value="{view}">' if view else '')
-        + '<label for="trade-filter"><b>Filter by trade (71 categories):</b></label> '
+        + '<label for="trade-filter"><b>All trade categories</b></label> '
         + '<select id="trade-filter" name="trade" onchange="this.form.submit()" style="max-width:100%;padding:10px;font-size:16px">'
         + '<option value="">All trades</option>' + filters + '</select>'
-        + '<noscript><button type="submit">Apply filter</button></noscript></form>'
+        + '<noscript><button type="submit">Apply filter</button></noscript></form></details></section>'
     )
 
     banner = ""
@@ -386,7 +406,15 @@ def dashboard():
     .deadline.soon{{color:#b45309}}
     .deadline.closed{{color:#8a8f8c}}
     .stage select{{font-size:16px;padding:8px;margin-left:6px}}
-    a{{color:#08783c}}.note{{font-size:13px}}
+    a{{color:#08783c}}.note{{font-size:13px;line-height:1.45}}
+    .trade-browser{{background:#e8f2eb;border:1px solid #d0e2d5;border-radius:14px;padding:16px;margin:18px 0}}
+    .trade-browser h2{{margin:0 0 6px}}
+    .trade-group{{background:#fff;border-radius:10px;padding:12px;margin:12px 0}}
+    .trade-group h3{{font-size:17px;margin:0 0 10px}}
+    .trade-chips{{display:flex;flex-wrap:wrap;gap:8px}}
+    .trade-chip{{display:inline-block;background:#f3f8f4;border:1px solid #c8ddce;border-radius:20px;padding:8px 11px;text-decoration:none;font-size:14px}}
+    details{{margin-top:12px}}summary{{cursor:pointer;font-weight:bold;padding:8px 0}}
+    @media(max-width:520px){{body{{padding:12px}}header{{padding:17px}}.card{{padding:14px}}.trade-browser{{padding:12px}}}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
     <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
@@ -680,6 +708,10 @@ def export_csv():
 
 TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 LEAD_STATUSES = ["New", "Contacted", "Qualified", "Passed to trade", "Won", "Closed"]
+LEAD_SOURCES = [
+    "Facebook community group", "Nextdoor / neighbourhood group", "Local business or letting agent",
+    "Direct customer enquiry", "Council / procurement portal", "Trade directory", "Other"
+]
 
 
 @app.route("/sources")
@@ -736,8 +768,8 @@ def private_leads():
         source_url = (request.form.get("source_url") or "").strip()
         contact = (request.form.get("contact_details") or "").strip()
         details = (request.form.get("details") or "").strip()
-        if not title or trade not in TRADE_CATEGORIES or not location or not source_name:
-            message = '<p style="color:#a11">Please enter a title, valid trade, location and source.</p>'
+        if not title or trade not in TRADE_CATEGORIES or not location or source_name not in LEAD_SOURCES:
+            message = '<p class="error">Please enter a title, valid trade, location and choose a source type.</p>'
         elif source_url and not source_url.startswith(("https://", "http://")):
             message = '<p style="color:#a11">Source link must start with http:// or https://.</p>'
         else:
@@ -751,6 +783,7 @@ def private_leads():
     rows = db.execute("SELECT * FROM private_leads ORDER BY created_at DESC LIMIT 100").fetchall()
     db.close()
     options = "".join(f'<option value="{safe(t)}">{safe(t)}</option>' for t in TRADE_CATEGORIES)
+    source_options = "".join(f'<option value="{safe(s)}">{safe(s)}</option>' for s in LEAD_SOURCES)
     cards = ""
     for row in rows:
         link = (f'<a href="{safe(row["source_url"])}" target="_blank" rel="noopener">Original source</a>'
@@ -765,22 +798,29 @@ def private_leads():
         cards = "<p>No private leads have been entered yet. This list is separate from public-sector tenders.</p>"
     page = (
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>Tender Scout — private trade leads</title><style>body{font:16px Arial;max-width:900px;margin:20px auto;padding:0 16px;color:#18251e}'
-        'label{display:block;margin:10px 0}input,select,textarea{box-sizing:border-box;width:100%;padding:10px;font:inherit}'
-        'button{padding:12px 18px;background:#168447;color:white;border:0;border-radius:8px;font-weight:bold}'
-        'article{background:#f3f6f4;border-radius:8px;padding:12px;margin:12px 0}a{color:#08783c}</style></head><body>'
-        '<h1>Private trade leads</h1><p>Manually capture genuine customer enquiries from permitted public sources. '
-        'Do not enter private or sensitive personal information unless you have a lawful basis to do so.</p>'
+        '<title>Tender Scout — private trade leads</title><style>'
+        'body{font:16px Arial;max-width:960px;margin:0 auto;padding:16px;color:#18251e;background:#f3f6f4;line-height:1.45}'
+        'header{background:#143d2a;color:white;border-radius:14px;padding:20px;margin-bottom:16px}'
+        'header a{color:white}nav{font-size:14px}main{background:white;border-radius:14px;padding:18px}'
+        'label{display:block;margin:14px 0;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b8c6bd;border-radius:8px;font:inherit;margin-top:6px;background:white}'
+        'button{padding:13px 18px;background:#168447;color:white;border:0;border-radius:9px;font-weight:bold;font-size:16px;width:100%;margin-top:8px}'
+        'article{background:#f3f6f4;border:1px solid #e0e8e2;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
+        'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
+        '.helper{font-size:13px;color:#53645a;font-weight:normal}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
+        '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
+        '<p>Choose where you found the enquiry. A direct URL is optional; you do not need to paste a link just to save a lead.</p>'
         + message +
-        '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250"></label>'
+        '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Gutter cleaning on a semi-detached house"></label>'
         '<label>Trade category<select name="trade_category" required><option value="">Choose a trade</option>' + options + '</select></label>'
         '<label>Location<input name="location_text" required maxlength="200" placeholder="e.g. Liverpool L15"></label>'
-        '<label>Source name<input name="source_name" required maxlength="200" placeholder="e.g. local community group"></label>'
-        '<label>Original source URL<input name="source_url" type="url" maxlength="1000"></label>'
-        '<label>Business contact details (only if publicly provided for this enquiry)<input name="contact_details" maxlength="500"></label>'
-        '<label>Job details<textarea name="details" rows="3" maxlength="4000"></textarea></label>'
+        '<label>Where did you find it?<select name="source_name" required><option value="">Choose a source</option>' + source_options + '</select><span class="helper">Select a source type instead of typing its name.</span></label>'
+        '<label>Original post / source link (optional)<input name="source_url" type="url" maxlength="1000" placeholder="Paste a link only if you have one"></label>'
+        '<label>Business contact details <span class="helper">(only if publicly provided for this enquiry)</span><input name="contact_details" maxlength="500"></label>'
+        '<label>Job details (optional)<textarea name="details" rows="3" maxlength="4000" placeholder="Scope, timing, access notes…"></textarea></label>'
         '<button type="submit">Save private lead</button></form><hr><h2>Recent private leads</h2>' + cards +
-        '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></body></html>'
+        '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></main></body></html>'
     )
     return Response(page, mimetype="text/html")
 
