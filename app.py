@@ -593,6 +593,9 @@ def add_tender():
     title = (request.form.get("title") or "").strip() or "Untitled tender"
     buyer = (request.form.get("buyer") or "").strip()
     pipeline_status = (request.form.get("pipeline_status") or "").strip() or "Reviewing"
+    opportunity_stage = (request.form.get("opportunity_stage") or "").strip() or "Open for bids"
+    if opportunity_stage not in ("Planning / upcoming", "Open for bids", "Other notice"):
+        opportunity_stage = "Open for bids"
     # Manual entries without a link get their own unique key, so they never
     # overwrite each other.
     notice_url = (request.form.get("notice_url") or "").strip() or "manual:" + uuid.uuid4().hex
@@ -605,18 +608,19 @@ def add_tender():
             INSERT INTO tenders
             (source, title, buyer, published_date, location_text,
              service_match, score, deadline, notice_url,
-             geography_reason, region_match, saved_at, pipeline_status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             geography_reason, region_match, saved_at, pipeline_status, opportunity_stage)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(notice_url) DO UPDATE SET
                 title=excluded.title,
                 buyer=excluded.buyer,
                 geography_reason=excluded.geography_reason,
                 pipeline_status=excluded.pipeline_status,
+                opportunity_stage=excluded.opportunity_stage,
                 saved_at=excluded.saved_at
             """,
             (
                 "Manual", title, buyer, now, "", "", 0, "", notice_url,
-                "Manual entry", "MANUAL", now, pipeline_status,
+                "Manual entry", "MANUAL", now, pipeline_status, opportunity_stage,
             ),
         )
         db.commit()
