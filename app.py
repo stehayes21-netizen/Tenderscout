@@ -232,16 +232,17 @@ def dashboard():
         "region_match = 'REVIEW'" if review_view
         else "region_match IN ('LOCAL', 'MANUAL')"
     )
+    params = []
     if pipeline_view:
         condition += " AND pipeline_status = ?"
-        params = ("Pipeline / upcoming",)
-    params = ()
+        params.append("Pipeline / upcoming")
     if trade:
         condition += " AND trade_category = ?"
-        params = (trade,)
+        params.append(trade)
     elif service:
         condition += " AND service_match = ?"
-        params = (SERVICE_FILTERS[service],)
+        params.append(SERVICE_FILTERS[service])
+    params = tuple(params)
     rows = db.execute(
         f"SELECT * FROM tenders WHERE {condition} "
         "ORDER BY score DESC, published_date DESC",
