@@ -90,7 +90,8 @@ class AppSmokeTest(AppTestCase):
         self.client.post("/add", data={
             "title": "Planned cleaning contract", "buyer": "Council",
             "notice_url": "https://example.com/pipeline",
-            "pipeline_status": "Pipeline / upcoming",
+            "pipeline_status": "Reviewing",
+            "opportunity_stage": "Planning / upcoming",
         })
         self.client.post("/add", data={
             "title": "Live cleaning tender", "buyer": "Council",
@@ -103,6 +104,10 @@ class AppSmokeTest(AppTestCase):
             ("Commercial and office cleaning", "https://example.com/pipeline"),
         )
         db.execute(
+            "UPDATE tenders SET opportunity_stage = ? WHERE notice_url = ?",
+            ("Planning / upcoming", "https://example.com/pipeline"),
+        )
+        db.execute(
             "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
             ("Commercial and office cleaning", "https://example.com/live"),
         )
@@ -112,6 +117,7 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(pipeline.status_code, 200)
         self.assertIn(b"Planned cleaning contract", pipeline.data)
         self.assertNotIn(b"Live cleaning tender", pipeline.data)
+        self.assertIn(b"Reviewing", pipeline.data)
         filtered = self.client.get("/?view=pipeline&trade=Commercial%20and%20office%20cleaning")
         self.assertEqual(filtered.status_code, 200)
         self.assertIn(b"Planned cleaning contract", filtered.data)
