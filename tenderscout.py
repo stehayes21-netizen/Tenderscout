@@ -37,6 +37,117 @@ from pathlib import Path
 FTS_URL = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages"
 CF_URL = "https://www.contractsfinder.service.gov.uk/Published/Notices/OCDS/Search"
 
+# Detailed selectable trade taxonomy shared by public tenders and private leads.
+TRADE_CATEGORIES = [
+    "Commercial and office cleaning", "School and college cleaning",
+    "Domestic and communal-area cleaning", "Deep cleaning", "Industrial cleaning",
+    "Window cleaning", "Gutter cleaning", "Carpet and upholstery cleaning",
+    "End-of-tenancy cleaning", "Waste removal and clearance", "Pest control",
+    "Grounds maintenance and gardening", "Landscaping", "Tree surgery",
+    "Facilities management", "Caretaking and concierge", "Security and guarding",
+    "CCTV and access control", "Fire alarms and fire safety", "Emergency lighting",
+    "Electrical installation and repairs", "Electrical testing and inspection",
+    "Plumbing", "Heating and boilers", "Gas safety and servicing",
+    "Air conditioning and ventilation", "Renewables and solar", "Roofing and roof repairs",
+    "Roofline, fascias and soffits", "Building and general maintenance",
+    "Handyman and odd jobs", "Joinery and carpentry", "Doors and windows",
+    "Glazing", "Bricklaying and masonry", "Plastering and rendering",
+    "Painting and decorating", "Tiling", "Flooring", "Kitchens and bathrooms",
+    "Damp proofing and waterproofing", "Insulation", "Scaffolding",
+    "Groundworks and excavation", "Drainage", "Roads and paving",
+    "Driveways and patios", "Fencing and gates", "Building refurbishment",
+    "Extensions and conversions", "Demolition", "Asbestos services",
+    "Lift and escalator maintenance", "Water hygiene and legionella",
+    "Building surveying", "Architecture and design", "Structural engineering",
+    "Quantity surveying", "Construction project management", "Waste management",
+    "Laundry and linen", "Catering and food services", "Furniture and equipment",
+    "IT and telecoms", "Transport and vehicle maintenance", "Other / unclassified",
+]
+assert len(TRADE_CATEGORIES) == 66
+
+TRADE_KEYWORDS = {
+    "Commercial and office cleaning": ["commercial cleaning", "office cleaning", "contract cleaning"],
+    "School and college cleaning": ["school cleaning", "college cleaning", "education cleaning"],
+    "Domestic and communal-area cleaning": ["communal cleaning", "domestic cleaning", "housing cleaning"],
+    "Deep cleaning": ["deep clean", "deep cleaning", "specialist cleaning"],
+    "Industrial cleaning": ["industrial cleaning", "factory cleaning", "industrial hygiene"],
+    "Window cleaning": ["window cleaning", "glass cleaning"],
+    "Gutter cleaning": ["gutter cleaning", "gutter clearance"],
+    "Carpet and upholstery cleaning": ["carpet cleaning", "upholstery cleaning"],
+    "End-of-tenancy cleaning": ["end of tenancy", "end-of-tenancy", "void cleaning"],
+    "Waste removal and clearance": ["waste removal", "rubbish clearance", "house clearance"],
+    "Pest control": ["pest control", "vermin control", "rodent control"],
+    "Grounds maintenance and gardening": ["grounds maintenance", "garden maintenance", "grass cutting"],
+    "Landscaping": ["landscaping", "landscape works"],
+    "Tree surgery": ["tree surgery", "arboriculture", "tree works"],
+    "Facilities management": ["facilities management", "facility management", "hard fm", "soft fm"],
+    "Caretaking and concierge": ["caretaking", "caretaker", "concierge"],
+    "Security and guarding": ["security guarding", "manned guarding", "security services"],
+    "CCTV and access control": ["cctv", "access control", "intruder alarm"],
+    "Fire alarms and fire safety": ["fire alarm", "fire safety", "fire detection"],
+    "Emergency lighting": ["emergency lighting"],
+    "Electrical installation and repairs": ["electrical installation", "electrical repairs", "electrician"],
+    "Electrical testing and inspection": ["electrical testing", "fixed wire testing", "eicr"],
+    "Plumbing": ["plumbing", "plumber", "drain tap"],
+    "Heating and boilers": ["boiler servicing", "heating maintenance", "heating system"],
+    "Gas safety and servicing": ["gas safety", "gas servicing", "gas certificate"],
+    "Air conditioning and ventilation": ["air conditioning", "ventilation", "hvac"],
+    "Renewables and solar": ["solar pv", "solar panel", "renewable energy", "heat pump"],
+    "Roofing and roof repairs": ["roofing", "roof repair", "roof replacement"],
+    "Roofline, fascias and soffits": ["fascias", "soffits", "roofline"],
+    "Building and general maintenance": ["building maintenance", "property maintenance", "responsive repairs"],
+    "Handyman and odd jobs": ["handyman", "minor repairs", "odd jobs"],
+    "Joinery and carpentry": ["joinery", "carpentry", "carpenter"],
+    "Doors and windows": ["door repairs", "window repairs", "window replacement"],
+    "Glazing": ["glazing", "double glazing", "glass replacement"],
+    "Bricklaying and masonry": ["bricklaying", "masonry", "repointing"],
+    "Plastering and rendering": ["plastering", "rendering", "plasterer"],
+    "Painting and decorating": ["painting and decorating", "decorating", "external decoration"],
+    "Tiling": ["tiling", "tiler", "wall and floor tiles"],
+    "Flooring": ["flooring", "floor coverings", "vinyl flooring"],
+    "Kitchens and bathrooms": ["kitchen installation", "bathroom installation", "kitchen refurbishment"],
+    "Damp proofing and waterproofing": ["damp proofing", "waterproofing", "rising damp"],
+    "Insulation": ["insulation", "loft insulation", "cavity wall insulation"],
+    "Scaffolding": ["scaffolding", "scaffold hire"],
+    "Groundworks and excavation": ["groundworks", "excavation", "earthworks"],
+    "Drainage": ["drainage", "drain clearance", "sewer repair"],
+    "Roads and paving": ["road resurfacing", "road repairs", "highway maintenance"],
+    "Driveways and patios": ["driveway", "patio installation", "block paving"],
+    "Fencing and gates": ["fencing", "gates installation", "boundary fencing"],
+    "Building refurbishment": ["refurbishment", "building refurbishment", "property refurbishment"],
+    "Extensions and conversions": ["building extension", "property conversion", "loft conversion"],
+    "Demolition": ["demolition", "dismantling works"],
+    "Asbestos services": ["asbestos removal", "asbestos survey", "asbestos management"],
+    "Lift and escalator maintenance": ["lift maintenance", "elevator maintenance", "escalator"],
+    "Water hygiene and legionella": ["legionella", "water hygiene", "water testing"],
+    "Building surveying": ["building survey", "building surveying", "condition survey"],
+    "Architecture and design": ["architectural services", "architectural design"],
+    "Structural engineering": ["structural engineering", "structural survey"],
+    "Quantity surveying": ["quantity surveying", "cost consultancy"],
+    "Construction project management": ["construction project management", "project management construction"],
+    "Waste management": ["waste management", "recycling services", "waste collection"],
+    "Laundry and linen": ["laundry services", "linen services", "laundry and linen"],
+    "Catering and food services": ["catering services", "food services", "school meals"],
+    "Furniture and equipment": ["furniture supply", "furniture installation", "equipment supply"],
+    "IT and telecoms": ["information technology", "telecommunications", "network infrastructure"],
+    "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "transport services"],
+    "Other / unclassified": [],
+}
+
+def classify_trade_category(fulltext):
+    """Return the best detailed category; leave unmatched opportunities unclassified."""
+    text = (fulltext or "").lower()
+    matches = []
+    for category, terms in TRADE_KEYWORDS.items():
+        for term in terms:
+            if term in text:
+                matches.append((len(term), category))
+    if matches:
+        matches.sort(reverse=True)
+        return matches[0][1]
+    return "Other / unclassified"
+
+
 CLEANING_TERMS = [
     "cleaning", "deep clean", "window cleaning", "carpet cleaning",
     "washroom", "janitorial", "hygiene services", "sanitary",
