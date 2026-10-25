@@ -5,6 +5,7 @@ import io
 import os
 import sqlite3
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse
 
@@ -366,12 +367,14 @@ def run_refresh():
     pages = env_int("TENDERSCOUT_PAGES", 25)
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
-    limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 40)
+    limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
     fts_stats, cf_stats = {}, {}
-    records = collector.dedupe(
-        collector.fetch_fts(days, pages, limit, fts_stats)
-        + collector.fetch_contracts_finder(days, pages, limit, cf_stats)
-    )
+    # Both feeds are read at the same time, so a refresh takes about as long as
+    # the slower one.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fts_job = pool.submit(collector.fetch_fts, days, pages, limit, fts_stats)
+        cf_job = pool.submit(collector.fetch_contracts_finder, days, pages, limit, cf_stats)
+        records = collector.dedupe(fts_job.result() + cf_job.result())
     LAST_FEEDS["Find a Tender"] = fts_stats
     LAST_FEEDS["Contracts Finder"] = cf_stats
     app.logger.warning("REFRESH feeds: %s", LAST_FEEDS)
@@ -485,6 +488,8 @@ def feed_notes():
         if not st:
             continue
         text = f"{name}: {st.get('records', 0)} notices in {st.get('pages', 0)} page(s)"
+        if st.get("windows"):
+            text += f" over {st['windows']} week(s) searched"
         if st.get("first_date"):
             text += f", published {st['first_date']} to {st['last_date']}"
         if st.get("error"):
@@ -493,7 +498,7 @@ def feed_notes():
             text += ". Stopped early (time limit), so there may be more"
         elif st.get("more"):
             text += ". More pages were available but not read"
-        elif st.get("last_batch", 0) >= 100:
+        elif st.get("full_end") or st.get("last_batch", 0) >= 100:
             text += ". The last page was full but no next-page link came back, so results may be cut off"
         lines.append(safe(text))
     if not lines:

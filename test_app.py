@@ -288,7 +288,7 @@ class FeedDiagnosticsTests(AppTestCase):
                                  "tender": {"title": "Cleaning"}}]}
         stats = {}
         with patch.object(tenderscout, "get_json", return_value=payload):
-            records = tenderscout.fetch_fts(14, 5, None, stats)
+            records = tenderscout.fetch_fts(7, 5, None, stats)
         self.assertEqual(len(records), 1)
         self.assertEqual((stats["pages"], stats["records"], stats["more"]), (1, 1, False))
         self.assertEqual(stats["first_date"], "2026-10-10")
@@ -310,7 +310,7 @@ class FeedPagingTests(unittest.TestCase):
         stats = {}
         with patch.object(tenderscout, "get_json", side_effect=fake_get), \
              patch.object(tenderscout.time, "sleep"):
-            records = tenderscout.fetch_fts(14, 5, None, stats)
+            records = tenderscout.fetch_fts(7, 5, None, stats)
         self.assertEqual(len(records), 2)
         self.assertEqual(urls[1],
                          "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=ABC%3D%3D&limit=100")
@@ -334,6 +334,54 @@ class FeedPagingTests(unittest.TestCase):
                 tenderscout.get_json("https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?limit=100")
         self.assertIn("cursor is invalid", str(ctx.exception))
         self.assertIn("HTTP 400", str(ctx.exception))
+
+
+class SearchWindowTests(unittest.TestCase):
+    def test_look_back_is_split_into_week_long_windows_newest_first(self):
+        import tenderscout
+        windows = tenderscout._windows(60)
+        self.assertEqual(len(windows), 9)
+        starts_and_ends = [(s, e) for s, e in windows]
+        self.assertTrue(all(e > s for s, e in starts_and_ends))
+        self.assertGreater(windows[0][1], windows[-1][1])  # newest first
+        for (s1, _), (_, e2) in zip(windows, windows[1:]):
+            self.assertEqual(s1, e2)  # no gaps between windows
+        self.assertEqual(round((windows[0][1] - windows[-1][0]).days), 60)
+
+    def test_each_window_is_searched_and_counted(self):
+        import tenderscout
+        calls = []
+
+        def fake_get(url, timeout=25):
+            calls.append(url)
+            return {"releases": [{"ocid": f"o{len(calls)}", "id": str(len(calls)),
+                                  "date": "2026-10-10T00:00:00Z", "tender": {"title": "T"}}]}
+
+        stats = {}
+        with patch.object(tenderscout, "get_json", side_effect=fake_get), \
+             patch.object(tenderscout.time, "sleep"):
+            records = tenderscout.fetch_contracts_finder(21, 5, None, stats)
+        self.assertEqual(stats["windows"], 3)
+        self.assertEqual(len(records), 3)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all("publishedFrom=" in u and "publishedTo=" in u for u in calls))
+
+    def test_time_limit_stops_after_the_newest_windows(self):
+        import tenderscout
+        calls = []
+
+        def fake_get(url, timeout=25):
+            calls.append(url)
+            return {"releases": [{"ocid": f"o{len(calls)}", "id": "1", "tender": {"title": "T"}}]}
+
+        stats = {}
+        ticks = iter([0, 0, 0, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100])
+        with patch.object(tenderscout, "get_json", side_effect=fake_get), \
+             patch.object(tenderscout.time, "sleep"), \
+             patch.object(tenderscout.time, "monotonic", side_effect=lambda: next(ticks)):
+            tenderscout.fetch_fts(60, 5, 10, stats)
+        self.assertEqual(stats["stopped"], "time limit")
+        self.assertLess(stats["windows"], 9)
 
 
 if __name__ == "__main__":
