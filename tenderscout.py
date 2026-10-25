@@ -61,9 +61,9 @@ TRADE_CATEGORIES = [
     "Building surveying", "Architecture and design", "Structural engineering",
     "Quantity surveying", "Construction project management", "Waste management",
     "Laundry and linen", "Catering and food services", "Furniture and equipment",
-    "IT and telecoms", "Transport and vehicle maintenance", "Other / unclassified",
+    "IT and telecoms", "Transport and vehicle maintenance", "Water and fire damage restoration",\n    "Interior design", "Signage and sign making", "Rope access and specialist access",\n    "Environmental services", "Other / unclassified",
 ]
-assert len(TRADE_CATEGORIES) == 66
+assert len(TRADE_CATEGORIES) == 71
 
 TRADE_KEYWORDS = {
     "Commercial and office cleaning": ["commercial cleaning", "office cleaning", "contract cleaning"],
@@ -131,7 +131,7 @@ TRADE_KEYWORDS = {
     "Furniture and equipment": ["furniture supply", "furniture installation", "equipment supply"],
     "IT and telecoms": ["information technology", "telecommunications", "network infrastructure"],
     "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "transport services"],
-    "Other / unclassified": [],
+    "Water and fire damage restoration": ["water damage restoration", "fire damage restoration", "flood restoration"],\n    "Interior design": ["interior design", "interior fit out design"],\n    "Signage and sign making": ["signage", "sign making", "wayfinding signs"],\n    "Rope access and specialist access": ["rope access", "industrial abseiling", "specialist access"],\n    "Environmental services": ["environmental services", "environmental remediation", "contaminated land"],\n    "Other / unclassified": [],
 }
 
 def classify_trade_category(fulltext):
