@@ -300,6 +300,11 @@ OUT_OF_AREA_TERMS = [
     "lancaster", "cumbria", "barrow-in-furness", "northumberland", "chorley",
     "leeds", "sheffield", "nottingham", "london", "birmingham", "bristol",
     "cardiff", "newcastle", "oxford", "cambridge", "wales", "northern ireland",
+    # Regional labels in procurement feeds are useful when no postcode is supplied.
+    # These are outside the configured target area and must not sit in its review queue.
+    "east midlands", "west midlands", "east of england", "south east",
+    "south west", "yorkshire and the humber", "north east",
+    "north east england", "south east england", "south west england",
     "belfast", "flintshire", "wrexham",
     "scotland", "scottish", "glasgow", "edinburgh", "aberdeen", "dundee",
     "inverness", "perth", "stirling", "falkirk", "paisley", "ayr",
