@@ -97,13 +97,25 @@ class AppSmokeTest(AppTestCase):
             "notice_url": "https://example.com/live",
             "pipeline_status": "Bidding",
         })
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Commercial and office cleaning", "https://example.com/pipeline"),
+        )
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Commercial and office cleaning", "https://example.com/live"),
+        )
+        db.commit()
+        db.close()
         pipeline = self.client.get("/?view=pipeline")
         self.assertEqual(pipeline.status_code, 200)
         self.assertIn(b"Planned cleaning contract", pipeline.data)
         self.assertNotIn(b"Live cleaning tender", pipeline.data)
         filtered = self.client.get("/?view=pipeline&trade=Commercial%20and%20office%20cleaning")
         self.assertEqual(filtered.status_code, 200)
-        self.assertIn(b"Pipeline / upcoming", filtered.data)
+        self.assertIn(b"Planned cleaning contract", filtered.data)
+        self.assertNotIn(b"Live cleaning tender", filtered.data)
 
     def test_manual_entries_without_a_link_do_not_overwrite_each_other(self):
         for title in ("First entry", "Second entry"):
