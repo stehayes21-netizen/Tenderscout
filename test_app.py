@@ -223,9 +223,14 @@ class DashboardFeatureTests(AppTestCase):
 
 class RefreshSummaryTests(AppTestCase):
     def test_refresh_returns_to_the_dashboard_with_a_summary(self):
-        r = self.client.post("/refresh")
-        self.assertEqual(r.status_code, 502)  # nothing fetched: not shown as success
         collector = self.app_module.collector
+        # Keep this test deterministic and offline: empty mocked feeds must
+        # produce a failure response rather than a false "zero tenders" success.
+        with patch.object(collector, "fetch_fts", return_value=[]), \
+             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+            r = self.client.post("/refresh")
+        self.assertEqual(r.status_code, 502)
+        self.assertIn(b"does not mean there are no tenders", r.data)
         records = [
             feed_record("liv", "Liverpool L2 2DH"),
             feed_record("edi", "Edinburgh EH1 1AA"),
