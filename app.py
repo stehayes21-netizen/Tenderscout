@@ -24,6 +24,7 @@ MIN_SCORE = 3
 SERVICES = list(collector.SERVICE_ORDER)
 STAGES = ["Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not for us"]
 SERVICE_FILTERS = dict(collector.SERVICE_LABELS)
+TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 
 _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
@@ -70,6 +71,7 @@ COLUMNS = """
     deadline TEXT, notice_url TEXT UNIQUE,
     geography_reason TEXT,
     region_match TEXT DEFAULT 'REVIEW',
+    trade_category TEXT DEFAULT 'Other / unclassified',
     saved_at TEXT,
     pipeline_status TEXT DEFAULT 'Reviewing'
 """
@@ -87,6 +89,12 @@ def ensure_schema(db):
         return
     id_column = "SERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
     db.execute(f"CREATE TABLE IF NOT EXISTS tenders (id {id_column}, {COLUMNS})")
+    if USE_POSTGRES:
+        db.execute("ALTER TABLE tenders ADD COLUMN IF NOT EXISTS trade_category TEXT DEFAULT 'Other / unclassified'")
+    else:
+        existing_columns = {row[1] for row in db.execute("PRAGMA table_info(tenders)").fetchall()}
+        if "trade_category" not in existing_columns:
+            db.execute("ALTER TABLE tenders ADD COLUMN trade_category TEXT DEFAULT 'Other / unclassified'")
     db.execute(f"""CREATE TABLE IF NOT EXISTS private_leads (
         id {id_column},
         title TEXT NOT NULL,
@@ -212,6 +220,8 @@ def dashboard_url(view="", service=""):
 @app.route("/", methods=["GET"])
 def dashboard():
     review_view = request.args.get("view") == "review"
+    trade = request.args.get("trade", "")
+    trade = trade if trade in TRADE_CATEGORIES else ""
     service = request.args.get("service", "")
     service = service if service in SERVICE_FILTERS else ""
     view = "review" if review_view else ""
@@ -222,7 +232,10 @@ def dashboard():
         else "region_match IN ('LOCAL', 'MANUAL')"
     )
     params = ()
-    if service:
+    if trade:
+        condition += " AND trade_category = ?"
+        params = (trade,)
+    elif service:
         condition += " AND service_match = ?"
         params = (SERVICE_FILTERS[service],)
     rows = db.execute(
@@ -254,7 +267,7 @@ def dashboard():
           <h2>{safe(row["title"]) or "Untitled tender"}</h2>
           <p class="deadline {deadline_class}">{safe(deadline_label)}</p>
           <p><b>Buyer:</b> {safe(row["buyer"]) or "Not listed"}</p>
-          <p><b>Service:</b> {safe(row["service_match"])} · <b>Score:</b> {safe(row["score"])}</p>
+          <p><b>Trade:</b> {safe(row["trade_category"] or row["service_match"])} · <b>Score:</b> {safe(row["score"])}</p>
           <p><b>Location:</b> {safe(row["location_text"]) or "Needs checking"}</p>
           <p><b>Source:</b> {safe(row["source"])}</p>
           <p>{safe(row["geography_reason"])}</p>
@@ -283,9 +296,18 @@ def dashboard():
         heading = f"{len(rows)} saved opportunities"
         switch = f'<a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
 
-    filters = " · ".join(
-        f'<b>{label}</b>' if key == service else f'<a href="{dashboard_url(view, key)}">{label}</a>'
-        for key, label in [("", "All")] + list(SERVICE_FILTERS.items())
+    selected_trade = trade
+    filters = "".join(
+        f'<option value="{safe(category)}"{" selected" if category == selected_trade else ""}>{safe(category)}</option>'
+        for category in TRADE_CATEGORIES
+    )
+    filter_form = (
+        '<form method="get" action="/" style="margin:12px 0">'
+        + (f'<input type="hidden" name="view" value="{view}">' if view else '')
+        + '<label for="trade-filter"><b>Filter by trade (71 categories):</b></label> '
+        + '<select id="trade-filter" name="trade" onchange="this.form.submit()" style="max-width:100%;padding:10px;font-size:16px">'
+        + '<option value="">All trades</option>' + filters + '</select>'
+        + '<noscript><button type="submit">Apply filter</button></noscript></form>'
     )
 
     banner = ""
@@ -339,7 +361,7 @@ def dashboard():
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
     {banner}
     <p>{heading} · {switch} · <a href="/export.csv">Export CSV</a></p>
-    <p>Show: {filters}</p>
+    {filter_form}
     <p class="note">Always verify eligibility, location, deadline and contract details
     on the official notice.</p>
     {cards}</body></html>"""
@@ -434,14 +456,15 @@ def run_refresh():
                 INSERT INTO tenders
                 (source, title, buyer, published_date, location_text,
                  service_match, score, deadline, notice_url,
-                 geography_reason, region_match, saved_at, pipeline_status)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 geography_reason, region_match, trade_category, saved_at, pipeline_status)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(notice_url) DO UPDATE SET
                     title=excluded.title, buyer=excluded.buyer,
                     score=excluded.score, deadline=excluded.deadline,
                     location_text=excluded.location_text,
                     geography_reason=excluded.geography_reason,
                     region_match=excluded.region_match,
+                    trade_category=excluded.trade_category,
                     saved_at=excluded.saved_at
                 """,
                 (
@@ -456,6 +479,7 @@ def run_refresh():
                     url,
                     match.get("geography_reason", ""),
                     region_match,
+                    match.get("trade_category", "Other / unclassified"),
                     datetime.now(timezone.utc).isoformat(),
                     "Reviewing",
                 ),
@@ -586,7 +610,7 @@ def add_tender():
 
 
 EXPORT_FIELDS = [
-    "title", "buyer", "location_text", "deadline", "notice_url",
+    "title", "buyer", "location_text", "trade_category", "deadline", "notice_url",
     "source", "region_match", "pipeline_status",
 ]
 
@@ -613,31 +637,7 @@ def export_csv():
 
 
 
-TRADE_CATEGORIES = [
-    "Commercial and office cleaning", "School and college cleaning",
-    "Domestic and communal-area cleaning", "Deep cleaning", "Industrial cleaning",
-    "Window cleaning", "Gutter cleaning", "Carpet and upholstery cleaning",
-    "End-of-tenancy cleaning", "Waste removal and clearance", "Pest control",
-    "Grounds maintenance and gardening", "Landscaping", "Tree surgery",
-    "Facilities management", "Caretaking and concierge", "Security and guarding",
-    "CCTV and access control", "Fire alarms and fire safety", "Emergency lighting",
-    "Electrical installation and repairs", "Electrical testing and inspection",
-    "Plumbing", "Heating and boilers", "Gas safety and servicing",
-    "Air conditioning and ventilation", "Renewables and solar", "Roofing and roof repairs",
-    "Roofline, fascias and soffits", "Building and general maintenance",
-    "Handyman and odd jobs", "Joinery and carpentry", "Doors and windows",
-    "Glazing", "Bricklaying and masonry", "Plastering and rendering",
-    "Painting and decorating", "Tiling", "Flooring", "Kitchens and bathrooms",
-    "Damp proofing and waterproofing", "Insulation", "Scaffolding",
-    "Groundworks and excavation", "Drainage", "Roads and paving",
-    "Driveways and patios", "Fencing and gates", "Building refurbishment",
-    "Extensions and conversions", "Demolition", "Asbestos services",
-    "Lift and escalator maintenance", "Water hygiene and legionella",
-    "Building surveying", "Architecture and design", "Structural engineering",
-    "Quantity surveying", "Construction project management", "Waste management",
-    "Laundry and linen", "Catering and food services", "Furniture and equipment",
-    "IT and telecoms", "Transport and vehicle maintenance", "Other / unclassified",
-]
+TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 LEAD_STATUSES = ["New", "Contacted", "Qualified", "Passed to trade", "Won", "Closed"]
 
 
