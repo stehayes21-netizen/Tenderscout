@@ -24,6 +24,7 @@ MIN_SCORE = 3
 SERVICES = list(collector.SERVICE_ORDER)
 STAGES = ["Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not for us"]
 SERVICE_FILTERS = dict(collector.SERVICE_LABELS)
+TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 
 _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
@@ -70,14 +71,17 @@ COLUMNS = """
     deadline TEXT, notice_url TEXT UNIQUE,
     geography_reason TEXT,
     region_match TEXT DEFAULT 'REVIEW',
+    trade_category TEXT DEFAULT 'Other / unclassified',
     saved_at TEXT,
-    pipeline_status TEXT DEFAULT 'Reviewing'
+    pipeline_status TEXT DEFAULT 'Reviewing',
+    opportunity_stage TEXT DEFAULT 'Open for bids'
 """
 # Columns added after the first release; added to older databases on start-up.
 # Older rows default to REVIEW because their location was never confirmed.
 ADDED_COLUMNS = [
     ("pipeline_status", "TEXT DEFAULT 'Reviewing'"),
     ("region_match", "TEXT DEFAULT 'REVIEW'"),
+    ("opportunity_stage", "TEXT DEFAULT 'Open for bids'"),
 ]
 
 
@@ -87,6 +91,27 @@ def ensure_schema(db):
         return
     id_column = "SERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
     db.execute(f"CREATE TABLE IF NOT EXISTS tenders (id {id_column}, {COLUMNS})")
+    if USE_POSTGRES:
+        db.execute("ALTER TABLE tenders ADD COLUMN IF NOT EXISTS trade_category TEXT DEFAULT 'Other / unclassified'")
+        db.execute("ALTER TABLE tenders ADD COLUMN IF NOT EXISTS opportunity_stage TEXT DEFAULT 'Open for bids'")
+    else:
+        existing_columns = {row[1] for row in db.execute("PRAGMA table_info(tenders)").fetchall()}
+        if "trade_category" not in existing_columns:
+            db.execute("ALTER TABLE tenders ADD COLUMN trade_category TEXT DEFAULT 'Other / unclassified'")
+        if "opportunity_stage" not in existing_columns:
+            db.execute("ALTER TABLE tenders ADD COLUMN opportunity_stage TEXT DEFAULT 'Open for bids'")
+    db.execute(f"""CREATE TABLE IF NOT EXISTS private_leads (
+        id {id_column},
+        title TEXT NOT NULL,
+        trade_category TEXT NOT NULL,
+        location_text TEXT NOT NULL,
+        source_name TEXT NOT NULL,
+        source_url TEXT,
+        contact_details TEXT,
+        details TEXT,
+        status TEXT DEFAULT 'New',
+        created_at TEXT NOT NULL
+    )""")
     if USE_POSTGRES:
         for name, ddl in ADDED_COLUMNS:
             db.execute(f"ALTER TABLE tenders ADD COLUMN IF NOT EXISTS {name} {ddl}")
@@ -200,19 +225,29 @@ def dashboard_url(view="", service=""):
 @app.route("/", methods=["GET"])
 def dashboard():
     review_view = request.args.get("view") == "review"
+    pipeline_view = request.args.get("view") == "pipeline"
+    trade = request.args.get("trade", "")
+    trade = trade if trade in TRADE_CATEGORIES else ""
     service = request.args.get("service", "")
     service = service if service in SERVICE_FILTERS else ""
-    view = "review" if review_view else ""
+    view = "review" if review_view else ("pipeline" if pipeline_view else "")
 
     db = connect_db()
     condition = (
         "region_match = 'REVIEW'" if review_view
         else "region_match IN ('LOCAL', 'MANUAL')"
     )
-    params = ()
-    if service:
+    params = []
+    if pipeline_view:
+        condition += " AND opportunity_stage = ?"
+        params.append("Planning / upcoming")
+    if trade:
+        condition += " AND trade_category = ?"
+        params.append(trade)
+    elif service:
         condition += " AND service_match = ?"
-        params = (SERVICE_FILTERS[service],)
+        params.append(SERVICE_FILTERS[service])
+    params = tuple(params)
     rows = db.execute(
         f"SELECT * FROM tenders WHERE {condition} "
         "ORDER BY score DESC, published_date DESC",
@@ -242,14 +277,15 @@ def dashboard():
           <h2>{safe(row["title"]) or "Untitled tender"}</h2>
           <p class="deadline {deadline_class}">{safe(deadline_label)}</p>
           <p><b>Buyer:</b> {safe(row["buyer"]) or "Not listed"}</p>
-          <p><b>Service:</b> {safe(row["service_match"])} · <b>Score:</b> {safe(row["score"])}</p>
+          <p><b>Trade:</b> {safe(row["trade_category"] or row["service_match"])} · <b>Score:</b> {safe(row["score"])}</p>
+          <p><b>Opportunity stage:</b> {safe(row["opportunity_stage"] or "Open for bids")}</p>
           <p><b>Location:</b> {safe(row["location_text"]) or "Needs checking"}</p>
           <p><b>Source:</b> {safe(row["source"])}</p>
           <p>{safe(row["geography_reason"])}</p>
           <form method="post" action="/tender/{int(row["id"])}/stage" class="stage">
             <input type="hidden" name="view" value="{view}">
             <input type="hidden" name="service" value="{service}">
-            <label><b>Stage:</b>
+            <label><b>Bid progress:</b>
               <select name="stage" onchange="this.form.submit()">{options}</select>
             </label>
             <noscript><button type="submit">Save</button></noscript>
@@ -267,13 +303,25 @@ def dashboard():
     if review_view:
         heading = f"{len(rows)} tenders need a location check"
         switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
+    elif pipeline_view:
+        heading = f"{len(rows)} pipeline / upcoming opportunities"
+        switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
     else:
         heading = f"{len(rows)} saved opportunities"
-        switch = f'<a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
+        switch = f'<a href="{dashboard_url("pipeline", service)}">Pipeline / upcoming</a> · <a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
 
-    filters = " · ".join(
-        f'<b>{label}</b>' if key == service else f'<a href="{dashboard_url(view, key)}">{label}</a>'
-        for key, label in [("", "All")] + list(SERVICE_FILTERS.items())
+    selected_trade = trade
+    filters = "".join(
+        f'<option value="{safe(category)}"{" selected" if category == selected_trade else ""}>{safe(category)}</option>'
+        for category in TRADE_CATEGORIES
+    )
+    filter_form = (
+        '<form method="get" action="/" style="margin:12px 0">'
+        + (f'<input type="hidden" name="view" value="{view}">' if view else '')
+        + '<label for="trade-filter"><b>Filter by trade (71 categories):</b></label> '
+        + '<select id="trade-filter" name="trade" onchange="this.form.submit()" style="max-width:100%;padding:10px;font-size:16px">'
+        + '<option value="">All trades</option>' + filters + '</select>'
+        + '<noscript><button type="submit">Apply filter</button></noscript></form>'
     )
 
     banner = ""
@@ -320,13 +368,14 @@ def dashboard():
     a{{color:#08783c}}.note{{font-size:13px}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
+    <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
     <p>Liverpool, Sefton, Wirral, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West</p>
     <form method="post" action="/refresh"
       onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
     {banner}
     <p>{heading} · {switch} · <a href="/export.csv">Export CSV</a></p>
-    <p>Show: {filters}</p>
+    {filter_form}
     <p class="note">Always verify eligibility, location, deadline and contract details
     on the official notice.</p>
     {cards}</body></html>"""
@@ -421,14 +470,16 @@ def run_refresh():
                 INSERT INTO tenders
                 (source, title, buyer, published_date, location_text,
                  service_match, score, deadline, notice_url,
-                 geography_reason, region_match, saved_at, pipeline_status)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 geography_reason, region_match, trade_category, saved_at, pipeline_status, opportunity_stage)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(notice_url) DO UPDATE SET
                     title=excluded.title, buyer=excluded.buyer,
                     score=excluded.score, deadline=excluded.deadline,
                     location_text=excluded.location_text,
                     geography_reason=excluded.geography_reason,
                     region_match=excluded.region_match,
+                    trade_category=excluded.trade_category,
+                    opportunity_stage=excluded.opportunity_stage,
                     saved_at=excluded.saved_at
                 """,
                 (
@@ -443,8 +494,10 @@ def run_refresh():
                     url,
                     match.get("geography_reason", ""),
                     region_match,
+                    match.get("trade_category", "Other / unclassified"),
                     datetime.now(timezone.utc).isoformat(),
                     "Reviewing",
+                    match.get("opportunity_stage", "Open for bids"),
                 ),
             )
             stats["local" if region_match == "LOCAL" else "review"] += 1
@@ -540,6 +593,9 @@ def add_tender():
     title = (request.form.get("title") or "").strip() or "Untitled tender"
     buyer = (request.form.get("buyer") or "").strip()
     pipeline_status = (request.form.get("pipeline_status") or "").strip() or "Reviewing"
+    opportunity_stage = (request.form.get("opportunity_stage") or "").strip() or "Open for bids"
+    if opportunity_stage not in ("Planning / upcoming", "Open for bids", "Other notice"):
+        opportunity_stage = "Open for bids"
     # Manual entries without a link get their own unique key, so they never
     # overwrite each other.
     notice_url = (request.form.get("notice_url") or "").strip() or "manual:" + uuid.uuid4().hex
@@ -552,18 +608,19 @@ def add_tender():
             INSERT INTO tenders
             (source, title, buyer, published_date, location_text,
              service_match, score, deadline, notice_url,
-             geography_reason, region_match, saved_at, pipeline_status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             geography_reason, region_match, saved_at, pipeline_status, opportunity_stage)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(notice_url) DO UPDATE SET
                 title=excluded.title,
                 buyer=excluded.buyer,
                 geography_reason=excluded.geography_reason,
                 pipeline_status=excluded.pipeline_status,
+                opportunity_stage=excluded.opportunity_stage,
                 saved_at=excluded.saved_at
             """,
             (
                 "Manual", title, buyer, now, "", "", 0, "", notice_url,
-                "Manual entry", "MANUAL", now, pipeline_status,
+                "Manual entry", "MANUAL", now, pipeline_status, opportunity_stage,
             ),
         )
         db.commit()
@@ -573,8 +630,8 @@ def add_tender():
 
 
 EXPORT_FIELDS = [
-    "title", "buyer", "location_text", "deadline", "notice_url",
-    "source", "region_match", "pipeline_status",
+    "title", "buyer", "location_text", "trade_category", "deadline", "notice_url",
+    "source", "region_match", "opportunity_stage", "pipeline_status",
 ]
 
 
@@ -597,6 +654,114 @@ def export_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=tenderscout_export.csv"},
     )
+
+
+
+TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
+LEAD_STATUSES = ["New", "Contacted", "Qualified", "Passed to trade", "Won", "Closed"]
+
+
+@app.route("/sources")
+def sources():
+    """Directory of official procurement portals and public community channels."""
+    items = [
+        ("Public-sector tenders", [
+            ("Find a Tender", "https://www.find-tender.service.gov.uk/Search", "UK government procurement notices"),
+            ("Contracts Finder", "https://www.contractsfinder.service.gov.uk/Search", "UK public-sector opportunities"),
+            ("Liverpool City Council — ProContract", "https://procontract.due-north.com/", "Liverpool Council says most of its opportunities are advertised through ProContract; some routes use other approved portals"),
+            ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
+            ("Wirral Council tender guidance", "https://www.wirral.gov.uk/business/tenders-and-contracts", "Wirral directs suppliers to The Chest"),
+        ]),
+        ("Community and private-lead channels", [
+            ("Formby Bubble Approved Trader List", "https://www.formbybubble.com/bubbleapprovedtraderlist", "Local trader directory; use as a contact/discovery source, not proof of a live job"),
+            ("Grafters Network Liverpool", "https://www.grafterssupergroups.co.uk/events/liverpoolflagship/", "Local business networking"),
+            ("Liverpool Business Forum", "https://liverpoolbusinessforum.co.uk/about-lbf/", "Local business contacts and networking"),
+            ("Facebook — Liverpool community groups", "https://www.facebook.com/search/groups/?q=Liverpool%20community", "Open group search; check each group's rules and use permitted/manual submissions"),
+            ("Facebook — Formby community groups", "https://www.facebook.com/search/groups/?q=Formby%20community", "Open group search; check each group's rules and use permitted/manual submissions"),
+            ("Nextdoor", "https://nextdoor.co.uk/", "Neighbourhood recommendations and requests; use authorised access only"),
+        ]),
+    ]
+    sections = ""
+    for heading, entries in items:
+        cards = "".join(
+            f'<li><a href="{safe(url)}" target="_blank" rel="noopener">{safe(name)}</a> — {safe(note)}</li>'
+            for name, url, note in entries
+        )
+        sections += f"<h2>{safe(heading)}</h2><ul>{cards}</ul>"
+    return Response(
+        '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Tender Scout sources</title><style>body{font:16px Arial;max-width:900px;margin:20px auto;padding:0 16px;color:#18251e}'
+        'li{margin:12px 0}a{color:#08783c}p{line-height:1.5}</style></head><body>'
+        '<h1>Council & community sources</h1><p>Public contracts and private customer leads are different opportunity types. '
+        'Council portals may require supplier registration and may not expose an open feed.</p>'
+        + sections +
+        '<p><b>Important:</b> Tender Scout does not automatically scrape Facebook, Nextdoor or gated supplier portals. '
+        'Add a private lead only when you have permission to use the information and a legitimate source link.</p>'
+        '<p><a href="/">Back to public tenders</a> · <a href="/leads">Open private leads</a></p></body></html>',
+        mimetype="text/html",
+    )
+
+
+@app.route("/leads", methods=["GET", "POST"])
+def private_leads():
+    """Separate, manually captured private customer enquiries; never mixed with tenders."""
+    db = connect_db()
+    message = ""
+    if request.method == "POST":
+        title = (request.form.get("title") or "").strip()
+        trade = (request.form.get("trade_category") or "").strip()
+        location = (request.form.get("location_text") or "").strip()
+        source_name = (request.form.get("source_name") or "").strip()
+        source_url = (request.form.get("source_url") or "").strip()
+        contact = (request.form.get("contact_details") or "").strip()
+        details = (request.form.get("details") or "").strip()
+        if not title or trade not in TRADE_CATEGORIES or not location or not source_name:
+            message = '<p style="color:#a11">Please enter a title, valid trade, location and source.</p>'
+        elif source_url and not source_url.startswith(("https://", "http://")):
+            message = '<p style="color:#a11">Source link must start with http:// or https://.</p>'
+        else:
+            db.execute(
+                "INSERT INTO private_leads (title,trade_category,location_text,source_name,source_url,contact_details,details,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (title, trade, location, source_name, source_url, contact, details, "New",
+                 datetime.now(timezone.utc).isoformat()),
+            )
+            db.commit()
+            message = '<p style="color:#08783c"><b>Private lead saved.</b></p>'
+    rows = db.execute("SELECT * FROM private_leads ORDER BY created_at DESC LIMIT 100").fetchall()
+    db.close()
+    options = "".join(f'<option value="{safe(t)}">{safe(t)}</option>' for t in TRADE_CATEGORIES)
+    cards = ""
+    for row in rows:
+        link = (f'<a href="{safe(row["source_url"])}" target="_blank" rel="noopener">Original source</a>'
+                if row["source_url"] and row["source_url"].startswith(("https://", "http://")) else "")
+        cards += (
+            f'<article><h3>{safe(row["title"])}</h3><p><b>Trade:</b> {safe(row["trade_category"])} · '
+            f'<b>Location:</b> {safe(row["location_text"])}</p><p><b>Source:</b> {safe(row["source_name"])} {link}</p>'
+            f'<p><b>Status:</b> {safe(row["status"])} · <b>Added:</b> {safe(row["created_at"][:10])}</p>'
+            f'<p>{safe(row["details"])}</p></article>'
+        )
+    if not cards:
+        cards = "<p>No private leads have been entered yet. This list is separate from public-sector tenders.</p>"
+    page = (
+        '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Tender Scout — private trade leads</title><style>body{font:16px Arial;max-width:900px;margin:20px auto;padding:0 16px;color:#18251e}'
+        'label{display:block;margin:10px 0}input,select,textarea{box-sizing:border-box;width:100%;padding:10px;font:inherit}'
+        'button{padding:12px 18px;background:#168447;color:white;border:0;border-radius:8px;font-weight:bold}'
+        'article{background:#f3f6f4;border-radius:8px;padding:12px;margin:12px 0}a{color:#08783c}</style></head><body>'
+        '<h1>Private trade leads</h1><p>Manually capture genuine customer enquiries from permitted public sources. '
+        'Do not enter private or sensitive personal information unless you have a lawful basis to do so.</p>'
+        + message +
+        '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250"></label>'
+        '<label>Trade category<select name="trade_category" required><option value="">Choose a trade</option>' + options + '</select></label>'
+        '<label>Location<input name="location_text" required maxlength="200" placeholder="e.g. Liverpool L15"></label>'
+        '<label>Source name<input name="source_name" required maxlength="200" placeholder="e.g. local community group"></label>'
+        '<label>Original source URL<input name="source_url" type="url" maxlength="1000"></label>'
+        '<label>Business contact details (only if publicly provided for this enquiry)<input name="contact_details" maxlength="500"></label>'
+        '<label>Job details<textarea name="details" rows="3" maxlength="4000"></textarea></label>'
+        '<button type="submit">Save private lead</button></form><hr><h2>Recent private leads</h2>' + cards +
+        '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></body></html>'
+    )
+    return Response(page, mimetype="text/html")
 
 
 if __name__ == "__main__":

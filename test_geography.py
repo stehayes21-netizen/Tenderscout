@@ -8,6 +8,44 @@ from unittest.mock import patch
 import tenderscout
 
 
+class DeadlineParsingTests(unittest.TestCase):
+    def test_date_only_deadline_remains_valid_through_end_of_date(self):
+        deadline = tenderscout.parse_date("2026-10-25")
+        self.assertEqual(deadline.isoformat(), "2026-10-25T23:59:59.999999+00:00")
+
+    def test_explicit_deadline_time_is_preserved(self):
+        deadline = tenderscout.parse_date("2026-10-25T12:30:00Z")
+        self.assertEqual(deadline.isoformat(), "2026-10-25T12:30:00+00:00")
+
+
+class OpportunityStageTests(unittest.TestCase):
+    def test_extract_records_identifies_planning_stage(self):
+        payload = {
+            "releases": [{
+                "id": "planning-1",
+                "ocid": "ocds-test-1",
+                "tag": ["planning"],
+                "date": "2026-10-25T10:00:00Z",
+                "tender": {"title": "Planned cleaning contract", "description": "Cleaning"},
+                "buyer": {"name": "Test Council"},
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["opportunity_stage"], "Planning / upcoming")
+
+    def test_dedupe_prefers_open_tender_over_planning_for_same_process(self):
+        rows = [
+            {"ocid": "ocds-test-2", "title": "Cleaning", "buyer": "Council",
+             "opportunity_stage": "Planning / upcoming"},
+            {"ocid": "ocds-test-2", "title": "Cleaning", "buyer": "Council",
+             "opportunity_stage": "Open for bids"},
+        ]
+        result = tenderscout.dedupe(rows)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["opportunity_stage"], "Open for bids")
+
+
 class GeographyClassifierTests(unittest.TestCase):
     def test_confirmed_liverpool_location_is_local(self):
         record = {"location_text": "Liverpool"}
@@ -208,6 +246,44 @@ class PostcodeAreaTests(unittest.TestCase):
         self.assertEqual(tenderscout.classify_geography(record, "UK wide")[0], "UK-wide search")
 
 
+class PostcodeCoverageTests(unittest.TestCase):
+    def classify(self, location_text):
+        return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
+
+    def test_relevant_postcode_areas_are_confirmed_local(self):
+        # Representative postcode districts across the full agreed service area:
+        # Liverpool, Sefton, Wirral, St Helens, Halton, Knowsley, Warrington,
+        # Wigan, West Lancashire and Cheshire West/Chester.
+        for postcode in (
+            "L1 1AA", "L20 1AA", "PR8 1AA", "CH41 1AA", "CH63 1AA",
+            "WA9 1AA", "WA7 1AA", "L32 1AA", "WA1 1AA", "WN1 1AA",
+            "L39 1AA", "WN8 1AA", "CH1 1AA", "CH64 1AA", "CW9 1AA",
+        ):
+            with self.subTest(postcode=postcode):
+                self.assertEqual(self.classify(postcode), "LOCAL")
+
+    def test_postcodes_outside_the_service_area_are_not_local(self):
+        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA"):
+            with self.subTest(postcode=postcode):
+                self.assertEqual(self.classify(postcode), "OUT_OF_AREA")
+
+    def test_explicit_english_regions_outside_target_area_are_rejected(self):
+        for region in (
+            "East Midlands, United Kingdom",
+            "South East, United Kingdom",
+            "West Midlands, United Kingdom",
+            "Yorkshire and the Humber, United Kingdom",
+            "East of England, United Kingdom",
+            "North East, United Kingdom",
+            "South West, United Kingdom",
+        ):
+            with self.subTest(region=region):
+                self.assertEqual(self.classify(region), "OUT_OF_AREA")
+
+    def test_borderline_postcode_is_sent_for_review(self):
+        self.assertEqual(self.classify("CH4 1AA"), "REVIEW")
+
+
 class RegionCodeAndCommunityTests(unittest.TestCase):
     def classify(self, location_text):
         return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
@@ -301,10 +377,26 @@ class OverlapAndTradeTests(unittest.TestCase):
                 self.assertEqual(result["service_match"], label)
 
     def test_unrelated_tenders_are_ignored(self):
-        for title in ("Supply of laptops", "Software licences", "Catering services",
+        for title in ("Supply of laptops", "Software licences",
                       "Legal advice framework"):
             with self.subTest(title=title):
                 self.assertIsNone(self.score(title))
+
+    def test_all_trades_are_in_scope_by_default(self):
+        for title, expected in (
+            ("Catering services", "Catering and food services"),
+            ("Roofing and roof repairs", "Roofing and roof repairs"),
+            ("IT and telecoms support", "IT and telecoms"),
+            ("Arboricultural services - tree planting and maintenance", "Tree surgery"),
+            ("RA360690 - Boiler Inspection", "Heating and boilers"),
+            ("Provision of Mechanical and Electrical Services", "Electrical installation and repairs"),
+            ("PA Unadopted Highways hard surface repairs", "Roads and paving"),
+            ("Provision of Project Management & Cost Consultant Services", "Construction project management"),
+        ):
+            with self.subTest(title=title):
+                result = self.score(title)
+                self.assertIsNotNone(result)
+                self.assertEqual(result["trade_category"], expected)
 
     def test_a_trade_can_be_switched_off(self):
         self.assertIsNone(self.score("Building refurbishment", services=["cleaning", "fm"]))

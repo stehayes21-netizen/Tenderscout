@@ -43,8 +43,28 @@ class AppTestCase(unittest.TestCase):
 
     def refresh_with(self, records):
         collector = self.app_module.collector
-        with patch.object(collector, "fetch_fts", return_value=records), \
-             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+        # Patch the executor as well as the feeds: the production refresh uses
+        # worker threads, while tests should execute these deterministic fixtures
+        # synchronously and avoid thread/mocking interactions.
+        class InlineFuture:
+            def __init__(self, fn, args, kwargs):
+                self.value = fn(*args, **kwargs)
+            def result(self):
+                return self.value
+
+        class InlineExecutor:
+            def __init__(self, *args, **kwargs):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def submit(self, fn, *args, **kwargs):
+                return InlineFuture(fn, args, kwargs)
+
+        with patch.object(self.app_module, "ThreadPoolExecutor", InlineExecutor), \
+             patch.object(collector, "fetch_fts", side_effect=lambda *args, **kwargs: records), \
+             patch.object(collector, "fetch_contracts_finder", side_effect=lambda *args, **kwargs: []):
             return self.client.post("/refresh", follow_redirects=True)
 
 
@@ -66,6 +86,43 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(exported.status_code, 200)
         self.assertIn(b"Test cleaning contract", exported.data)
 
+    def test_pipeline_view_only_shows_upcoming_pipeline_opportunities(self):
+        self.client.post("/add", data={
+            "title": "Planned cleaning contract", "buyer": "Council",
+            "notice_url": "https://example.com/pipeline",
+            "pipeline_status": "Reviewing",
+            "opportunity_stage": "Planning / upcoming",
+        })
+        self.client.post("/add", data={
+            "title": "Live cleaning tender", "buyer": "Council",
+            "notice_url": "https://example.com/live",
+            "pipeline_status": "Bidding",
+        })
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Commercial and office cleaning", "https://example.com/pipeline"),
+        )
+        db.execute(
+            "UPDATE tenders SET opportunity_stage = ? WHERE notice_url = ?",
+            ("Planning / upcoming", "https://example.com/pipeline"),
+        )
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Commercial and office cleaning", "https://example.com/live"),
+        )
+        db.commit()
+        db.close()
+        pipeline = self.client.get("/?view=pipeline")
+        self.assertEqual(pipeline.status_code, 200)
+        self.assertIn(b"Planned cleaning contract", pipeline.data)
+        self.assertNotIn(b"Live cleaning tender", pipeline.data)
+        self.assertIn(b"Reviewing", pipeline.data)
+        filtered = self.client.get("/?view=pipeline&trade=Commercial%20and%20office%20cleaning")
+        self.assertEqual(filtered.status_code, 200)
+        self.assertIn(b"Planned cleaning contract", filtered.data)
+        self.assertNotIn(b"Live cleaning tender", filtered.data)
+
     def test_manual_entries_without_a_link_do_not_overwrite_each_other(self):
         for title in ("First entry", "Second entry"):
             self.client.post("/add", data={"title": title})
@@ -77,6 +134,82 @@ class AppSmokeTest(AppTestCase):
         r = self.client.get("/health")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.get_json(), {"status": "ok", "database": "sqlite"})
+
+
+    def test_source_directory_lists_council_and_community_sources(self):
+        r = self.client.get("/sources")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"ProContract", r.data)
+        self.assertIn(b"The Chest", r.data)
+        self.assertIn(b"Formby Bubble", r.data)
+        self.assertIn(b"does not automatically scrape Facebook", r.data)
+
+    def test_private_lead_is_saved_separately_from_public_tenders(self):
+        r = self.client.post("/leads", data={
+            "title": "Repair leaking roof",
+            "trade_category": "Roofing and roof repairs",
+            "location_text": "Liverpool L15",
+            "source_name": "Community group",
+            "source_url": "https://example.com/request",
+            "details": "Customer requests a roof inspection",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Private lead saved", r.data)
+        self.assertIn(b"Repair leaking roof", r.data)
+        self.assertNotIn(b"Repair leaking roof", self.client.get("/").data)
+
+    def test_private_lead_rejects_unknown_trade_category(self):
+        r = self.client.post("/leads", data={
+            "title": "Job", "trade_category": "Not a real category",
+            "location_text": "Liverpool", "source_name": "Community group",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn(b"Private lead saved", r.data)
+        self.assertIn(b"valid trade", r.data)
+
+
+    def test_trade_taxonomy_has_71_categories_and_classifies_roofing(self):
+        import tenderscout
+        self.assertEqual(len(tenderscout.TRADE_CATEGORIES), 71)
+        self.assertEqual(
+            tenderscout.classify_trade_category("Roofing and roof repairs"),
+            "Roofing and roof repairs",
+        )
+
+    def test_public_tenders_can_be_filtered_by_detailed_trade(self):
+        # Isolate the dashboard filter from feed-fetching behavior: seed two
+        # valid local records, then verify only the selected detailed trade shows.
+        self.client.post("/add", data={
+            "title": "Roofing and roof repairs", "buyer": "Test buyer",
+            "notice_url": "https://example.com/roof",
+        })
+        self.client.post("/add", data={
+            "title": "Office cleaning", "buyer": "Test buyer",
+            "notice_url": "https://example.com/clean",
+        })
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Roofing and roof repairs", "https://example.com/roof"),
+        )
+        db.execute(
+            "UPDATE tenders SET trade_category = ? WHERE notice_url = ?",
+            ("Commercial and office cleaning", "https://example.com/clean"),
+        )
+        db.commit()
+        db.close()
+
+        page = self.client.get("/?trade=Roofing%20and%20roof%20repairs").data
+        self.assertIn(b"example.com/roof", page)
+        self.assertNotIn(b"example.com/clean", page)
+        self.assertIn(b"Filter by trade (71 categories)", page)
+
+    def test_private_lead_trade_selector_uses_shared_71_category_list(self):
+        import tenderscout
+        page = self.client.get("/leads").data
+        self.assertEqual(len(tenderscout.TRADE_CATEGORIES), 71)
+        self.assertIn(b"Rope access and specialist access", page)
+        self.assertIn(b"Environmental services", page)
 
 
 class RefreshTests(AppTestCase):
@@ -223,9 +356,14 @@ class DashboardFeatureTests(AppTestCase):
 
 class RefreshSummaryTests(AppTestCase):
     def test_refresh_returns_to_the_dashboard_with_a_summary(self):
-        r = self.client.post("/refresh")
-        self.assertEqual(r.status_code, 502)  # nothing fetched: not shown as success
         collector = self.app_module.collector
+        # Keep this test deterministic and offline: empty mocked feeds must
+        # produce a failure response rather than a false "zero tenders" success.
+        with patch.object(collector, "fetch_fts", return_value=[]), \
+             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+            r = self.client.post("/refresh")
+        self.assertEqual(r.status_code, 502)
+        self.assertIn(b"does not mean there are no tenders", r.data)
         records = [
             feed_record("liv", "Liverpool L2 2DH"),
             feed_record("edi", "Edinburgh EH1 1AA"),

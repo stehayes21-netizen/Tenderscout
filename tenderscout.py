@@ -37,6 +37,124 @@ from pathlib import Path
 FTS_URL = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages"
 CF_URL = "https://www.contractsfinder.service.gov.uk/Published/Notices/OCDS/Search"
 
+# Detailed selectable trade taxonomy shared by public tenders and private leads.
+TRADE_CATEGORIES = [
+    "Commercial and office cleaning", "School and college cleaning",
+    "Domestic and communal-area cleaning", "Deep cleaning", "Industrial cleaning",
+    "Window cleaning", "Gutter cleaning", "Carpet and upholstery cleaning",
+    "End-of-tenancy cleaning", "Waste removal and clearance", "Pest control",
+    "Grounds maintenance and gardening", "Landscaping", "Tree surgery",
+    "Facilities management", "Caretaking and concierge", "Security and guarding",
+    "CCTV and access control", "Fire alarms and fire safety", "Emergency lighting",
+    "Electrical installation and repairs", "Electrical testing and inspection",
+    "Plumbing", "Heating and boilers", "Gas safety and servicing",
+    "Air conditioning and ventilation", "Renewables and solar", "Roofing and roof repairs",
+    "Roofline, fascias and soffits", "Building and general maintenance",
+    "Handyman and odd jobs", "Joinery and carpentry", "Doors and windows",
+    "Glazing", "Bricklaying and masonry", "Plastering and rendering",
+    "Painting and decorating", "Tiling", "Flooring", "Kitchens and bathrooms",
+    "Damp proofing and waterproofing", "Insulation", "Scaffolding",
+    "Groundworks and excavation", "Drainage", "Roads and paving",
+    "Driveways and patios", "Fencing and gates", "Building refurbishment",
+    "Extensions and conversions", "Demolition", "Asbestos services",
+    "Lift and escalator maintenance", "Water hygiene and legionella",
+    "Building surveying", "Architecture and design", "Structural engineering",
+    "Quantity surveying", "Construction project management", "Waste management",
+    "Laundry and linen", "Catering and food services", "Furniture and equipment",
+    "IT and telecoms", "Transport and vehicle maintenance", "Water and fire damage restoration",
+    "Interior design", "Signage and sign making", "Rope access and specialist access",
+    "Environmental services", "Other / unclassified",
+]
+assert len(TRADE_CATEGORIES) == 71
+
+TRADE_KEYWORDS = {
+    "Commercial and office cleaning": ["commercial cleaning", "office cleaning", "contract cleaning"],
+    "School and college cleaning": ["school cleaning", "college cleaning", "education cleaning"],
+    "Domestic and communal-area cleaning": ["communal cleaning", "domestic cleaning", "housing cleaning"],
+    "Deep cleaning": ["deep clean", "deep cleaning", "specialist cleaning"],
+    "Industrial cleaning": ["industrial cleaning", "factory cleaning", "industrial hygiene"],
+    "Window cleaning": ["window cleaning", "glass cleaning"],
+    "Gutter cleaning": ["gutter cleaning", "gutter clearance"],
+    "Carpet and upholstery cleaning": ["carpet cleaning", "upholstery cleaning"],
+    "End-of-tenancy cleaning": ["end of tenancy", "end-of-tenancy", "void cleaning"],
+    "Waste removal and clearance": ["waste removal", "rubbish clearance", "house clearance"],
+    "Pest control": ["pest control", "vermin control", "rodent control"],
+    "Grounds maintenance and gardening": ["grounds maintenance", "garden maintenance", "grass cutting"],
+    "Landscaping": ["landscaping", "landscape works"],
+    "Tree surgery": ["tree surgery", "arboriculture", "arboricultural", "tree works", "tree maintenance", "tree planting", "tree pruning", "tree felling"],
+    "Facilities management": ["facilities management", "facility management", "hard fm", "soft fm"],
+    "Caretaking and concierge": ["caretaking", "caretaker", "concierge"],
+    "Security and guarding": ["security guarding", "manned guarding", "security services"],
+    "CCTV and access control": ["cctv", "access control", "intruder alarm"],
+    "Fire alarms and fire safety": ["fire alarm", "fire safety", "fire detection"],
+    "Emergency lighting": ["emergency lighting"],
+    "Electrical installation and repairs": ["electrical installation", "electrical repairs", "electrician", "mechanical and electrical", "mechanical & electrical", "m&e services", "m and e services"],
+    "Electrical testing and inspection": ["electrical testing", "fixed wire testing", "eicr"],
+    "Plumbing": ["plumbing", "plumber", "drain tap"],
+    "Heating and boilers": ["boiler servicing", "boiler inspection", "boiler maintenance", "boiler replacement", "heating maintenance", "heating system", "biomass boiler"],
+    "Gas safety and servicing": ["gas safety", "gas servicing", "gas certificate"],
+    "Air conditioning and ventilation": ["air conditioning", "ventilation", "hvac"],
+    "Renewables and solar": ["solar pv", "solar panel", "renewable energy", "heat pump"],
+    "Roofing and roof repairs": ["roofing", "roof repair", "roof replacement"],
+    "Roofline, fascias and soffits": ["fascias", "soffits", "roofline"],
+    "Building and general maintenance": ["building maintenance", "property maintenance", "responsive repairs", "facility maintenance", "facilities maintenance", "estate maintenance", "tenancy repairs"],
+    "Handyman and odd jobs": ["handyman", "minor repairs", "odd jobs"],
+    "Joinery and carpentry": ["joinery", "carpentry", "carpenter"],
+    "Doors and windows": ["door repairs", "window repairs", "window replacement"],
+    "Glazing": ["glazing", "double glazing", "glass replacement"],
+    "Bricklaying and masonry": ["bricklaying", "masonry", "repointing"],
+    "Plastering and rendering": ["plastering", "rendering", "plasterer"],
+    "Painting and decorating": ["painting and decorating", "decorating", "external decoration"],
+    "Tiling": ["tiling", "tiler", "wall and floor tiles"],
+    "Flooring": ["flooring", "floor coverings", "vinyl flooring"],
+    "Kitchens and bathrooms": ["kitchen installation", "bathroom installation", "kitchen refurbishment"],
+    "Damp proofing and waterproofing": ["damp proofing", "waterproofing", "rising damp"],
+    "Insulation": ["insulation", "loft insulation", "cavity wall insulation"],
+    "Scaffolding": ["scaffolding", "scaffold hire"],
+    "Groundworks and excavation": ["groundworks", "excavation", "earthworks"],
+    "Drainage": ["drainage", "drain clearance", "sewer repair"],
+    "Roads and paving": ["road resurfacing", "road repairs", "highway maintenance", "unadopted highways", "highway repairs", "hard surface repairs", "pavement repairs"],
+    "Driveways and patios": ["driveway", "patio installation", "block paving"],
+    "Fencing and gates": ["fencing", "gates installation", "boundary fencing"],
+    "Building refurbishment": ["refurbishment", "building refurbishment", "property refurbishment"],
+    "Extensions and conversions": ["building extension", "property conversion", "loft conversion"],
+    "Demolition": ["demolition", "dismantling works"],
+    "Asbestos services": ["asbestos removal", "asbestos survey", "asbestos management"],
+    "Lift and escalator maintenance": ["lift maintenance", "elevator maintenance", "escalator"],
+    "Water hygiene and legionella": ["legionella", "water hygiene", "water testing"],
+    "Building surveying": ["building survey", "building surveying", "condition survey"],
+    "Architecture and design": ["architectural services", "architectural design"],
+    "Structural engineering": ["structural engineering", "structural survey"],
+    "Quantity surveying": ["quantity surveying", "cost consultancy"],
+    "Construction project management": ["construction project management", "project management construction", "project management and cost consultant", "project management & cost consultant"],
+    "Waste management": ["waste management", "recycling services", "waste collection"],
+    "Laundry and linen": ["laundry services", "linen services", "laundry and linen"],
+    "Catering and food services": ["catering services", "food services", "school meals"],
+    "Furniture and equipment": ["furniture supply", "furniture installation", "equipment supply"],
+    "IT and telecoms": ["information technology", "telecommunications", "network infrastructure", "it and telecoms", "it support", "telecoms support"],
+    "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "transport services"],
+    "Water and fire damage restoration": ["water damage restoration", "fire damage restoration", "flood restoration"],
+    "Interior design": ["interior design", "interior fit out design"],
+    "Signage and sign making": ["signage", "sign making", "wayfinding signs"],
+    "Rope access and specialist access": ["rope access", "industrial abseiling", "specialist access"],
+    "Environmental services": ["environmental services", "environmental remediation", "contaminated land"],
+    "Other / unclassified": [],
+}
+
+def classify_trade_category(fulltext):
+    """Return the best detailed category; leave unmatched opportunities unclassified."""
+    text = (fulltext or "").lower()
+    matches = []
+    for category, terms in TRADE_KEYWORDS.items():
+        for term in terms:
+            if term in text:
+                matches.append((len(term), category))
+    if matches:
+        matches.sort(reverse=True)
+        return matches[0][1]
+    return "Other / unclassified"
+
+
 CLEANING_TERMS = [
     "cleaning", "deep clean", "window cleaning", "carpet cleaning",
     "washroom", "janitorial", "hygiene services", "sanitary",
@@ -182,6 +300,11 @@ OUT_OF_AREA_TERMS = [
     "lancaster", "cumbria", "barrow-in-furness", "northumberland", "chorley",
     "leeds", "sheffield", "nottingham", "london", "birmingham", "bristol",
     "cardiff", "newcastle", "oxford", "cambridge", "wales", "northern ireland",
+    # Regional labels in procurement feeds are useful when no postcode is supplied.
+    # These are outside the configured target area and must not sit in its review queue.
+    "east midlands", "west midlands", "east of england", "south east",
+    "south west", "yorkshire and the humber", "north east",
+    "north east england", "south east england", "south west england",
     "belfast", "flintshire", "wrexham",
     "scotland", "scottish", "glasgow", "edinburgh", "aberdeen", "dundee",
     "inverness", "perth", "stirling", "falkirk", "paisley", "ayr",
@@ -214,7 +337,7 @@ def nuts_codes(text):
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
     "service_match", "region_match", "geography_reason", "estimated_value_gbp",
-    "deadline", "status", "score", "score_reasons", "notice_url", "ocid",
+    "deadline", "status", "opportunity_stage", "score", "score_reasons", "notice_url", "ocid",
 ]
 
 EXPLICIT_LOCATION_KEYS = (
@@ -298,10 +421,16 @@ def parse_date(value):
     if not value:
         return None
     try:
-        value = str(value).replace("Z", "+00:00")
-        dt = datetime.fromisoformat(value)
+        raw = str(value).strip()
+        # Procurement feeds sometimes publish a deadline as a date with no time.
+        # Treat that date as inclusive through the end of the day; interpreting
+        # YYYY-MM-DD as midnight would wrongly expire it at the start of that day.
+        date_only = bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw))
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        if date_only:
+            dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
         return dt
     except (ValueError, TypeError):
         return None
@@ -407,8 +536,20 @@ def extract_records(payload, source):
             ):
                 add_location_values(candidate, location_parts)
 
+            raw_tags = rel.get("tag") or rel.get("tags") or []
+            if isinstance(raw_tags, str):
+                raw_tags = [raw_tags]
+            tag_text = " ".join(as_text(tag) for tag in raw_tags).lower()
+            if "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
+                opportunity_stage = "Planning / upcoming"
+            elif "tender" in tag_text:
+                opportunity_stage = "Open for bids"
+            else:
+                opportunity_stage = "Open for bids" if (tender.get("tenderPeriod") or tender.get("tender_period")) else "Other notice"
+
             output.append({
                 "source": source,
+                "opportunity_stage": opportunity_stage,
                 "location_text": ", ".join(dict.fromkeys(location_parts)),
                 "published_date": as_text(published),
                 "title": title.strip(),
@@ -537,7 +678,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             break
         stats["windows"] += 1
         params = {
-            "stages": "tender", "limit": "100",
+            "stages": "planning,tender", "limit": "100",
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
@@ -722,10 +863,17 @@ def score_record(record, services, region, min_value, max_value):
     }
     exclude_hits = keyword_hits(fulltext, EXCLUDE_TERMS)
     matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
-    if not matched:
+    detailed_category = classify_trade_category(fulltext)
+    # The default scope now covers the full detailed trade taxonomy. Keep
+    # backwards compatibility for callers explicitly selecting a subset of the
+    # legacy service groups: those switches must still exclude disabled groups.
+    all_legacy_groups_enabled = all(group in services for group in SERVICE_ORDER)
+    if not matched and (not all_legacy_groups_enabled or detailed_category == "Other / unclassified"):
         return None
-    service = SERVICE_LABELS[matched[0]]
+    service = SERVICE_LABELS[matched[0]] if matched else detailed_category
     service_hits = [term for t in matched for term in trade_hits[t]]
+    if not service_hits and detailed_category != "Other / unclassified":
+        service_hits = [detailed_category]
 
     score, reasons = 3, []
     reasons.append("service keywords: " + ", ".join(dict.fromkeys(service_hits))[:80])
@@ -777,6 +925,7 @@ def score_record(record, services, region, min_value, max_value):
 
     record.update({
         "service_match": service,
+        "trade_category": detailed_category,
         "score": score,
         "score_reasons": "; ".join(reasons),
         "status": deadline_status,
@@ -785,17 +934,21 @@ def score_record(record, services, region, min_value, max_value):
 
 
 def dedupe(records):
-    seen = set()
-    result = []
+    """Deduplicate procurement processes, preferring the most actionable stage."""
+    priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
+    by_key = {}
     for row in records:
-        key = row.get("ocid") or (row.get("title", "").lower(), row.get("buyer", "").lower())
-        if not key or key == "":
-            key = (row.get("title", "").lower(), row.get("buyer", "").lower(), row.get("published_date", ""))
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(row)
-    return result
+        key = row.get("ocid") or (
+            row.get("title", "").lower(), row.get("buyer", "").lower(),
+            row.get("published_date", ""),
+        )
+        if not key:
+            key = (row.get("title", "").lower(), row.get("buyer", "").lower(),
+                   row.get("published_date", ""))
+        current = by_key.get(key)
+        if current is None or priority.get(row.get("opportunity_stage"), 0) > priority.get(current.get("opportunity_stage"), 0):
+            by_key[key] = row
+    return list(by_key.values())
 
 
 def write_csv(path, rows):
@@ -830,14 +983,22 @@ def main():
 
     filtered = []
     review_rows = []
+    rejected_by_scoring = 0
+    scored_geography_counts = {}
+    scored_trade_counts = {}
     for row in all_rows:
         scored = score_record(row, args.services, args.region, args.min_value, args.max_value)
         if not scored:
+            rejected_by_scoring += 1
             continue
-        if normalise_region(args.region) == TARGET_AREA_LABEL and scored.get("region_match") == "REVIEW":
+        geo = scored.get("region_match", "NOT SCORED")
+        scored_geography_counts[geo] = scored_geography_counts.get(geo, 0) + 1
+        trade = scored.get("trade_category") or scored.get("service_match") or "NO TRADE MATCH"
+        scored_trade_counts[trade] = scored_trade_counts.get(trade, 0) + 1
+        if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
             review_rows.append(scored)
             continue
-        if scored.get("region_match") == "LOCAL" and scored["score"] >= args.min_score:
+        if geo == "LOCAL" and scored["score"] >= args.min_score:
             filtered.append(scored)
     filtered.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
     review_rows.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
@@ -850,6 +1011,50 @@ def main():
     write_csv(review_path, review_rows)
 
     print(f"Fetched/deduplicated notices: {len(all_rows)}")
+    stage_counts = {}
+    for row in all_rows:
+        stage = row.get("opportunity_stage", "Other notice")
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+    print("Opportunity stages: " + ", ".join(f"{stage}={count}" for stage, count in sorted(stage_counts.items())))
+    geography_counts = {}
+    trade_counts = {}
+    for row in all_rows:
+        # Score only matched trades for the main list, but independently audit
+        # the geography and taxonomy of every raw notice. This separates a
+        # thin local feed from trade-keyword gaps and avoids reporting every
+        # unscored notice as "NOT SCORED".
+        geo, _ = classify_geography(row, args.region)
+        geography_counts[geo] = geography_counts.get(geo, 0) + 1
+        fulltext = " ".join((row.get(field, "") or "") for field in ("title", "description", "buyer"))
+        trade = classify_trade_category(fulltext)
+        trade_counts[trade] = trade_counts.get(trade, 0) + 1
+    print("Raw geography classification (all notices): " + ", ".join(f"{key}={count}" for key, count in sorted(geography_counts.items())))
+    print("Raw trade taxonomy (all notices): " + ", ".join(f"{key}={count}" for key, count in sorted(trade_counts.items(), key=lambda item: (-item[1], item[0]))[:15]))
+    local_trade_counts = {}
+    review_trade_counts = {}
+    for row in all_rows:
+        geo, _ = classify_geography(row, args.region)
+        fulltext = " ".join((row.get(field, "") or "") for field in ("title", "description", "buyer"))
+        trade = classify_trade_category(fulltext)
+        if geo == "LOCAL":
+            local_trade_counts[trade] = local_trade_counts.get(trade, 0) + 1
+        elif geo == "REVIEW":
+            review_trade_counts[trade] = review_trade_counts.get(trade, 0) + 1
+    print("Trade taxonomy in confirmed local notices: " + (", ".join(f"{key}={count}" for key, count in sorted(local_trade_counts.items(), key=lambda item: (-item[1], item[0]))) or "none"))
+    print("Trade taxonomy in location-review notices: " + ", ".join(f"{key}={count}" for key, count in sorted(review_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:15]))
+    deadline_counts = {"future": 0, "expired": 0, "missing_or_unparsed": 0}
+    for row in all_rows:
+        deadline = parse_date(row.get("deadline"))
+        if deadline is None:
+            deadline_counts["missing_or_unparsed"] += 1
+        elif deadline < datetime.now(timezone.utc):
+            deadline_counts["expired"] += 1
+        else:
+            deadline_counts["future"] += 1
+    print("Raw deadline health (all notices): " + ", ".join(f"{key}={count}" for key, count in deadline_counts.items()))
+    print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
+    print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
+    print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
