@@ -174,9 +174,21 @@ class PostcodeAreaTests(unittest.TestCase):
         # "Canterbury" contains "bury"; it must not be treated as Bury.
         self.assertEqual(self.classify("Canterbury"), "REVIEW")
 
-    def test_postcode_in_title_only_is_review(self):
+    def test_full_postcode_in_notice_text_is_local(self):
         record = {"location_text": "", "title": "Cleaning at Civic Centre WA7 2PQ", "description": ""}
-        self.assertEqual(tenderscout.classify_geography(record, "Target area")[0], "REVIEW")
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "LOCAL")
+        self.assertIn("notice text", reason)
+
+    def test_notice_text_postcode_is_not_trusted_when_text_points_elsewhere(self):
+        for description in (
+            "Sites in Runcorn WA7 2PQ and Edinburgh EH1 1AA",
+            "Sites at WA7 2PQ and across Scotland",
+            "Sites at WA7 2PQ and Rainhill L35 5AB",
+        ):
+            with self.subTest(description=description):
+                record = {"location_text": "", "title": "Cleaning", "description": description}
+                self.assertEqual(tenderscout.classify_geography(record, "Target area")[0], "REVIEW")
 
     def test_north_west_is_still_accepted_as_an_alias(self):
         record = {"location_text": "Birkenhead CH41 6AB"}
@@ -185,6 +197,55 @@ class PostcodeAreaTests(unittest.TestCase):
     def test_uk_wide_skips_the_area_filter(self):
         record = {"location_text": "Edinburgh EH1 1AA"}
         self.assertEqual(tenderscout.classify_geography(record, "UK wide")[0], "UK-wide search")
+
+
+class RegionCodeAndCommunityTests(unittest.TestCase):
+    def classify(self, location_text):
+        return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
+
+    def test_liverpool_sefton_wirral_region_codes_are_local(self):
+        for code in ("UKD72", "UKD73", "UKD74", "ukd72"):
+            with self.subTest(code=code):
+                self.assertEqual(self.classify(code), "LOCAL")
+
+    def test_east_merseyside_alone_needs_checking_because_it_includes_knowsley(self):
+        self.assertEqual(self.classify("UKD71"), "REVIEW")
+
+    def test_east_merseyside_with_a_target_place_is_local(self):
+        self.assertEqual(self.classify("UKD71 St Helens"), "LOCAL")
+        self.assertEqual(self.classify("UKD71 Runcorn"), "LOCAL")
+        self.assertEqual(self.classify("UKD71 WA10 1AA"), "LOCAL")
+
+    def test_east_merseyside_with_knowsley_needs_checking(self):
+        self.assertEqual(self.classify("UKD71 Knowsley"), "REVIEW")
+
+    def test_region_codes_for_other_areas_are_out_of_area(self):
+        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD61", "UKD63", "UKC11"):
+            with self.subTest(code=code):
+                self.assertEqual(self.classify(code), "OUT_OF_AREA")
+
+    def test_region_codes_do_not_match_ordinary_words(self):
+        for text in ("UKAS accredited", "UKHSA site", "UKCA marked", "UKRI funded"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "REVIEW")
+
+    def test_local_neighbourhoods_are_recognised(self):
+        for place in ("Wavertree", "Aigburth", "Ainsdale", "Hoylake", "West Kirby", "Bebington",
+                      "Rainford", "Newton-le-Willows", "Daresbury", "Widnes", "Port Sunlight"):
+            with self.subTest(place=place):
+                self.assertEqual(self.classify(place), "LOCAL")
+
+    def test_names_shared_with_other_places_need_checking(self):
+        for place in ("Woolton Hill", "Garston", "Halton", "Walton", "Sutton"):
+            with self.subTest(place=place):
+                self.assertEqual(self.classify(place), "REVIEW")
+
+    def test_ambiguous_name_is_confirmed_by_a_postcode(self):
+        self.assertEqual(self.classify("Woolton, Liverpool L25 7TA"), "LOCAL")
+        self.assertEqual(self.classify("Halton Borough Council, Runcorn WA7 2PQ"), "LOCAL")
+
+    def test_liverpool_street_london_is_not_liverpool(self):
+        self.assertEqual(self.classify("Liverpool Street, London"), "REVIEW")
 
 
 if __name__ == "__main__":

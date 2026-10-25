@@ -80,14 +80,34 @@ LOCAL_POSTCODE_DISTRICTS = {
 REVIEW_POSTCODE_DISTRICTS = {"L35", "CH64"}
 
 LOCAL_PLACE_TERMS = [
-    "liverpool",
-    "sefton", "southport", "formby", "crosby", "bootle", "litherland",
-    "maghull", "netherton", "ainsdale", "birkdale", "aintree",
-    "wirral", "birkenhead", "wallasey", "heswall", "bromborough",
-    "new brighton", "bebington", "hoylake", "west kirby",
+    # Liverpool
+    "liverpool", "wavertree", "aigburth", "childwall", "croxteth", "fazakerley",
+    "norris green", "tuebrook", "old swan", "gateacre", "speke", "toxteth",
+    "anfield", "west derby", "mossley hill", "sefton park", "cressington",
+    # Sefton
+    "sefton", "southport", "formby", "crosby", "great crosby", "blundellsands",
+    "bootle", "litherland", "seaforth", "maghull", "lydiate", "melling",
+    "netherton", "ainsdale", "birkdale", "aintree", "hightown", "churchtown",
+    # Wirral
+    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
+    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
+    "tranmere", "seacombe", "egremont", "leasowe", "meols", "bidston",
+    "port sunlight", "eastham", "clatterbridge", "pensby", "greasby", "irby",
+    "thingwall", "noctorum", "claughton",
+    # St Helens
     "st helens", "saint helens", "rainhill", "haydock", "newton-le-willows",
-    "billinge", "thatto hector",
-    "halton", "runcorn", "widnes",
+    "earlestown", "billinge", "rainford", "thatto hector", "clock face",
+    "garswood", "windle",
+    # Halton
+    "halton borough", "borough of halton", "halton council", "runcorn", "widnes",
+    "daresbury", "preston brook", "murdishaw", "castlefields", "palacefields",
+    "weston point", "halton brook",
+]
+# Names that also exist in other parts of the UK. On their own they only send a
+# tender to the review list; a postcode or a clear place name must confirm them.
+AMBIGUOUS_PLACE_TERMS = [
+    "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
+    "eccleston", "halton", "orrell", "thornton", "sutton",
 ]
 # Too broad to confirm the target area on their own.
 WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire", "neston"]
@@ -95,6 +115,7 @@ WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire", "neston
 # deliberately excluded, and everything in Scotland).
 OUT_OF_AREA_TERMS = [
     "knowsley", "kirkby", "huyton", "prescot", "whiston", "halewood",
+    "liverpool street",
     "ormskirk", "skelmersdale", "ellesmere port", "warrington", "wigan",
     "chester", "northwich", "crewe",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
@@ -112,6 +133,19 @@ OUT_OF_AREA_TERMS = [
 
 FULL_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b")
 DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
+
+# Find a Tender and Contracts Finder often give the region as a NUTS code instead
+# of a postcode. UKD72 Liverpool, UKD73 Sefton and UKD74 Wirral are in the target
+# area. UKD71 (East Merseyside) also covers Knowsley, which is excluded, so it
+# needs a postcode or place name to confirm. Every other UK code is outside.
+NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
+LOCAL_NUTS = {"UKD72", "UKD73", "UKD74"}
+REVIEW_NUTS = {"UKD", "UKD7", "UKD71"}
+
+
+def nuts_codes(text):
+    return {"UK" + m.group(1) + m.group(2) for m in NUTS_RE.finditer(text.upper())}
+
 
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
@@ -449,9 +483,15 @@ def classify_geography(record, region):
     pc_other = sorted(d for d in full if d not in LOCAL_POSTCODE_DISTRICTS
                       and d not in REVIEW_POSTCODE_DISTRICTS)
 
-    strong_local = pc_local + place_hits(location_text, LOCAL_PLACE_TERMS)
-    strong_out = pc_other + place_hits(location_text, OUT_OF_AREA_TERMS)
-    weak = pc_review + place_hits(location_text, WEAK_AREA_TERMS)
+    nuts = nuts_codes(location_text)
+    nuts_local = sorted(c for c in nuts if c in LOCAL_NUTS)
+    nuts_weak = sorted(c for c in nuts if c in REVIEW_NUTS)
+    nuts_out = sorted(c for c in nuts if c not in LOCAL_NUTS | REVIEW_NUTS)
+
+    strong_local = pc_local + nuts_local + place_hits(location_text, LOCAL_PLACE_TERMS)
+    strong_out = pc_other + nuts_out + place_hits(location_text, OUT_OF_AREA_TERMS)
+    weak = pc_review + nuts_weak + place_hits(
+        location_text, WEAK_AREA_TERMS + AMBIGUOUS_PLACE_TERMS)
 
     if strong_local and strong_out:
         return "REVIEW", (
@@ -479,6 +519,15 @@ def classify_geography(record, region):
         )
 
     prose_full, _ = postcode_districts(prose)
+    # A full postcode written in the notice text is specific enough to trust when
+    # nothing in the text points anywhere else.
+    prose_local = sorted(d for d in prose_full if d in LOCAL_POSTCODE_DISTRICTS)
+    prose_elsewhere = [d for d in prose_full if d not in LOCAL_POSTCODE_DISTRICTS]
+    if prose_local and not prose_elsewhere and not place_hits(prose, OUT_OF_AREA_TERMS):
+        return "LOCAL", (
+            "Postcode found in the notice text, not a structured location "
+            "(verify on the notice): " + ", ".join(prose_local[:3])
+        )
     prose_hits = (
         sorted(d for d in prose_full if d in LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS)
         + place_hits(prose, LOCAL_PLACE_TERMS)

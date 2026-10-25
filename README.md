@@ -8,15 +8,19 @@ A small dashboard that finds UK public-sector tenders for cleaning and facilitie
 - Tenders confirmed in the target area appear on the main list. Anything whose location can't be confirmed goes to **Needs a location check** instead, so unclear tenders never mix into the main list.
 
 ## How the area filter works
-Postcodes are checked first, then whole-word place names.
+The filter looks for evidence in this order: postcodes, government region codes, place names, then postcodes written in the notice text.
 
 | Result | Meaning |
 | --- | --- |
-| Confirmed | A delivery/site postcode or place is in the target area, with nothing contradicting it |
-| Needs a location check | No location, a vague one (e.g. "Merseyside", "Cheshire"), a borderline postcode (L35, CH64), or locations both inside and outside the area |
+| Confirmed | A delivery/site postcode, region code or place is in the target area, with nothing contradicting it |
+| Needs a location check | No location, a vague one (e.g. "Merseyside", "Cheshire"), a borderline postcode (L35, CH64), a name shared with other places (Halton, Woolton, Garston), `UKD71` on its own, or locations both inside and outside the area |
 | Dropped | Every location is outside the area, e.g. Scotland, Knowsley, Warrington, Manchester |
 
-Target postcode districts: `L1`–`L19`, `L24`, `L25`, `L27` (Liverpool); `L20`–`L23`, `L29`–`L31`, `L37`, `L38`, `PR8`, `PR9` (Sefton); `CH41`–`CH49`, `CH60`–`CH63` (Wirral); `WA9`–`WA12` (St Helens); `WA7`, `WA8` (Halton).
+**Region codes.** The government feeds often give the area as a code. `UKD72` (Liverpool), `UKD73` (Sefton) and `UKD74` (Wirral) count as confirmed. `UKD71` (East Merseyside) also covers Knowsley, so it needs a postcode or place name to confirm it. Any other UK code is outside the area.
+
+**Notice text.** A full postcode written in the title or description (for example `WA7 2PQ`) counts as confirmed if nothing there points elsewhere. The reason shown on the card says so, so check the notice.
+
+Target postcode districts: `L1`-`L19`, `L24`, `L25`, `L27` (Liverpool); `L20`-`L23`, `L29`-`L31`, `L37`, `L38`, `PR8`, `PR9` (Sefton); `CH41`-`CH49`, `CH60`-`CH63` (Wirral); `WA9`-`WA12` (St Helens); `WA7`, `WA8` (Halton). Local neighbourhood names are listed at the top of `tenderscout.py`.
 
 Royal Mail postcode districts don't line up exactly with council boundaries, so check the lists at the top of `tenderscout.py` against your own knowledge and edit them if needed. Knowsley is deliberately excluded.
 
