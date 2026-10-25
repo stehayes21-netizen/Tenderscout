@@ -8,6 +8,16 @@ from unittest.mock import patch
 import tenderscout
 
 
+class DeadlineParsingTests(unittest.TestCase):
+    def test_date_only_deadline_remains_valid_through_end_of_date(self):
+        deadline = tenderscout.parse_date("2026-10-25")
+        self.assertEqual(deadline.isoformat(), "2026-10-25T23:59:59.999999+00:00")
+
+    def test_explicit_deadline_time_is_preserved(self):
+        deadline = tenderscout.parse_date("2026-10-25T12:30:00Z")
+        self.assertEqual(deadline.isoformat(), "2026-10-25T12:30:00+00:00")
+
+
 class OpportunityStageTests(unittest.TestCase):
     def test_extract_records_identifies_planning_stage(self):
         payload = {
