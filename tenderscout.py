@@ -972,14 +972,22 @@ def main():
 
     filtered = []
     review_rows = []
+    rejected_by_scoring = 0
+    scored_geography_counts = {}
+    scored_trade_counts = {}
     for row in all_rows:
         scored = score_record(row, args.services, args.region, args.min_value, args.max_value)
         if not scored:
+            rejected_by_scoring += 1
             continue
-        if normalise_region(args.region) == TARGET_AREA_LABEL and scored.get("region_match") == "REVIEW":
+        geo = scored.get("region_match", "NOT SCORED")
+        scored_geography_counts[geo] = scored_geography_counts.get(geo, 0) + 1
+        trade = scored.get("trade_category") or scored.get("service_match") or "NO TRADE MATCH"
+        scored_trade_counts[trade] = scored_trade_counts.get(trade, 0) + 1
+        if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
             review_rows.append(scored)
             continue
-        if scored.get("region_match") == "LOCAL" and scored["score"] >= args.min_score:
+        if geo == "LOCAL" and scored["score"] >= args.min_score:
             filtered.append(scored)
     filtered.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
     review_rows.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
@@ -1004,8 +1012,10 @@ def main():
         geography_counts[geo] = geography_counts.get(geo, 0) + 1
         trade = row.get("trade_category") or row.get("service_match") or "NO TRADE MATCH"
         trade_counts[trade] = trade_counts.get(trade, 0) + 1
-    print("Geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(geography_counts.items())))
-    print("Trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
+    print("Raw geography hints (before scoring): " + ", ".join(f"{key}={count}" for key, count in sorted(geography_counts.items())))
+    print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
+    print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
+    print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
