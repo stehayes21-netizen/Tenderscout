@@ -86,6 +86,25 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(exported.status_code, 200)
         self.assertIn(b"Test cleaning contract", exported.data)
 
+    def test_pipeline_view_only_shows_upcoming_pipeline_opportunities(self):
+        self.client.post("/add", data={
+            "title": "Planned cleaning contract", "buyer": "Council",
+            "notice_url": "https://example.com/pipeline",
+            "pipeline_status": "Pipeline / upcoming",
+        })
+        self.client.post("/add", data={
+            "title": "Live cleaning tender", "buyer": "Council",
+            "notice_url": "https://example.com/live",
+            "pipeline_status": "Bidding",
+        })
+        pipeline = self.client.get("/?view=pipeline")
+        self.assertEqual(pipeline.status_code, 200)
+        self.assertIn(b"Planned cleaning contract", pipeline.data)
+        self.assertNotIn(b"Live cleaning tender", pipeline.data)
+        filtered = self.client.get("/?view=pipeline&trade=Commercial%20and%20office%20cleaning")
+        self.assertEqual(filtered.status_code, 200)
+        self.assertIn(b"Pipeline / upcoming", filtered.data)
+
     def test_manual_entries_without_a_link_do_not_overwrite_each_other(self):
         for title in ("First entry", "Second entry"):
             self.client.post("/add", data={"title": title})
