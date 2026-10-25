@@ -1019,6 +1019,18 @@ def main():
         trade_counts[trade] = trade_counts.get(trade, 0) + 1
     print("Raw geography classification (all notices): " + ", ".join(f"{key}={count}" for key, count in sorted(geography_counts.items())))
     print("Raw trade taxonomy (all notices): " + ", ".join(f"{key}={count}" for key, count in sorted(trade_counts.items(), key=lambda item: (-item[1], item[0]))[:15]))
+    local_trade_counts = {}
+    review_trade_counts = {}
+    for row in all_rows:
+        geo, _ = classify_geography(row, args.region)
+        fulltext = " ".join((row.get(field, "") or "") for field in ("title", "description", "buyer"))
+        trade = classify_trade_category(fulltext)
+        if geo == "LOCAL":
+            local_trade_counts[trade] = local_trade_counts.get(trade, 0) + 1
+        elif geo == "REVIEW":
+            review_trade_counts[trade] = review_trade_counts.get(trade, 0) + 1
+    print("Trade taxonomy in confirmed local notices: " + (", ".join(f"{key}={count}" for key, count in sorted(local_trade_counts.items(), key=lambda item: (-item[1], item[0]))) or "none"))
+    print("Trade taxonomy in location-review notices: " + ", ".join(f"{key}={count}" for key, count in sorted(review_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:15]))
     deadline_counts = {"future": 0, "expired": 0, "missing_or_unparsed": 0}
     for row in all_rows:
         deadline = parse_date(row.get("deadline"))
