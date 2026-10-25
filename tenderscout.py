@@ -1008,11 +1008,17 @@ def main():
     geography_counts = {}
     trade_counts = {}
     for row in all_rows:
-        geo = row.get("region_match", "NOT SCORED")
+        # Score only matched trades for the main list, but independently audit
+        # the geography and taxonomy of every raw notice. This separates a
+        # thin local feed from trade-keyword gaps and avoids reporting every
+        # unscored notice as "NOT SCORED".
+        geo, _ = classify_geography(row, args.region)
         geography_counts[geo] = geography_counts.get(geo, 0) + 1
-        trade = row.get("trade_category") or row.get("service_match") or "NO TRADE MATCH"
+        fulltext = " ".join((row.get(field, "") or "") for field in ("title", "description", "buyer"))
+        trade = classify_trade_category(fulltext)
         trade_counts[trade] = trade_counts.get(trade, 0) + 1
-    print("Raw geography hints (before scoring): " + ", ".join(f"{key}={count}" for key, count in sorted(geography_counts.items())))
+    print("Raw geography classification (all notices): " + ", ".join(f"{key}={count}" for key, count in sorted(geography_counts.items())))
+    print("Raw trade taxonomy (all notices): " + ", ".join(f"{key}={count}" for key, count in sorted(trade_counts.items(), key=lambda item: (-item[1], item[0]))[:15]))
     print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
