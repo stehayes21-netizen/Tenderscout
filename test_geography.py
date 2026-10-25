@@ -301,10 +301,21 @@ class OverlapAndTradeTests(unittest.TestCase):
                 self.assertEqual(result["service_match"], label)
 
     def test_unrelated_tenders_are_ignored(self):
-        for title in ("Supply of laptops", "Software licences", "Catering services",
+        for title in ("Supply of laptops", "Software licences",
                       "Legal advice framework"):
             with self.subTest(title=title):
                 self.assertIsNone(self.score(title))
+
+    def test_all_trades_are_in_scope_by_default(self):
+        for title, expected in (
+            ("Catering services", "Catering and food services"),
+            ("Roofing and roof repairs", "Roofing and roof repairs"),
+            ("IT and telecoms support", "IT and telecoms"),
+        ):
+            with self.subTest(title=title):
+                result = self.score(title)
+                self.assertIsNotNone(result)
+                self.assertEqual(result["trade_category"], expected)
 
     def test_a_trade_can_be_switched_off(self):
         self.assertIsNone(self.score("Building refurbishment", services=["cleaning", "fm"]))
