@@ -294,5 +294,47 @@ class FeedDiagnosticsTests(AppTestCase):
         self.assertEqual(stats["first_date"], "2026-10-10")
 
 
+class FeedPagingTests(unittest.TestCase):
+    PAGE1 = {"releases": [{"ocid": "a", "id": "1", "date": "2026-10-10T00:00:00Z", "tender": {"title": "T1"}}],
+             "links": {"next": "http://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=ABC%3D%3D&limit=100"}}
+    PAGE2 = {"releases": [{"ocid": "b", "id": "2", "date": "2026-10-11T00:00:00Z", "tender": {"title": "T2"}}]}
+
+    def test_next_page_uses_the_link_the_feed_gives(self):
+        import tenderscout
+        urls = []
+
+        def fake_get(url, timeout=25):
+            urls.append(url)
+            return self.PAGE1 if len(urls) == 1 else self.PAGE2
+
+        stats = {}
+        with patch.object(tenderscout, "get_json", side_effect=fake_get), \
+             patch.object(tenderscout.time, "sleep"):
+            records = tenderscout.fetch_fts(14, 5, None, stats)
+        self.assertEqual(len(records), 2)
+        self.assertEqual(urls[1],
+                         "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=ABC%3D%3D&limit=100")
+        self.assertEqual(stats["pages"], 2)
+
+    def test_links_to_other_websites_are_never_followed(self):
+        import tenderscout
+        payload = {"releases": [], "links": {"next": "https://evil.example/steal?cursor=x"}}
+        cursor = tenderscout._next_cursor(payload)
+        url = tenderscout._page_url(tenderscout.FTS_URL, {"limit": "100"}, cursor)
+        self.assertTrue(url.startswith("https://www.find-tender.service.gov.uk/"))
+        self.assertNotIn("evil.example", url)
+        self.assertIsNone(tenderscout._next_cursor(
+            {"releases": [], "links": {"next": "https://evil.example/steal"}}))
+
+    def test_http_errors_include_the_feeds_explanation(self):
+        import io, urllib.error, tenderscout
+        error = urllib.error.HTTPError("https://x", 400, "Bad Request", {}, io.BytesIO(b'{"error":"cursor is invalid"}'))
+        with patch.object(tenderscout.urllib.request, "urlopen", side_effect=error):
+            with self.assertRaises(RuntimeError) as ctx:
+                tenderscout.get_json("https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?limit=100")
+        self.assertIn("cursor is invalid", str(ctx.exception))
+        self.assertIn("HTTP 400", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

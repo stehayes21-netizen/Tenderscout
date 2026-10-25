@@ -257,8 +257,19 @@ def get_json(url: str, timeout: int = 25):
             "Accept": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8", errors="replace"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        # Keep the feed's own explanation, so a rejected request can be understood.
+        try:
+            body = " ".join(exc.read().decode("utf-8", errors="replace").split())[:200]
+        except Exception:
+            body = ""
+        query = urllib.parse.urlparse(url).query
+        raise RuntimeError(
+            f"HTTP {exc.code} {exc.reason}. Feed said: {body or 'nothing'}. Request: ?{query}"
+        ) from None
 
 
 def as_text(value):
@@ -413,6 +424,9 @@ def extract_records(payload, source):
     return output
 
 
+API_HOSTS = {"www.find-tender.service.gov.uk", "www.contractsfinder.service.gov.uk"}
+
+
 def _next_cursor(payload):
     """Read common OCDS pagination cursor shapes without assuming page numbers."""
     if not isinstance(payload, dict):
@@ -428,17 +442,19 @@ def _next_cursor(payload):
             nxt = nxt.get("href") or nxt.get("uri")
         if isinstance(nxt, str) and nxt:
             parsed = urllib.parse.urlparse(nxt)
-            query = urllib.parse.parse_qs(parsed.query)
-            values = query.get("cursor")
+            # Follow the link the feed gives us exactly as given, but only if it
+            # points at one of the official feeds.
+            if parsed.hostname in API_HOSTS:
+                return urllib.parse.urlunparse(parsed._replace(scheme="https"))
+            values = urllib.parse.parse_qs(parsed.query).get("cursor")
             if values:
                 return values[0]
-            return nxt
     return None
 
 
 def _page_url(base_url, params, cursor):
     """Build the next request URL, supporting opaque cursors and next links."""
-    if cursor and cursor.startswith(("https://", "http://")):
+    if cursor and cursor.startswith("https://"):
         return cursor
     page_params = dict(params)
     if cursor:
@@ -481,7 +497,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             payload = get_json(url)
         except Exception as exc:
             print(f"[WARN] Find a Tender fetch failed: {exc}", file=sys.stderr)
-            stats["error"] = str(exc)[:120]
+            stats["error"] = str(exc)[:320]
             break
         batch = extract_records(payload, "Find a Tender")
         _note_page(stats, batch)
@@ -517,7 +533,7 @@ def fetch_contracts_finder(days, max_pages, max_seconds=None, stats=None):
             payload = get_json(url)
         except Exception as exc:
             print(f"[WARN] Contracts Finder fetch failed: {exc}", file=sys.stderr)
-            stats["error"] = str(exc)[:120]
+            stats["error"] = str(exc)[:320]
             break
         batch = extract_records(payload, "Contracts Finder")
         if not batch:
