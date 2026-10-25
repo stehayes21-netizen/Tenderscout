@@ -43,9 +43,27 @@ class AppTestCase(unittest.TestCase):
 
     def refresh_with(self, records):
         collector = self.app_module.collector
-        # run_refresh passes paging, timeout and stats arguments to each feed.
-        # Accept those arguments here while keeping the fixture deterministic.
-        with patch.object(collector, "fetch_fts", side_effect=lambda *args, **kwargs: records), \
+        # Patch the executor as well as the feeds: the production refresh uses
+        # worker threads, while tests should execute these deterministic fixtures
+        # synchronously and avoid thread/mocking interactions.
+        class InlineFuture:
+            def __init__(self, fn, args, kwargs):
+                self.value = fn(*args, **kwargs)
+            def result(self):
+                return self.value
+
+        class InlineExecutor:
+            def __init__(self, *args, **kwargs):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def submit(self, fn, *args, **kwargs):
+                return InlineFuture(fn, args, kwargs)
+
+        with patch.object(self.app_module, "ThreadPoolExecutor", InlineExecutor), \
+             patch.object(collector, "fetch_fts", side_effect=lambda *args, **kwargs: records), \
              patch.object(collector, "fetch_contracts_finder", side_effect=lambda *args, **kwargs: []):
             return self.client.post("/refresh", follow_redirects=True)
 
