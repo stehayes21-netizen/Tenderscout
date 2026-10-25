@@ -61,7 +61,9 @@ TRADE_CATEGORIES = [
     "Building surveying", "Architecture and design", "Structural engineering",
     "Quantity surveying", "Construction project management", "Waste management",
     "Laundry and linen", "Catering and food services", "Furniture and equipment",
-    "IT and telecoms", "Transport and vehicle maintenance", "Water and fire damage restoration",\n    "Interior design", "Signage and sign making", "Rope access and specialist access",\n    "Environmental services", "Other / unclassified",
+    "IT and telecoms", "Transport and vehicle maintenance", "Water and fire damage restoration",
+    "Interior design", "Signage and sign making", "Rope access and specialist access",
+    "Environmental services", "Other / unclassified",
 ]
 assert len(TRADE_CATEGORIES) == 71
 
