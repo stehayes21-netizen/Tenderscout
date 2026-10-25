@@ -997,6 +997,15 @@ def main():
         stage = row.get("opportunity_stage", "Other notice")
         stage_counts[stage] = stage_counts.get(stage, 0) + 1
     print("Opportunity stages: " + ", ".join(f"{stage}={count}" for stage, count in sorted(stage_counts.items())))
+    geography_counts = {}
+    trade_counts = {}
+    for row in all_rows:
+        geo = row.get("region_match", "NOT SCORED")
+        geography_counts[geo] = geography_counts.get(geo, 0) + 1
+        trade = row.get("trade_category") or row.get("service_match") or "NO TRADE MATCH"
+        trade_counts[trade] = trade_counts.get(trade, 0) + 1
+    print("Geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(geography_counts.items())))
+    print("Trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
