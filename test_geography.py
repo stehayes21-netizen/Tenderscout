@@ -257,6 +257,19 @@ class PostcodeCoverageTests(unittest.TestCase):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "OUT_OF_AREA")
 
+    def test_explicit_english_regions_outside_target_area_are_rejected(self):
+        for region in (
+            "East Midlands, United Kingdom",
+            "South East, United Kingdom",
+            "West Midlands, United Kingdom",
+            "Yorkshire and the Humber, United Kingdom",
+            "East of England, United Kingdom",
+            "North East, United Kingdom",
+            "South West, United Kingdom",
+        ):
+            with self.subTest(region=region):
+                self.assertEqual(self.classify(region), "OUT_OF_AREA")
+
     def test_borderline_postcode_is_sent_for_review(self):
         self.assertEqual(self.classify("CH4 1AA"), "REVIEW")
 
