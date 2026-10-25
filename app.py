@@ -743,14 +743,21 @@ def sources():
         sections += f"<h2>{safe(heading)}</h2><ul>{cards}</ul>"
     return Response(
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>Tender Scout sources</title><style>body{font:16px Arial;max-width:900px;margin:20px auto;padding:0 16px;color:#18251e}'
-        'li{margin:12px 0}a{color:#08783c}p{line-height:1.5}</style></head><body>'
-        '<h1>Council & community sources</h1><p>Public contracts and private customer leads are different opportunity types. '
-        'Council portals may require supplier registration and may not expose an open feed.</p>'
+        '<title>Tender Scout sources</title><style>'
+        'body{font:16px Arial;max-width:960px;margin:0 auto;padding:16px;color:#18251e;background:#f3f6f4;line-height:1.5}'
+        'header{background:#143d2a;color:white;border-radius:14px;padding:20px;margin-bottom:16px}'
+        'header a{color:white}main{background:white;border-radius:14px;padding:18px}'
+        'h2{font-size:21px;margin-top:22px}ul{list-style:none;padding:0}'
+        'li{margin:10px 0;padding:14px;background:#f5f8f6;border:1px solid #e0e8e2;border-radius:10px}'
+        'a{color:#08783c;font-weight:600}p{line-height:1.5}.note{font-size:14px;color:#53645a}'
+        '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<h1>Council & community sources</h1><p>Use this directory to find official tender notices and permitted customer enquiry sources.</p></header><main>'
+        '<p class="note">Public contracts and private customer leads are different opportunity types. Council portals may require supplier registration and may not expose an open feed.</p>'
         + sections +
         '<p><b>Important:</b> Tender Scout does not automatically scrape Facebook, Nextdoor or gated supplier portals. '
         'Add a private lead only when you have permission to use the information and a legitimate source link.</p>'
-        '<p><a href="/">Back to public tenders</a> · <a href="/leads">Open private leads</a></p></body></html>',
+        '<p><a href="/">Back to public tenders</a> · <a href="/leads">Open private leads</a></p></main></body></html>',
         mimetype="text/html",
     )
 
