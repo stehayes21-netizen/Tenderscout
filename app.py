@@ -22,7 +22,7 @@ DB_PATH = os.environ.get("TENDERSCOUT_DB", "tenderscout.db")
 
 MIN_SCORE = 3
 SERVICES = list(collector.SERVICE_ORDER)
-STAGES = ["Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not for us"]
+STAGES = ["Pipeline / upcoming", "Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not for us"]
 SERVICE_FILTERS = dict(collector.SERVICE_LABELS)
 TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 
@@ -220,17 +220,21 @@ def dashboard_url(view="", service=""):
 @app.route("/", methods=["GET"])
 def dashboard():
     review_view = request.args.get("view") == "review"
+    pipeline_view = request.args.get("view") == "pipeline"
     trade = request.args.get("trade", "")
     trade = trade if trade in TRADE_CATEGORIES else ""
     service = request.args.get("service", "")
     service = service if service in SERVICE_FILTERS else ""
-    view = "review" if review_view else ""
+    view = "review" if review_view else ("pipeline" if pipeline_view else "")
 
     db = connect_db()
     condition = (
         "region_match = 'REVIEW'" if review_view
         else "region_match IN ('LOCAL', 'MANUAL')"
     )
+    if pipeline_view:
+        condition += " AND pipeline_status = ?"
+        params = ("Pipeline / upcoming",)
     params = ()
     if trade:
         condition += " AND trade_category = ?"
@@ -292,9 +296,12 @@ def dashboard():
     if review_view:
         heading = f"{len(rows)} tenders need a location check"
         switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
+    elif pipeline_view:
+        heading = f"{len(rows)} pipeline / upcoming opportunities"
+        switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
     else:
         heading = f"{len(rows)} saved opportunities"
-        switch = f'<a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
+        switch = f'<a href="{dashboard_url("pipeline", service)}">Pipeline / upcoming</a> · <a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
 
     selected_trade = trade
     filters = "".join(
