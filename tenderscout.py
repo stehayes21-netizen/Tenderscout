@@ -841,13 +841,16 @@ def score_record(record, services, region, min_value, max_value):
     exclude_hits = keyword_hits(fulltext, EXCLUDE_TERMS)
     matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
     detailed_category = classify_trade_category(fulltext)
-    # Keep the established four service switches authoritative. Detailed
-    # trade classification adds a subcategory; it must not bypass a disabled
-    # service or turn unrelated procurement into a match.
-    if not matched:
+    # The default scope now covers the full detailed trade taxonomy. Keep
+    # backwards compatibility for callers explicitly selecting a subset of the
+    # legacy service groups: those switches must still exclude disabled groups.
+    all_legacy_groups_enabled = all(group in services for group in SERVICE_ORDER)
+    if not matched and (not all_legacy_groups_enabled or detailed_category == "Other / unclassified"):
         return None
-    service = SERVICE_LABELS[matched[0]]
+    service = SERVICE_LABELS[matched[0]] if matched else detailed_category
     service_hits = [term for t in matched for term in trade_hits[t]]
+    if not service_hits and detailed_category != "Other / unclassified":
+        service_hits = [detailed_category]
 
     score, reasons = 3, []
     reasons.append("service keywords: " + ", ".join(dict.fromkeys(service_hits))[:80])
