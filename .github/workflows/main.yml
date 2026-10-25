@@ -34,6 +34,14 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
+      - name: Smoke test deployed health endpoint
+        run: |
+          echo "Health endpoint response:"
+          curl --fail --show-error --silent --max-time 30 https://tenderscout-1qnz.onrender.com/health
+          echo
+          echo "Dashboard HTTP status (401 means login is required):"
+          curl --show-error --silent --max-time 30 -o /dev/null -w "%{http_code}\n" https://tenderscout-1qnz.onrender.com/
+
       # Isolated branch validation uses a bounded live-feed sample.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/test/live-feed-validation'))
