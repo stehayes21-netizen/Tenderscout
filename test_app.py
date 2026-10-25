@@ -111,6 +111,34 @@ class AppSmokeTest(AppTestCase):
         self.assertIn(b"valid trade", r.data)
 
 
+    def test_trade_taxonomy_has_71_categories_and_classifies_roofing(self):
+        import tenderscout
+        self.assertEqual(len(tenderscout.TRADE_CATEGORIES), 71)
+        self.assertEqual(
+            tenderscout.classify_trade_category("Roofing and roof repairs"),
+            "Roofing and roof repairs",
+        )
+
+    def test_public_tenders_can_be_filtered_by_detailed_trade(self):
+        self.refresh_with([
+            feed_record("roof", "Liverpool L2 2DH", title="Roofing and roof repairs",
+                        description="Roof repair and replacement contract."),
+            feed_record("clean", "Liverpool L2 2DH", title="Office cleaning",
+                        description="Commercial cleaning services."),
+        ])
+        page = self.client.get("/?trade=Roofing%20and%20roof%20repairs").data
+        self.assertIn(b"example.com/roof", page)
+        self.assertNotIn(b"example.com/clean", page)
+        self.assertIn(b"Filter by trade (71 categories)", page)
+
+    def test_private_lead_trade_selector_uses_shared_71_category_list(self):
+        import tenderscout
+        page = self.client.get("/leads").data
+        self.assertEqual(len(tenderscout.TRADE_CATEGORIES), 71)
+        self.assertIn(b"Rope access and specialist access", page)
+        self.assertIn(b"Environmental services", page)
+
+
 class RefreshTests(AppTestCase):
     def test_only_confirmed_target_area_tenders_reach_the_main_list(self):
         r = self.refresh_with([
