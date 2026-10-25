@@ -348,6 +348,18 @@ def set_stage(tender_id):
     return redirect(dashboard_url(view, service if service in SERVICE_FILTERS else ""))
 
 
+def sample_line(record):
+    """A one-line description of a tender, for reading in the service logs."""
+    def clip(value, size):
+        return " ".join(str(value or "").split())[:size]
+    return " | ".join([
+        clip(record.get("title"), 70),
+        "buyer: " + clip(record.get("buyer"), 40),
+        "location: " + clip(record.get("location_text"), 140),
+        "why: " + clip(record.get("geography_reason"), 90),
+    ])
+
+
 def run_refresh():
     """Fetch official feeds and save matching tenders. Returns a dict of counts."""
     days = env_int("TENDERSCOUT_DAYS", 60)
@@ -363,6 +375,7 @@ def run_refresh():
     LAST_FEEDS["Find a Tender"] = fts_stats
     LAST_FEEDS["Contracts Finder"] = cf_stats
     app.logger.warning("REFRESH feeds: %s", LAST_FEEDS)
+    samples = {"review": [], "outside": []}
     stats = {"fetched": len(records), "service": 0, "outside": 0, "local": 0, "review": 0}
     if not records:
         return stats
@@ -379,6 +392,10 @@ def run_refresh():
                 stats["service"] += 1
                 if record["region_match"] == "OUT_OF_AREA":
                     stats["outside"] += 1
+                    if len(samples["outside"]) < 20:
+                        samples["outside"].append(sample_line(record))
+                elif record["region_match"] == "REVIEW" and match and len(samples["review"]) < 40:
+                    samples["review"].append(sample_line(record))
             if not match or match.get("score", 0) < MIN_SCORE:
                 continue
             region_match = match.get("region_match")
@@ -431,6 +448,9 @@ def run_refresh():
         db.commit()
     finally:
         db.close()
+    for kind, lines in samples.items():
+        for line in lines:
+            app.logger.warning("REFRESH %s: %s", kind, line)
     return stats
 
 
