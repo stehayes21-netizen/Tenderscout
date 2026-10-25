@@ -295,10 +295,22 @@ def dashboard():
         """
 
     if not cards:
-        cards = (
-            "<p>Nothing to check right now.</p>" if review_view
-            else "<p>No tenders saved yet. Press Refresh tenders to search.</p>"
-        )
+        if review_view:
+            cards = "<p>Nothing to check right now.</p>"
+        elif trade:
+            cards = (
+                f'<p>No saved opportunities match the trade “{safe(trade)}”. '
+                f'<a href="{safe(dashboard_url(view, service))}">Show all trades</a>, '
+                "or refresh to check for new notices.</p>"
+            )
+        elif service:
+            cards = (
+                f'<p>No saved opportunities match the {safe(service)} filter. '
+                f'<a href="{safe(dashboard_url(view))}">Show all trades</a>, '
+                "or refresh to check for new notices.</p>"
+            )
+        else:
+            cards = "<p>No tenders saved yet. Press Refresh tenders to search.</p>"
 
     if review_view:
         heading = f"{len(rows)} tenders need a location check"
