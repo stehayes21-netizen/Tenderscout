@@ -992,6 +992,11 @@ def main():
     write_csv(review_path, review_rows)
 
     print(f"Fetched/deduplicated notices: {len(all_rows)}")
+    stage_counts = {}
+    for row in all_rows:
+        stage = row.get("opportunity_stage", "Other notice")
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+    print("Opportunity stages: " + ", ".join(f"{stage}={count}" for stage, count in sorted(stage_counts.items())))
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
