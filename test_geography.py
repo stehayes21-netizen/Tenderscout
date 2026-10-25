@@ -409,3 +409,20 @@ class OverlapAndTradeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class FindATenderRequestTests(unittest.TestCase):
+    def test_fetch_does_not_use_incomplete_stage_filter(self):
+        captured = []
+
+        def fake_page(base_url, params, source, max_pages, started, max_seconds, stats):
+            captured.append((base_url, dict(params), source))
+            return []
+
+        with patch.object(tenderscout, "_page_through", side_effect=fake_page):
+            tenderscout.fetch_fts(days=1, max_pages=1, max_seconds=1, stats={})
+
+        self.assertTrue(captured)
+        self.assertTrue(all(source == "Find a Tender" for _, _, source in captured))
+        self.assertTrue(all("stages" not in params for _, params, _ in captured))
+        self.assertTrue(all(params["limit"] == "100" for _, params, _ in captured))

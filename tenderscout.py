@@ -677,8 +677,12 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
         if stats["stopped"]:
             break
         stats["windows"] += 1
+        # Do not send the API stages filter here. Find a Tender's documented
+        # filter has historically omitted many Procurement Act 2023 notices,
+        # including tender/tenderUpdate releases, when stages=tender is supplied.
+        # Retrieve the complete release window and classify lifecycle locally.
         params = {
-            "stages": "planning,tender", "limit": "100",
+            "limit": "100",
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
