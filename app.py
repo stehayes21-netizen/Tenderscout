@@ -342,11 +342,13 @@ def dashboard():
             )
 
     page = f"""<!doctype html>
-    <html><head><meta name="viewport" content="width=device-width">
+    <html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Tender Scout</title>
     <style>
+    *{{box-sizing:border-box}}
+    html{{width:100%;max-width:100%;overflow-x:hidden}}
     body{{font:16px Arial;background:#f3f6f4;color:#18251e;
-    margin:0;padding:20px}}
+    margin:0;padding:20px;width:100%;max-width:900px;overflow-wrap:anywhere}}
     header{{background:#143d2a;color:white;padding:22px;border-radius:12px}}
     .btn{{display:block;width:100%;max-width:340px;margin-top:16px;
     padding:15px 22px;background:linear-gradient(#2fc36f,#168447);color:#fff;
@@ -360,7 +362,7 @@ def dashboard():
     .card{{background:white;margin:16px 0;padding:18px;
     border-radius:10px;overflow-wrap:anywhere}}
     .banner{{background:#e3f4e8;border:1px solid #168447;border-radius:10px;
-    padding:12px 14px;margin:14px 0}}
+    padding:12px 14px;margin:14px 0;overflow-wrap:anywhere;word-break:break-word}}
     .deadline{{font-weight:bold;color:#18251e}}
     .deadline.soon{{color:#b45309}}
     .deadline.closed{{color:#8a8f8c}}
