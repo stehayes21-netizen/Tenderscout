@@ -22,7 +22,7 @@ DB_PATH = os.environ.get("TENDERSCOUT_DB", "tenderscout.db")
 
 MIN_SCORE = 3
 SERVICES = list(collector.SERVICE_ORDER)
-STAGES = ["Pipeline / upcoming", "Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not for us"]
+STAGES = ["Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not for us"]
 SERVICE_FILTERS = dict(collector.SERVICE_LABELS)
 TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 
@@ -73,13 +73,15 @@ COLUMNS = """
     region_match TEXT DEFAULT 'REVIEW',
     trade_category TEXT DEFAULT 'Other / unclassified',
     saved_at TEXT,
-    pipeline_status TEXT DEFAULT 'Reviewing'
+    pipeline_status TEXT DEFAULT 'Reviewing',
+    opportunity_stage TEXT DEFAULT 'Open for bids'
 """
 # Columns added after the first release; added to older databases on start-up.
 # Older rows default to REVIEW because their location was never confirmed.
 ADDED_COLUMNS = [
     ("pipeline_status", "TEXT DEFAULT 'Reviewing'"),
     ("region_match", "TEXT DEFAULT 'REVIEW'"),
+    ("opportunity_stage", "TEXT DEFAULT 'Open for bids'"),
 ]
 
 
@@ -91,10 +93,13 @@ def ensure_schema(db):
     db.execute(f"CREATE TABLE IF NOT EXISTS tenders (id {id_column}, {COLUMNS})")
     if USE_POSTGRES:
         db.execute("ALTER TABLE tenders ADD COLUMN IF NOT EXISTS trade_category TEXT DEFAULT 'Other / unclassified'")
+        db.execute("ALTER TABLE tenders ADD COLUMN IF NOT EXISTS opportunity_stage TEXT DEFAULT 'Open for bids'")
     else:
         existing_columns = {row[1] for row in db.execute("PRAGMA table_info(tenders)").fetchall()}
         if "trade_category" not in existing_columns:
             db.execute("ALTER TABLE tenders ADD COLUMN trade_category TEXT DEFAULT 'Other / unclassified'")
+        if "opportunity_stage" not in existing_columns:
+            db.execute("ALTER TABLE tenders ADD COLUMN opportunity_stage TEXT DEFAULT 'Open for bids'")
     db.execute(f"""CREATE TABLE IF NOT EXISTS private_leads (
         id {id_column},
         title TEXT NOT NULL,
@@ -234,8 +239,8 @@ def dashboard():
     )
     params = []
     if pipeline_view:
-        condition += " AND pipeline_status = ?"
-        params.append("Pipeline / upcoming")
+        condition += " AND opportunity_stage = ?"
+        params.append("Planning / upcoming")
     if trade:
         condition += " AND trade_category = ?"
         params.append(trade)
@@ -273,6 +278,7 @@ def dashboard():
           <p class="deadline {deadline_class}">{safe(deadline_label)}</p>
           <p><b>Buyer:</b> {safe(row["buyer"]) or "Not listed"}</p>
           <p><b>Trade:</b> {safe(row["trade_category"] or row["service_match"])} · <b>Score:</b> {safe(row["score"])}</p>
+          <p><b>Opportunity stage:</b> {safe(row["opportunity_stage"] or "Open for bids")}</p>
           <p><b>Location:</b> {safe(row["location_text"]) or "Needs checking"}</p>
           <p><b>Source:</b> {safe(row["source"])}</p>
           <p>{safe(row["geography_reason"])}</p>
@@ -464,8 +470,8 @@ def run_refresh():
                 INSERT INTO tenders
                 (source, title, buyer, published_date, location_text,
                  service_match, score, deadline, notice_url,
-                 geography_reason, region_match, trade_category, saved_at, pipeline_status)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 geography_reason, region_match, trade_category, saved_at, pipeline_status, opportunity_stage)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(notice_url) DO UPDATE SET
                     title=excluded.title, buyer=excluded.buyer,
                     score=excluded.score, deadline=excluded.deadline,
@@ -473,6 +479,7 @@ def run_refresh():
                     geography_reason=excluded.geography_reason,
                     region_match=excluded.region_match,
                     trade_category=excluded.trade_category,
+                    opportunity_stage=excluded.opportunity_stage,
                     saved_at=excluded.saved_at
                 """,
                 (
@@ -490,6 +497,7 @@ def run_refresh():
                     match.get("trade_category", "Other / unclassified"),
                     datetime.now(timezone.utc).isoformat(),
                     "Reviewing",
+                    match.get("opportunity_stage", "Open for bids"),
                 ),
             )
             stats["local" if region_match == "LOCAL" else "review"] += 1
@@ -619,7 +627,7 @@ def add_tender():
 
 EXPORT_FIELDS = [
     "title", "buyer", "location_text", "trade_category", "deadline", "notice_url",
-    "source", "region_match", "pipeline_status",
+    "source", "region_match", "opportunity_stage", "pipeline_status",
 ]
 
 
