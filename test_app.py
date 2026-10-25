@@ -43,8 +43,10 @@ class AppTestCase(unittest.TestCase):
 
     def refresh_with(self, records):
         collector = self.app_module.collector
-        with patch.object(collector, "fetch_fts", return_value=records), \
-             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+        # run_refresh passes paging, timeout and stats arguments to each feed.
+        # Accept those arguments here while keeping the fixture deterministic.
+        with patch.object(collector, "fetch_fts", side_effect=lambda *args, **kwargs: records), \
+             patch.object(collector, "fetch_contracts_finder", side_effect=lambda *args, **kwargs: []):
             return self.client.post("/refresh", follow_redirects=True)
 
 
