@@ -245,6 +245,14 @@ class RefreshTests(AppTestCase):
         self.assertNotIn(b"https://example.com/edi", main)
         self.assertNotIn(b"https://example.com/unk", main)
 
+    def test_empty_dashboard_points_to_saved_location_review_tenders(self):
+        self.refresh_with([feed_record("unk", "")])
+        page = self.client.get("/").data
+        self.assertIn(b"No confirmed local opportunities are currently saved", page)
+        self.assertIn(b"1 tenders need a location check", page)
+        self.assertIn(b"Review location-uncertain tenders", page)
+        self.assertIn(b"view=review", page)
+
     def test_scottish_tenders_are_never_saved(self):
         self.refresh_with([feed_record("edi", "Edinburgh EH1 1AA")])
         self.assertNotIn(b"example.com/edi", self.client.get("/export.csv").data)

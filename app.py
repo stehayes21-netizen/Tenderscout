@@ -309,6 +309,13 @@ def dashboard():
                 f'<a href="{safe(dashboard_url(view))}">Show all trades</a>, '
                 "or refresh to check for new notices.</p>"
             )
+        elif counts["review"] and not pipeline_view:
+            cards = (
+                f'<p>No confirmed local opportunities are currently saved. '
+                f'{counts["review"]} tenders need a location check. '
+                f'<a href="{safe(dashboard_url("review", service))}">Review location-uncertain tenders</a>, '
+                "or refresh to check for new notices.</p>"
+            )
         else:
             cards = "<p>No tenders saved yet. Press Refresh tenders to search.</p>"
 
