@@ -258,5 +258,41 @@ class RefreshSummaryTests(AppTestCase):
         self.assertIn(b"1 confirmed in your area", r.data)
 
 
+class FeedDiagnosticsTests(AppTestCase):
+    def test_dashboard_shows_what_each_feed_returned(self):
+        collector = self.app_module.collector
+
+        def fake_fts(days, pages, limit, stats):
+            stats.update({"pages": 1, "records": 100, "last_batch": 100, "more": False,
+                          "error": "", "stopped": "", "first_date": "2026-10-11",
+                          "last_date": "2026-10-12"})
+            return [feed_record("liv", "Liverpool L2 2DH")]
+
+        def fake_cf(days, pages, limit, stats):
+            stats.update({"pages": 3, "records": 250, "last_batch": 50, "more": False,
+                          "error": "", "stopped": "time limit"})
+            return []
+
+        with patch.object(collector, "fetch_fts", side_effect=fake_fts), \
+             patch.object(collector, "fetch_contracts_finder", side_effect=fake_cf):
+            r = self.client.post("/refresh", follow_redirects=True)
+        page = r.data.decode()
+        self.assertIn("Find a Tender: 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
+        self.assertIn("no next-page link came back, so results may be cut off", page)
+        self.assertIn("Contracts Finder: 250 notices in 3 page(s)", page)
+        self.assertIn("Stopped early (time limit)", page)
+
+    def test_collector_records_pages_and_stops_when_no_next_link(self):
+        import tenderscout
+        payload = {"releases": [{"ocid": "a", "id": "1", "date": "2026-10-10T00:00:00Z",
+                                 "tender": {"title": "Cleaning"}}]}
+        stats = {}
+        with patch.object(tenderscout, "get_json", return_value=payload):
+            records = tenderscout.fetch_fts(14, 5, None, stats)
+        self.assertEqual(len(records), 1)
+        self.assertEqual((stats["pages"], stats["records"], stats["more"]), (1, 1, False))
+        self.assertEqual(stats["first_date"], "2026-10-10")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

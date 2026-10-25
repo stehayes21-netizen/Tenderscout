@@ -25,6 +25,7 @@ STAGES = ["Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not
 SERVICE_FILTERS = dict(collector.SERVICE_LABELS)
 
 _schema_ready = False
+LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 
 
 def env_int(name, default):
@@ -287,6 +288,7 @@ def dashboard():
                 + summary_text({"fetched": counts["n"], "service": counts["s"],
                                 "outside": counts["o"], "local": counts["l"],
                                 "review": counts["r"]})
+                + feed_notes()
                 + "</div>"
             )
 
@@ -353,10 +355,14 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 40)
+    fts_stats, cf_stats = {}, {}
     records = collector.dedupe(
-        collector.fetch_fts(days, pages, limit)
-        + collector.fetch_contracts_finder(days, pages, limit)
+        collector.fetch_fts(days, pages, limit, fts_stats)
+        + collector.fetch_contracts_finder(days, pages, limit, cf_stats)
     )
+    LAST_FEEDS["Find a Tender"] = fts_stats
+    LAST_FEEDS["Contracts Finder"] = cf_stats
+    app.logger.warning("REFRESH feeds: %s", LAST_FEEDS)
     stats = {"fetched": len(records), "service": 0, "outside": 0, "local": 0, "review": 0}
     if not records:
         return stats
@@ -450,6 +456,29 @@ def refresh_or_error():
             mimetype="text/html",
         )
     return stats, None
+
+
+def feed_notes():
+    """One short line per feed: what came back, and any sign it was cut short."""
+    lines = []
+    for name, st in LAST_FEEDS.items():
+        if not st:
+            continue
+        text = f"{name}: {st.get('records', 0)} notices in {st.get('pages', 0)} page(s)"
+        if st.get("first_date"):
+            text += f", published {st['first_date']} to {st['last_date']}"
+        if st.get("error"):
+            text += f". Problem: {st['error']}"
+        elif st.get("stopped"):
+            text += ". Stopped early (time limit), so there may be more"
+        elif st.get("more"):
+            text += ". More pages were available but not read"
+        elif st.get("last_batch", 0) >= 100:
+            text += ". The last page was full but no next-page link came back, so results may be cut off"
+        lines.append(safe(text))
+    if not lines:
+        return ""
+    return '<div class="note">' + "<br>".join(lines) + "</div>"
 
 
 def summary_text(stats):

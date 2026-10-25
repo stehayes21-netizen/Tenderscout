@@ -446,7 +446,26 @@ def _page_url(base_url, params, cursor):
     return base_url + "?" + urllib.parse.urlencode(page_params)
 
 
-def fetch_fts(days, max_pages, max_seconds=None):
+def _start_stats(stats):
+    stats = stats if stats is not None else {}
+    stats.update({"pages": 0, "records": 0, "last_batch": 0, "more": False,
+                  "error": "", "stopped": ""})
+    return stats
+
+
+def _note_page(stats, batch):
+    """Record what a feed page returned, so a paging problem can be seen."""
+    stats["pages"] += 1
+    stats["records"] += len(batch)
+    stats["last_batch"] = len(batch)
+    dates = sorted(str(r.get("published_date", ""))[:10] for r in batch if r.get("published_date"))
+    if dates:
+        stats["first_date"] = min(stats.get("first_date") or dates[0], dates[0])
+        stats["last_date"] = max(stats.get("last_date") or dates[-1], dates[-1])
+
+
+def fetch_fts(days, max_pages, max_seconds=None, stats=None):
+    stats = _start_stats(stats)
     results = []
     started = time.monotonic()
     updated_from = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -454,6 +473,7 @@ def fetch_fts(days, max_pages, max_seconds=None):
     for _ in range(max_pages):
         if max_seconds and time.monotonic() - started > max_seconds:
             print("[WARN] Stopped early: the time limit for this source was reached", file=sys.stderr)
+            stats["stopped"] = "time limit"
             break
         params = {"stages": "tender", "limit": "100", "updatedFrom": updated_from}
         url = _page_url(FTS_URL, params, cursor)
@@ -461,17 +481,21 @@ def fetch_fts(days, max_pages, max_seconds=None):
             payload = get_json(url)
         except Exception as exc:
             print(f"[WARN] Find a Tender fetch failed: {exc}", file=sys.stderr)
+            stats["error"] = str(exc)[:120]
             break
         batch = extract_records(payload, "Find a Tender")
+        _note_page(stats, batch)
         results.extend(batch)
         cursor = _next_cursor(payload)
+        stats["more"] = bool(cursor)
         if not cursor or not batch:
             break
         time.sleep(0.2)
     return results
 
 
-def fetch_contracts_finder(days, max_pages, max_seconds=None):
+def fetch_contracts_finder(days, max_pages, max_seconds=None, stats=None):
+    stats = _start_stats(stats)
     results = []
     started = time.monotonic()
     today = datetime.now(timezone.utc).date()
@@ -480,6 +504,7 @@ def fetch_contracts_finder(days, max_pages, max_seconds=None):
     for _ in range(max_pages):
         if max_seconds and time.monotonic() - started > max_seconds:
             print("[WARN] Stopped early: the time limit for this source was reached", file=sys.stderr)
+            stats["stopped"] = "time limit"
             break
         params = {
             "publishedFrom": start.isoformat(),
@@ -492,12 +517,15 @@ def fetch_contracts_finder(days, max_pages, max_seconds=None):
             payload = get_json(url)
         except Exception as exc:
             print(f"[WARN] Contracts Finder fetch failed: {exc}", file=sys.stderr)
+            stats["error"] = str(exc)[:120]
             break
         batch = extract_records(payload, "Contracts Finder")
         if not batch:
             break
+        _note_page(stats, batch)
         results.extend(batch)
         cursor = _next_cursor(payload)
+        stats["more"] = bool(cursor)
         if not cursor:
             break
         time.sleep(0.2)
