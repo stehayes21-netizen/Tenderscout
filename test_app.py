@@ -79,6 +79,38 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(r.get_json(), {"status": "ok", "database": "sqlite"})
 
 
+    def test_source_directory_lists_council_and_community_sources(self):
+        r = self.client.get("/sources")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"ProContract", r.data)
+        self.assertIn(b"The Chest", r.data)
+        self.assertIn(b"Formby Bubble", r.data)
+        self.assertIn(b"does not automatically scrape Facebook", r.data)
+
+    def test_private_lead_is_saved_separately_from_public_tenders(self):
+        r = self.client.post("/leads", data={
+            "title": "Repair leaking roof",
+            "trade_category": "Roofing and roof repairs",
+            "location_text": "Liverpool L15",
+            "source_name": "Community group",
+            "source_url": "https://example.com/request",
+            "details": "Customer requests a roof inspection",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Private lead saved", r.data)
+        self.assertIn(b"Repair leaking roof", r.data)
+        self.assertNotIn(b"Repair leaking roof", self.client.get("/").data)
+
+    def test_private_lead_rejects_unknown_trade_category(self):
+        r = self.client.post("/leads", data={
+            "title": "Job", "trade_category": "Not a real category",
+            "location_text": "Liverpool", "source_name": "Community group",
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn(b"Private lead saved", r.data)
+        self.assertIn(b"valid trade", r.data)
+
+
 class RefreshTests(AppTestCase):
     def test_only_confirmed_target_area_tenders_reach_the_main_list(self):
         r = self.refresh_with([
