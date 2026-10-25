@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -34,10 +34,10 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      # The steps below only run on the schedule or a manual run, not on every push.
+      # Isolated branch validation uses a bounded live-feed sample.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/test/live-feed-validation'))
-        run: python tenderscout.py --days 60 --region "Target area" --min-score 3
+        run: python tenderscout.py --days 14 --pages 1 --region "Target area" --min-score 3
 
       - name: Save CSV results
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/test/live-feed-validation')))
