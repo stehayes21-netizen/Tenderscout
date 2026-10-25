@@ -36,11 +36,11 @@ jobs:
 
       # The steps below only run on the schedule or a manual run, not on every push.
       - name: Collect tenders (CSV for audit)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/fix/refresh-test-and-all-trades')
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/test/live-feed-validation'))
         run: python tenderscout.py --days 60 --region "Target area" --min-score 3
 
       - name: Save CSV results
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/fix/refresh-test-and-all-trades'))
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/test/live-feed-validation')))
         uses: actions/upload-artifact@v4
         with:
           name: tenderscout-results
