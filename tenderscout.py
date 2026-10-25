@@ -1019,6 +1019,16 @@ def main():
         trade_counts[trade] = trade_counts.get(trade, 0) + 1
     print("Raw geography classification (all notices): " + ", ".join(f"{key}={count}" for key, count in sorted(geography_counts.items())))
     print("Raw trade taxonomy (all notices): " + ", ".join(f"{key}={count}" for key, count in sorted(trade_counts.items(), key=lambda item: (-item[1], item[0]))[:15]))
+    deadline_counts = {"future": 0, "expired": 0, "missing_or_unparsed": 0}
+    for row in all_rows:
+        deadline = parse_date(row.get("deadline"))
+        if deadline is None:
+            deadline_counts["missing_or_unparsed"] += 1
+        elif deadline < datetime.now(timezone.utc):
+            deadline_counts["expired"] += 1
+        else:
+            deadline_counts["future"] += 1
+    print("Raw deadline health (all notices): " + ", ".join(f"{key}={count}" for key, count in deadline_counts.items()))
     print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
