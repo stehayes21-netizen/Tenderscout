@@ -37,7 +37,7 @@ jobs:
       # The steps below only run on the schedule or a manual run, not on every push.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: python tenderscout.py --days 14 --region "Target area" --min-score 3 --services cleaning fm
+        run: python tenderscout.py --days 60 --region "Target area" --min-score 3
 
       - name: Save CSV results
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')

@@ -1,11 +1,14 @@
 # TenderScout
 
-A small dashboard that finds UK public-sector tenders for cleaning and facilities management (FM) in **Liverpool, Sefton, Wirral, St Helens and Halton**.
+A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, Wirral, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and Chester**.
 
 ## How it works
 - `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds, scores them, and decides whether each one is in the target area.
 - `app.py` is the Flask dashboard. **Refresh tenders** runs the collector and saves matches to the database.
 - Tenders confirmed in the target area appear on the main list. Anything whose location can't be confirmed goes to **Needs a location check** instead, so unclear tenders never mix into the main list.
+
+## Trades
+Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.
 
 ## How the area filter works
 The filter looks for evidence in this order: postcodes, government region codes, place names, then postcodes written in the notice text.
@@ -13,16 +16,16 @@ The filter looks for evidence in this order: postcodes, government region codes,
 | Result | Meaning |
 | --- | --- |
 | Confirmed | A delivery/site postcode, region code or place is in the target area, with nothing contradicting it |
-| Needs a location check | No location, a vague one (e.g. "Merseyside", "Cheshire"), a borderline postcode (L35, CH64), a name shared with other places (Halton, Woolton, Garston), `UKD71` on its own, or locations both inside and outside the area |
-| Dropped | Every location is outside the area, e.g. Scotland, Knowsley, Warrington, Manchester |
+| Needs a location check | No location, a vague one (e.g. "Merseyside", "Greater Manchester"), a borderline postcode (CH4), a name shared with other places (Halton, Leigh, Kirkby, Garston), or locations both inside and outside the area |
+| Dropped | Every location is outside the area, e.g. Scotland, Manchester, Preston, Cheshire East |
 
-**Region codes.** The government feeds often give the area as a code. `UKD72` (Liverpool), `UKD73` (Sefton) and `UKD74` (Wirral) count as confirmed. `UKD71` (East Merseyside) also covers Knowsley, so it needs a postcode or place name to confirm it. Any other UK code is outside the area.
+**Region codes.** The government feeds often give the area as a code. `UKD61` (Warrington), `UKD63` (Cheshire West and Chester), `UKD71` (East Merseyside: Knowsley, St Helens, Halton), `UKD72` (Liverpool), `UKD73` (Sefton) and `UKD74` (Wirral) count as confirmed. Codes that cover the area plus places outside it (Greater Manchester, Lancashire, the broad North West code) need a postcode or place name to confirm, because I could not verify which Greater Manchester code covers Wigan. Any other UK code is outside the area.
+
+**Longer names win.** "Preston Brook" is Halton, not Preston; "Chester-le-Street" is Durham, not Chester; "Cheshire East" is outside the area.
 
 **Notice text.** A full postcode written in the title or description (for example `WA7 2PQ`) counts as confirmed if nothing there points elsewhere. The reason shown on the card says so, so check the notice.
 
-Target postcode districts: `L1`-`L19`, `L24`, `L25`, `L27` (Liverpool); `L20`-`L23`, `L29`-`L31`, `L37`, `L38`, `PR8`, `PR9` (Sefton); `CH41`-`CH49`, `CH60`-`CH63` (Wirral); `WA9`-`WA12` (St Helens); `WA7`, `WA8` (Halton). Local neighbourhood names are listed at the top of `tenderscout.py`.
-
-Royal Mail postcode districts don't line up exactly with council boundaries, so check the lists at the top of `tenderscout.py` against your own knowledge and edit them if needed. Knowsley is deliberately excluded.
+Target postcode districts are listed at the top of `tenderscout.py`. Royal Mail postcode districts don't line up exactly with council boundaries, so check them against your own knowledge and edit them if needed.
 
 ## Local run
 ```bash
@@ -37,7 +40,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 | `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Turn on password protection. **Set both before sharing the site.** If either is missing the site is open to anyone with the link. `/health` stays open for the host. |
 | `DATABASE_URL` | PostgreSQL connection string. Without it the app uses SQLite, which is wiped on every redeploy on Render's free tier. |
 | `TENDERSCOUT_DB` | SQLite file path (local use only) |
-| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES` | Look-back window (default 14 days) and pages per source (default 5) |
+| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE` | Look-back window (default 60 days), pages per source (default 25) and the time limit per source (default 40 seconds) |
 
 ## Hosting on Render
 - Start command: `gunicorn app:app` (`gunicorn.conf.py` raises the timeout to 120 seconds so a refresh isn't cut off).
@@ -49,7 +52,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 `.github/workflows/main.yml` runs the tests on every push. On a schedule (every 6 hours) and on manual runs it also saves a CSV of matches and can refresh the live site. To enable the refresh, set the repository variable `TENDERSCOUT_APP_URL` and the secrets `TENDERSCOUT_APP_USER` and `TENDERSCOUT_APP_PASSWORD`.
 
 ## Pages
-- `/` confirmed tenders · `/?view=review` tenders needing a location check · add `service=cleaning` or `service=fm` to filter
+- `/` confirmed tenders · `/?view=review` tenders needing a location check · add `service=cleaning`, `fm`, `maintenance` or `construction` to filter
 - Each tender shows how long is left to bid (closed tenders sink to the bottom) and has a **Stage** dropdown: Reviewing, Interested, Bidding, Submitted, Won, Lost, Not for us
 - `POST /refresh` fetch new tenders and return to the dashboard with a summary; `POST /api/refresh` does the same but replies in plain text for scheduled jobs
 - `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)

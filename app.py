@@ -20,9 +20,9 @@ USE_POSTGRES = DATABASE_URL.startswith(("postgres://", "postgresql://"))
 DB_PATH = os.environ.get("TENDERSCOUT_DB", "tenderscout.db")
 
 MIN_SCORE = 3
-SERVICES = ["cleaning", "fm"]
+SERVICES = list(collector.SERVICE_ORDER)
 STAGES = ["Reviewing", "Interested", "Bidding", "Submitted", "Won", "Lost", "Not for us"]
-SERVICE_FILTERS = {"cleaning": "Cleaning", "fm": "Facilities management"}
+SERVICE_FILTERS = dict(collector.SERVICE_LABELS)
 
 _schema_ready = False
 
@@ -271,7 +271,7 @@ def dashboard():
 
     filters = " · ".join(
         f'<b>{label}</b>' if key == service else f'<a href="{dashboard_url(view, key)}">{label}</a>'
-        for key, label in (("", "All"), ("cleaning", "Cleaning"), ("fm", "Facilities management"))
+        for key, label in [("", "All")] + list(SERVICE_FILTERS.items())
     )
 
     banner = ""
@@ -317,7 +317,7 @@ def dashboard():
     a{{color:#08783c}}.note{{font-size:13px}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
-    <p>Liverpool, Sefton, Wirral, St Helens and Halton</p>
+    <p>Liverpool, Sefton, Wirral, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West</p>
     <form method="post" action="/refresh"
       onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
@@ -348,10 +348,14 @@ def set_stage(tender_id):
 
 def run_refresh():
     """Fetch official feeds and save matching tenders. Returns a dict of counts."""
-    days = env_int("TENDERSCOUT_DAYS", 14)
-    pages = env_int("TENDERSCOUT_PAGES", 5)
+    days = env_int("TENDERSCOUT_DAYS", 60)
+    pages = env_int("TENDERSCOUT_PAGES", 25)
+    # Each source stops after this many seconds, so a slow feed cannot make the
+    # request run past the web server's timeout.
+    limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 40)
     records = collector.dedupe(
-        collector.fetch_fts(days, pages) + collector.fetch_contracts_finder(days, pages)
+        collector.fetch_fts(days, pages, limit)
+        + collector.fetch_contracts_finder(days, pages, limit)
     )
     stats = {"fetched": len(records), "service": 0, "outside": 0, "local": 0, "review": 0}
     if not records:
@@ -450,8 +454,8 @@ def refresh_or_error():
 
 def summary_text(stats):
     return (
-        f"{stats['fetched']} notices checked. {stats['service']} were cleaning or FM "
-        f"and {stats['outside']} of those were outside your area. "
+        f"{stats['fetched']} notices checked. {stats['service']} matched your trades; "
+        f"{stats['outside']} of those were outside your area. "
         f"{stats['local']} confirmed in your area, {stats['review']} need a location check."
     )
 

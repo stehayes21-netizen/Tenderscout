@@ -153,14 +153,23 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
-    def test_knowsley_and_neighbours_are_out_of_area(self):
-        for text in ("Kirkby L32 8XX", "Huyton L36 1AA", "Warrington WA1 1AA",
-                     "Ormskirk L39 2AA", "Ellesmere Port CH65 4AA", "Manchester M1 1AA"):
+    def test_wider_area_postcodes_and_places_are_local(self):
+        for text in ("Kirkby L32 8XX", "Huyton L36 1AA", "Prescot L34 1AA", "Warrington WA1 1AA",
+                     "Lymm WA13 0AA", "Wigan WN1 1AA", "Leigh WN7 1AA", "Ormskirk L39 2AA",
+                     "Skelmersdale WN8 6AA", "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
+                     "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA", "Rainhill L35 5AB"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "LOCAL")
+
+    def test_places_beyond_the_wider_area_are_out_of_area(self):
+        for text in ("Manchester M1 1AA", "Preston PR1 2AA", "Bolton BL1 1AA", "Crewe CW1 2AA",
+                     "Stockport SK1 1AA", "Blackpool FY1 1AA", "Chorley PR7 1AA",
+                     "Cheshire East", "Chester-le-Street DH3 3AA", "Wrexham LL11 1AA"):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_borderline_postcodes_go_to_review(self):
-        for text in ("L35 5AB", "Neston CH64 3RD", "Merseyside", "Cheshire"):
+        for text in ("CH4 8AA", "Merseyside", "Cheshire", "Greater Manchester", "North West"):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "REVIEW")
 
@@ -184,7 +193,7 @@ class PostcodeAreaTests(unittest.TestCase):
         for description in (
             "Sites in Runcorn WA7 2PQ and Edinburgh EH1 1AA",
             "Sites at WA7 2PQ and across Scotland",
-            "Sites at WA7 2PQ and Rainhill L35 5AB",
+            "Sites at WA7 2PQ and Crewe CW1 2AA",
         ):
             with self.subTest(description=description):
                 record = {"location_text": "", "title": "Cleaning", "description": description}
@@ -208,19 +217,26 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "LOCAL")
 
-    def test_east_merseyside_alone_needs_checking_because_it_includes_knowsley(self):
-        self.assertEqual(self.classify("UKD71"), "REVIEW")
+    def test_wider_area_region_codes_are_local(self):
+        for code in ("UKD61", "UKD63", "UKD71"):
+            with self.subTest(code=code):
+                self.assertEqual(self.classify(code), "LOCAL")
 
-    def test_east_merseyside_with_a_target_place_is_local(self):
-        self.assertEqual(self.classify("UKD71 St Helens"), "LOCAL")
-        self.assertEqual(self.classify("UKD71 Runcorn"), "LOCAL")
-        self.assertEqual(self.classify("UKD71 WA10 1AA"), "LOCAL")
+    def test_codes_covering_the_area_and_more_need_checking(self):
+        for code in ("UKD", "UKD3", "UKD36", "UKD47", "UKD6", "UKD7"):
+            with self.subTest(code=code):
+                self.assertEqual(self.classify(code), "REVIEW")
 
-    def test_east_merseyside_with_knowsley_needs_checking(self):
-        self.assertEqual(self.classify("UKD71 Knowsley"), "REVIEW")
+    def test_a_broad_code_is_confirmed_by_a_place_or_postcode(self):
+        self.assertEqual(self.classify("UKD36 Wigan"), "LOCAL")
+        self.assertEqual(self.classify("UKD47 Ormskirk"), "LOCAL")
+        self.assertEqual(self.classify("UKD36 Bolton"), "OUT_OF_AREA")
+        self.assertEqual(self.classify("UKD36 Leigh"), "REVIEW")
+        self.assertEqual(self.classify("Merseyside, Edinburgh"), "OUT_OF_AREA")
+        self.assertEqual(self.classify("Greater Manchester, Bolton"), "OUT_OF_AREA")
 
     def test_region_codes_for_other_areas_are_out_of_area(self):
-        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD61", "UKD63", "UKC11"):
+        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD62", "UKD41", "UKC11"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "OUT_OF_AREA")
 
@@ -236,7 +252,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
                 self.assertEqual(self.classify(place), "LOCAL")
 
     def test_names_shared_with_other_places_need_checking(self):
-        for place in ("Woolton Hill", "Garston", "Halton", "Walton", "Sutton"):
+        for place in ("Woolton Hill", "Garston", "Halton", "Walton", "Sutton", "Leigh", "Kirkby", "Whiston", "Orrell"):
             with self.subTest(place=place):
                 self.assertEqual(self.classify(place), "REVIEW")
 
@@ -245,7 +261,58 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
         self.assertEqual(self.classify("Halton Borough Council, Runcorn WA7 2PQ"), "LOCAL")
 
     def test_liverpool_street_london_is_not_liverpool(self):
-        self.assertEqual(self.classify("Liverpool Street, London"), "REVIEW")
+        self.assertEqual(self.classify("Liverpool Street, London"), "OUT_OF_AREA")
+
+
+class OverlapAndTradeTests(unittest.TestCase):
+    def classify(self, location_text):
+        return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
+
+    def test_longer_names_win_over_the_shorter_name_inside_them(self):
+        self.assertEqual(self.classify("Preston Brook, Runcorn"), "LOCAL")
+        self.assertEqual(self.classify("Cheshire West and Chester"), "LOCAL")
+        self.assertEqual(self.classify("Cheshire East"), "OUT_OF_AREA")
+        self.assertEqual(self.classify("Preston"), "OUT_OF_AREA")
+
+    def score(self, title, description="", location_text="Liverpool L2 2DH", services=None):
+        record = {
+            "title": title, "description": description, "buyer": "Test buyer",
+            "location_text": location_text, "estimated_value_gbp": "",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        return tenderscout.score_record(
+            record, services or tenderscout.SERVICE_ORDER, "Target area", None, None)
+
+    def test_each_trade_is_recognised_and_labelled(self):
+        cases = {
+            "Commercial cleaning of council offices": "Cleaning",
+            "Soft FM and caretaking services": "Facilities management",
+            "Responsive repairs and void works for housing stock": "Property maintenance",
+            "Painting and decorating framework": "Property maintenance",
+            "Roof repair programme": "Property maintenance",
+            "School refurbishment and extension works": "Construction",
+            "Demolition and groundworks": "Construction",
+            "New build housing development": "Construction",
+        }
+        for title, label in cases.items():
+            with self.subTest(title=title):
+                result = self.score(title)
+                self.assertIsNotNone(result)
+                self.assertEqual(result["service_match"], label)
+
+    def test_unrelated_tenders_are_ignored(self):
+        for title in ("Supply of laptops", "Software licences", "Catering services",
+                      "Legal advice framework"):
+            with self.subTest(title=title):
+                self.assertIsNone(self.score(title))
+
+    def test_a_trade_can_be_switched_off(self):
+        self.assertIsNone(self.score("Building refurbishment", services=["cleaning", "fm"]))
+        self.assertIsNotNone(self.score("Building refurbishment", services=["construction"]))
+
+    def test_cleaning_wins_when_a_tender_matches_several_trades(self):
+        result = self.score("Cleaning after refurbishment works")
+        self.assertEqual(result["service_match"], "Cleaning")
 
 
 if __name__ == "__main__":

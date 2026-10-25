@@ -42,6 +42,9 @@ CLEANING_TERMS = [
     "washroom", "janitorial", "hygiene services", "sanitary",
     "graffiti removal", "industrial cleaning", "specialised cleaning",
     "specialized cleaning", "biohazard cleaning", "kitchen extraction",
+    "commercial cleaning", "office cleaning", "contract cleaning",
+    "building cleaning", "school cleaning", "communal cleaning",
+    "cleansing services",
 ]
 FM_TERMS = [
     "facilities management", "facility management", "hard fm", "soft fm",
@@ -49,23 +52,53 @@ FM_TERMS = [
     "caretaker", "grounds maintenance", "waste management", "pest control",
     "planned preventative maintenance", "ppm", "property maintenance",
 ]
+MAINTENANCE_TERMS = [
+    "property maintenance", "building maintenance", "estates maintenance",
+    "repairs and maintenance", "repair and maintenance", "maintenance and repair",
+    "responsive repairs", "reactive repairs", "reactive maintenance",
+    "planned maintenance", "cyclical maintenance", "void repairs", "void works",
+    "void property", "housing repairs", "property repairs", "minor works",
+    "painting and decorating", "decoration services", "external decoration",
+    "gas servicing", "gas safety", "boiler servicing", "heating maintenance",
+    "electrical maintenance", "electrical testing", "fixed wire testing",
+    "fire alarm", "emergency lighting", "roofing", "roof repair", "plumbing",
+    "joinery", "handyman", "damp proofing", "window repairs", "door repairs",
+    "lift maintenance", "legionella", "fire safety works",
+]
+CONSTRUCTION_TERMS = [
+    "construction", "refurbishment", "refurbish", "building works",
+    "building contractor", "new build", "demolition", "groundworks",
+    "fit out", "fit-out", "renovation", "design and build", "retrofit",
+    "extension works", "conversion works", "building alterations",
+    "civil engineering", "structural works", "remodelling", "redevelopment",
+]
 EXCLUDE_TERMS = [
     "software", "information technology", "it equipment", "laptop",
     "cyber security", "telecommunications", "road construction",
-    "new build", "building construction", "architectural services",
+    "architectural services",
 ]
 
+# Order matters: a tender that matches several trades gets the first label.
+SERVICE_ORDER = ["cleaning", "fm", "maintenance", "construction"]
+SERVICE_LABELS = {
+    "cleaning": "Cleaning",
+    "fm": "Facilities management",
+    "maintenance": "Property maintenance",
+    "construction": "Construction",
+}
+
 # --- Target area ------------------------------------------------------------
-# Only tenders delivered in these five council areas are shortlisted:
-# Liverpool, Sefton, Wirral, St Helens and Halton.
+# Core areas: Liverpool, Sefton, Wirral, St Helens and Halton.
+# Wider areas: Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and
+# Chester (Chester, Ellesmere Port, Neston, Northwich, Winsford, Frodsham).
 # Postcodes are the main evidence because place names are ambiguous. Royal Mail
-# postcode districts do not line up exactly with council boundaries, so
-# borderline districts go to the review queue instead of the shortlist.
+# postcode districts do not line up exactly with council boundaries, so borderline
+# districts go to the review queue instead of the shortlist.
 # Edit these sets to change the area.
 TARGET_AREA_LABEL = "Target area"
 
 LOCAL_POSTCODE_DISTRICTS = {
-    # Liverpool (L24 also covers Hale in Halton)
+    # Liverpool
     *(f"L{n}" for n in range(1, 20)), "L24", "L25", "L27",
     # Sefton
     "L20", "L21", "L22", "L23", "L29", "L30", "L31", "L37", "L38", "PR8", "PR9",
@@ -75,9 +108,20 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA9", "WA10", "WA11", "WA12",
     # Halton
     "WA7", "WA8",
+    # Knowsley
+    "L26", "L28", "L32", "L33", "L34", "L35", "L36",
+    # Warrington
+    "WA1", "WA2", "WA3", "WA4", "WA5", "WA13",
+    # Wigan
+    "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7",
+    # West Lancashire
+    "L39", "L40", "WN8",
+    # Cheshire West and Chester
+    "CH1", "CH2", "CH3", "CH64", "CH65", "CH66", "WA6", "CW6", "CW7", "CW8", "CW9",
 }
-# Districts that straddle the target area and its neighbours.
-REVIEW_POSTCODE_DISTRICTS = {"L35", "CH64"}
+# Districts that straddle the target area and a neighbour (CH4 includes parts of
+# Wales).
+REVIEW_POSTCODE_DISTRICTS = {"CH4"}
 
 LOCAL_PLACE_TERMS = [
     # Liverpool
@@ -102,28 +146,43 @@ LOCAL_PLACE_TERMS = [
     "halton borough", "borough of halton", "halton council", "runcorn", "widnes",
     "daresbury", "preston brook", "murdishaw", "castlefields", "palacefields",
     "weston point", "halton brook",
+    # Knowsley
+    "knowsley", "huyton", "prescot", "halewood", "stockbridge village",
+    "tarbock", "roby", "cronton",
+    # Warrington
+    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
+    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
+    # Wigan
+    "wigan", "hindley", "standish", "golborne", "tyldesley", "atherton",
+    "ashton-in-makerfield", "ince-in-makerfield", "shevington", "aspull",
+    "pemberton",
+    # West Lancashire
+    "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton",
+    "up holland",
+    # Cheshire West and Chester
+    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
+    "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
 # Names that also exist in other parts of the UK. On their own they only send a
 # tender to the review list; a postcode or a clear place name must confirm them.
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
-    "eccleston", "halton", "orrell", "thornton", "sutton",
+    "eccleston", "halton", "orrell", "thornton", "sutton", "kirkby", "whiston",
+    "birchwood", "leigh", "astley",
 ]
 # Too broad to confirm the target area on their own.
-WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire", "neston"]
-# Places that clearly are not in the target area (including Knowsley, which is
-# deliberately excluded, and everything in Scotland).
+WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire",
+                   "greater manchester"]
+# Places that clearly are not in the target area, including everything in Scotland.
 OUT_OF_AREA_TERMS = [
-    "knowsley", "kirkby", "huyton", "prescot", "whiston", "halewood",
-    "liverpool street",
-    "ormskirk", "skelmersdale", "ellesmere port", "warrington", "wigan",
-    "chester", "northwich", "crewe",
+    "liverpool street", "chester-le-street", "crewe", "cheshire east",
+    "macclesfield", "knutsford", "altrincham",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
-    "lancaster", "cumbria", "barrow-in-furness", "northumberland",
+    "lancaster", "cumbria", "barrow-in-furness", "northumberland", "chorley",
     "leeds", "sheffield", "nottingham", "london", "birmingham", "bristol",
     "cardiff", "newcastle", "oxford", "cambridge", "wales", "northern ireland",
-    "belfast",
+    "belfast", "flintshire", "wrexham",
     "scotland", "scottish", "glasgow", "edinburgh", "aberdeen", "dundee",
     "inverness", "perth", "stirling", "falkirk", "paisley", "ayr",
     "livingston", "kirkcaldy", "lanarkshire", "ayrshire", "fife", "highland",
@@ -135,17 +194,22 @@ FULL_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b")
 DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 
 # Find a Tender and Contracts Finder often give the region as a NUTS code instead
-# of a postcode. UKD72 Liverpool, UKD73 Sefton and UKD74 Wirral are in the target
-# area. UKD71 (East Merseyside) also covers Knowsley, which is excluded, so it
-# needs a postcode or place name to confirm. Every other UK code is outside.
+# of a postcode. These codes are confirmed against the published code lists:
+# UKD61 Warrington, UKD63 Cheshire West and Chester, UKD71 East Merseyside
+# (Knowsley, St Helens, Halton), UKD72 Liverpool, UKD73 Sefton, UKD74 Wirral.
+# Codes that cover the target area plus places outside it (Greater Manchester,
+# Lancashire, the broad Cheshire and North West codes) need a postcode or place
+# name to confirm. Every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD72", "UKD73", "UKD74"}
-REVIEW_NUTS = {"UKD", "UKD7", "UKD71"}
+LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
+REVIEW_NUTS = {
+    "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
+    "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
+}
 
 
 def nuts_codes(text):
     return {"UK" + m.group(1) + m.group(2) for m in NUTS_RE.finditer(text.upper())}
-
 
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
@@ -382,11 +446,15 @@ def _page_url(base_url, params, cursor):
     return base_url + "?" + urllib.parse.urlencode(page_params)
 
 
-def fetch_fts(days, max_pages):
+def fetch_fts(days, max_pages, max_seconds=None):
     results = []
+    started = time.monotonic()
     updated_from = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
     cursor = None
     for _ in range(max_pages):
+        if max_seconds and time.monotonic() - started > max_seconds:
+            print("[WARN] Stopped early: the time limit for this source was reached", file=sys.stderr)
+            break
         params = {"stages": "tender", "limit": "100", "updatedFrom": updated_from}
         url = _page_url(FTS_URL, params, cursor)
         try:
@@ -403,12 +471,16 @@ def fetch_fts(days, max_pages):
     return results
 
 
-def fetch_contracts_finder(days, max_pages):
+def fetch_contracts_finder(days, max_pages, max_seconds=None):
     results = []
+    started = time.monotonic()
     today = datetime.now(timezone.utc).date()
     start = today - timedelta(days=days)
     cursor = None
     for _ in range(max_pages):
+        if max_seconds and time.monotonic() - started > max_seconds:
+            print("[WARN] Stopped early: the time limit for this source was reached", file=sys.stderr)
+            break
         params = {
             "publishedFrom": start.isoformat(),
             "publishedTo": today.isoformat(),
@@ -450,6 +522,21 @@ def place_hits(text, terms):
     ]
 
 
+def drop_contained(hits, longer_hits):
+    """Drop a hit that is just part of a longer matched name.
+
+    "preston" inside "preston brook", or "cheshire" inside "cheshire east", should
+    not count on its own: the longer, more specific name decides.
+    """
+    kept = []
+    for hit in hits:
+        pattern = r"(?<![a-z])" + re.escape(hit) + r"(?![a-z])"
+        if any(len(other) > len(hit) and re.search(pattern, other) for other in longer_hits):
+            continue
+        kept.append(hit)
+    return kept
+
+
 def postcode_districts(text, include_bare=False):
     """Return (full-postcode districts, bare target/review districts) found in text."""
     upper = text.upper()
@@ -488,10 +575,24 @@ def classify_geography(record, region):
     nuts_weak = sorted(c for c in nuts if c in REVIEW_NUTS)
     nuts_out = sorted(c for c in nuts if c not in LOCAL_NUTS | REVIEW_NUTS)
 
-    strong_local = pc_local + nuts_local + place_hits(location_text, LOCAL_PLACE_TERMS)
-    strong_out = pc_other + nuts_out + place_hits(location_text, OUT_OF_AREA_TERMS)
-    weak = pc_review + nuts_weak + place_hits(
-        location_text, WEAK_AREA_TERMS + AMBIGUOUS_PLACE_TERMS)
+    local_raw = place_hits(location_text, LOCAL_PLACE_TERMS)
+    out_raw = place_hits(location_text, OUT_OF_AREA_TERMS)
+    # The longer, more specific name wins: "preston" is not Preston Brook, and
+    # "chester" is not Chester-le-Street.
+    broad_raw = place_hits(location_text, WEAK_AREA_TERMS)
+    local_places = drop_contained(local_raw, out_raw)
+    out_places = drop_contained(out_raw, local_raw + broad_raw)
+    named = local_places + out_places
+    ambiguous = drop_contained(place_hits(location_text, AMBIGUOUS_PLACE_TERMS), named)
+    broad = drop_contained(broad_raw, named)
+
+    strong_local = pc_local + nuts_local + local_places
+    strong_out = pc_other + nuts_out + out_places
+    # Place-level doubt (a shared name, a borderline postcode) means a person
+    # should look. Broad region words and codes only describe the wider region, so
+    # on their own they never rescue a tender whose named place is outside.
+    weak_place = pc_review + ambiguous
+    weak = weak_place + nuts_weak + broad
 
     if strong_local and strong_out:
         return "REVIEW", (
@@ -502,10 +603,10 @@ def classify_geography(record, region):
         return "LOCAL", (
             "Structured delivery/site location: " + ", ".join(strong_local[:3])
         )
-    if strong_out and weak:
+    if strong_out and weak_place:
         return "REVIEW", (
             "Delivery/site location is mixed or borderline: "
-            + ", ".join((weak + strong_out)[:5])
+            + ", ".join((weak_place + strong_out)[:5])
         )
     if strong_out:
         return "OUT_OF_AREA", (
@@ -548,20 +649,21 @@ def score_record(record, services, region, min_value, max_value):
         record.get("title", ""), record.get("description", ""),
         record.get("buyer", ""),
     ]).lower()
-    cleaning_hits = keyword_hits(fulltext, CLEANING_TERMS)
-    fm_hits = keyword_hits(fulltext, FM_TERMS)
+    trade_hits = {
+        "cleaning": keyword_hits(fulltext, CLEANING_TERMS),
+        "fm": keyword_hits(fulltext, FM_TERMS),
+        "maintenance": keyword_hits(fulltext, MAINTENANCE_TERMS),
+        "construction": keyword_hits(fulltext, CONSTRUCTION_TERMS),
+    }
     exclude_hits = keyword_hits(fulltext, EXCLUDE_TERMS)
-    if "cleaning" in services and cleaning_hits:
-        service = "Cleaning"
-    elif "fm" in services and fm_hits:
-        service = "Facilities management"
-    else:
+    matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
+    if not matched:
         return None
-    if exclude_hits and not (cleaning_hits or fm_hits):
-        return None
+    service = SERVICE_LABELS[matched[0]]
+    service_hits = [term for t in matched for term in trade_hits[t]]
 
     score, reasons = 3, []
-    reasons.append("service keywords: " + ", ".join((cleaning_hits + fm_hits)[:4]))
+    reasons.append("service keywords: " + ", ".join(dict.fromkeys(service_hits))[:80])
     region = normalise_region(region)
     geo_class, geo_reason = classify_geography(record, region)
     record["region_match"] = geo_class
@@ -604,7 +706,7 @@ def score_record(record, services, region, min_value, max_value):
         deadline_status = "Deadline missing — manual check required"
         reasons.append("deadline missing or unparsed")
 
-    if exclude_hits and (cleaning_hits or fm_hits):
+    if exclude_hits:
         score -= 1
         reasons.append("mixed keywords; inspect scope")
 
@@ -641,15 +743,15 @@ def write_csv(path, rows):
 
 def main():
     parser = argparse.ArgumentParser(description="TenderScout official-feed collector and filter")
-    parser.add_argument("--days", type=int, default=14, help="Look-back window for publication/update date (default 14)")
+    parser.add_argument("--days", type=int, default=60, help="Look-back window for publication/update date (default 60)")
     parser.add_argument(
         "--region", choices=[TARGET_AREA_LABEL, "North West", "UK wide"], default=TARGET_AREA_LABEL,
         help="'Target area' = Liverpool, Sefton, Wirral, St Helens, Halton ('North West' is an alias)")
-    parser.add_argument("--services", nargs="+", choices=["cleaning", "fm"], default=["cleaning", "fm"])
+    parser.add_argument("--services", nargs="+", choices=SERVICE_ORDER, default=SERVICE_ORDER)
     parser.add_argument("--min-value", type=float, default=None, help="Minimum estimated GBP value")
     parser.add_argument("--max-value", type=float, default=None, help="Maximum estimated GBP value")
     parser.add_argument("--min-score", type=int, default=3, help="Minimum relevance score (default 3)")
-    parser.add_argument("--pages", type=int, default=5, help="Maximum pages to fetch from each source")
+    parser.add_argument("--pages", type=int, default=10, help="Maximum pages to fetch from each source")
     parser.add_argument("--out", default="tenderscout_results.csv", help="Filtered output CSV path")
     args = parser.parse_args()
 

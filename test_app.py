@@ -240,7 +240,7 @@ class RefreshSummaryTests(AppTestCase):
         self.assertTrue(r.headers["Location"].startswith("/?done=1"))
         page = self.client.get(r.headers["Location"]).data.decode()
         self.assertIn("Refresh complete.", page)
-        self.assertIn("4 notices checked. 3 were cleaning or FM and 1 of those were outside your area.", page)
+        self.assertIn("4 notices checked. 3 matched your trades; 1 of those were outside your area.", page)
         self.assertIn("1 confirmed in your area, 1 need a location check.", page)
 
     def test_summary_banner_ignores_junk_values(self):
