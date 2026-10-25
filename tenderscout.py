@@ -668,7 +668,7 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             return results
         # Find a Tender rate-limits bursty clients. Keep requests below a
         # conservative 10/minute cadence rather than hammering each page/window.
-        time.sleep(5.5 if source == "Find a Tender" else 0.2)
+        time.sleep(10.5 if source == "Find a Tender" else 0.2)
     stats["more"] = True  # used every allowed page and the feed still had more
     return results
 
@@ -682,7 +682,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             break
         if stats["windows"]:
             # Windows without a next-page link still count as separate API calls.
-            time.sleep(5.5)
+            time.sleep(10.5)
         stats["windows"] += 1
         # Do not send the API stages filter here. Find a Tender's documented
         # filter has historically omitted many Procurement Act 2023 notices,
