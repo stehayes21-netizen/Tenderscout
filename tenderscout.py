@@ -525,8 +525,20 @@ def extract_records(payload, source):
             ):
                 add_location_values(candidate, location_parts)
 
+            raw_tags = rel.get("tag") or rel.get("tags") or []
+            if isinstance(raw_tags, str):
+                raw_tags = [raw_tags]
+            tag_text = " ".join(as_text(tag) for tag in raw_tags).lower()
+            if "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
+                opportunity_stage = "Planning / upcoming"
+            elif "tender" in tag_text:
+                opportunity_stage = "Open for bids"
+            else:
+                opportunity_stage = "Open for bids" if (tender.get("tenderPeriod") or tender.get("tender_period")) else "Other notice"
+
             output.append({
                 "source": source,
+                "opportunity_stage": opportunity_stage,
                 "location_text": ", ".join(dict.fromkeys(location_parts)),
                 "published_date": as_text(published),
                 "title": title.strip(),
@@ -655,7 +667,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             break
         stats["windows"] += 1
         params = {
-            "stages": "tender", "limit": "100",
+            "stages": "planning,tender", "limit": "100",
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
@@ -911,17 +923,21 @@ def score_record(record, services, region, min_value, max_value):
 
 
 def dedupe(records):
-    seen = set()
-    result = []
+    """Deduplicate procurement processes, preferring the most actionable stage."""
+    priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
+    by_key = {}
     for row in records:
-        key = row.get("ocid") or (row.get("title", "").lower(), row.get("buyer", "").lower())
-        if not key or key == "":
-            key = (row.get("title", "").lower(), row.get("buyer", "").lower(), row.get("published_date", ""))
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(row)
-    return result
+        key = row.get("ocid") or (
+            row.get("title", "").lower(), row.get("buyer", "").lower(),
+            row.get("published_date", ""),
+        )
+        if not key:
+            key = (row.get("title", "").lower(), row.get("buyer", "").lower(),
+                   row.get("published_date", ""))
+        current = by_key.get(key)
+        if current is None or priority.get(row.get("opportunity_stage"), 0) > priority.get(current.get("opportunity_stage"), 0):
+            by_key[key] = row
+    return list(by_key.values())
 
 
 def write_csv(path, rows):
