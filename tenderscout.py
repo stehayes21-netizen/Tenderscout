@@ -384,14 +384,16 @@ def get_json(url: str, timeout: int = 25):
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
-        # Keep the feed's own explanation, so a rejected request can be understood.
+        # Never print the full cursor URL: it can be enormous and makes the
+        # mobile results page unreadable. Preserve Retry-After for diagnostics.
         try:
-            body = " ".join(exc.read().decode("utf-8", errors="replace").split())[:200]
+            body = " ".join(exc.read().decode("utf-8", errors="replace").split())[:180]
         except Exception:
             body = ""
-        query = urllib.parse.urlparse(url).query
+        retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
+        retry_note = f" Retry after {retry_after} seconds." if retry_after.isdigit() else ""
         raise RuntimeError(
-            f"HTTP {exc.code} {exc.reason}. Feed said: {body or 'nothing'}. Request: ?{query}"
+            f"HTTP {exc.code} {exc.reason}.{retry_note} Feed said: {body or 'no details returned'}"
         ) from None
 
 
