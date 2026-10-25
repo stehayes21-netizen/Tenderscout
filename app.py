@@ -87,8 +87,8 @@ def ensure_schema(db):
         return
     id_column = "SERIAL PRIMARY KEY" if USE_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
     db.execute(f"CREATE TABLE IF NOT EXISTS tenders (id {id_column}, {COLUMNS})")
-    db.execute("""CREATE TABLE IF NOT EXISTS private_leads (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    db.execute(f"""CREATE TABLE IF NOT EXISTS private_leads (
+        id {id_column},
         title TEXT NOT NULL,
         trade_category TEXT NOT NULL,
         location_text TEXT NOT NULL,
