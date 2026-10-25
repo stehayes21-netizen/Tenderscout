@@ -133,7 +133,12 @@ TRADE_KEYWORDS = {
     "Furniture and equipment": ["furniture supply", "furniture installation", "equipment supply"],
     "IT and telecoms": ["information technology", "telecommunications", "network infrastructure"],
     "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "transport services"],
-    "Water and fire damage restoration": ["water damage restoration", "fire damage restoration", "flood restoration"],\n    "Interior design": ["interior design", "interior fit out design"],\n    "Signage and sign making": ["signage", "sign making", "wayfinding signs"],\n    "Rope access and specialist access": ["rope access", "industrial abseiling", "specialist access"],\n    "Environmental services": ["environmental services", "environmental remediation", "contaminated land"],\n    "Other / unclassified": [],
+    "Water and fire damage restoration": ["water damage restoration", "fire damage restoration", "flood restoration"],
+    "Interior design": ["interior design", "interior fit out design"],
+    "Signage and sign making": ["signage", "sign making", "wayfinding signs"],
+    "Rope access and specialist access": ["rope access", "industrial abseiling", "specialist access"],
+    "Environmental services": ["environmental services", "environmental remediation", "contaminated land"],
+    "Other / unclassified": [],
 }
 
 def classify_trade_category(fulltext):
