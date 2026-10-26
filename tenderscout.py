@@ -447,11 +447,12 @@ def money_value(value):
         return ""
 
 
-def add_location_values(obj, location_parts):
-    """Collect values only from explicit delivery/site location fields.
+def add_location_values(obj, location_parts, in_location=False):
+    """Collect delivery/site evidence without mistaking buyer metadata for a site.
 
-    We intentionally ignore buyer addresses and other generic organisation details
-    unless they are nested inside a contract/site delivery structure.
+    Location descriptions are common in OCDS feeds even when no structured
+    address is supplied. Read a description only after entering an explicit
+    delivery/site field; never read the tender's general description as a location.
     """
     if obj is None:
         return
@@ -462,19 +463,32 @@ def add_location_values(obj, location_parts):
         return
     if isinstance(obj, list):
         for item in obj:
-            add_location_values(item, location_parts)
+            add_location_values(item, location_parts, in_location=in_location)
         return
     if not isinstance(obj, dict):
         return
 
+    if in_location:
+        description = obj.get("description")
+        if isinstance(description, str) and description.strip():
+            location_parts.append(description.strip())
+
     for key in EXPLICIT_LOCATION_KEYS:
         if key in obj:
-            add_location_values(obj[key], location_parts)
+            # A location becomes trusted context only through a known delivery,
+            # site, or address field. Generic "description" is never a trigger.
+            child_is_location = in_location or key in {
+                "deliveryAddress", "deliveryAddresses", "delivery_address",
+                "deliveryLocation", "deliveryLocations", "delivery_location",
+                "location", "locations", "address", "addresses", "siteAddress",
+                "site_address", "site",
+            }
+            add_location_values(obj[key], location_parts, in_location=child_is_location)
 
-    # If the address/location object itself contains a nested address block, capture it.
+    # Some publishers wrap the actual site address one level deeper.
     for nested_key in ("address", "location", "deliveryAddress", "deliveryLocation"):
-        if nested_key in obj:
-            add_location_values(obj[nested_key], location_parts)
+        if nested_key in obj and nested_key not in EXPLICIT_LOCATION_KEYS:
+            add_location_values(obj[nested_key], location_parts, in_location=True)
 
 
 def extract_records(payload, source):
