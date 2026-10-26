@@ -270,7 +270,7 @@ def dashboard():
     db = connect_db()
     condition = (
         "region_match = 'REVIEW'" if review_view
-        else "region_match IN ('LOCAL', 'MANUAL')"
+        else "region_match IN ('LOCAL', 'MANUAL', 'REVIEW')"
     )
     params = []
     if pipeline_view:
@@ -970,8 +970,12 @@ def private_leads():
         urgency = (request.form.get("urgency") or "Flexible / no rush").strip()
         if urgency not in LEAD_URGENCIES:
             urgency = "Flexible / no rush"
-        if not title or trade not in TRADE_CATEGORIES or not location or source_name not in LEAD_SOURCES:
-            message = '<p class="error">Please enter a title, valid trade, location and choose a source type.</p>'
+        if not title or not location:
+            message = '<p class="error">Please enter the job and location. Source type is optional.</p>'
+        elif trade not in TRADE_CATEGORIES:
+            message = '<p class="error">Please choose a valid trade category.</p>'
+        elif source_name and source_name not in LEAD_SOURCES:
+            message = '<p class="error">Please choose a valid source type or leave it blank.</p>'
         elif source_url and not source_url.startswith(("https://", "http://")):
             message = '<p style="color:#a11">Source link must start with http:// or https://.</p>'
         else:
@@ -991,16 +995,12 @@ def private_leads():
         link = (f'<a href="{safe(row["source_url"])}" target="_blank" rel="noopener">Open original source</a>'
                 if row["source_url"] and row["source_url"].startswith(("https://", "http://")) else "")
         share_message = "\n".join([
-            "PRIVATE CUSTOMER LEAD — " + str(row["title"] or ""),
-            "Trade needed: " + str(row["trade_category"] or ""),
-            "Urgency: " + str(row["urgency"] or "Flexible / no rush"),
-            "Lead status: " + str(row["status"] or "New"),
-            "Captured: " + str(row["created_at"] or "")[:10],
-            "Location: " + str(row["location_text"] or ""),
-            "Job details: " + str(row["details"] or "See original source / confirm scope"),
-            "Customer/business contact: " + str(row["contact_details"] or "Not supplied — confirm via source"),
-            "Found via: " + str(row["source_name"] or ""),
-            "Original source: " + str(row["source_url"] or "No direct link saved"),
+            "JOB: " + str(row["title"] or ""),
+            "TRADE: " + str(row["trade_category"] or ""),
+            "LOCATION: " + str(row["location_text"] or ""),
+            "WHAT THEY WANT: " + str(row["details"] or "Confirm job scope with the customer"),
+            "CONTACT: " + str(row["contact_details"] or "Not supplied — check original source"),
+            "SOURCE: " + str(row["source_url"] or row["source_name"] or "Not recorded"),
         ])
         whatsapp_url = "https://wa.me/?" + urlencode({"text": share_message})
         email_url = "mailto:?" + urlencode({"subject": "Trade lead: " + str(row["title"] or ""), "body": share_message})
@@ -1014,9 +1014,9 @@ def private_leads():
             f'<h3>{safe(row["title"])}</h3><p><b>Exact job location:</b> {safe(row["location_text"])}</p>'
             f'<p><b>Original source:</b> {safe(row["source_name"])} {link}</p>'
             f'<p><b>Customer / business contact:</b> {safe(row["contact_details"]) or "Not supplied — check the original post or contact the source"}</p>'
-            f'<p><b>Job details:</b><br>{safe(row["details"]) or "No extra details saved yet."}</p>'
-            f'<p><b>Status:</b> {safe(row["status"])} · <b>Captured:</b> {safe(row["created_at"][:10])}</p>'
-            f'<form method="post" action="/leads/{int(row["id"])}/status" class="status-form"><label>Lead progress<select name="status">{status_options}</select></label><button type="submit">Update status</button></form>'
+            f'<p><b>What they want:</b><br>{safe(row["details"]) or "No extra job details supplied."}</p>'
+            
+            
             f'<p class="share-actions"><a href="{safe(whatsapp_url)}" target="_blank" rel="noopener">Send lead by WhatsApp</a> <a href="{safe(email_url)}">Send lead by email</a></p></article>'
         )
     if not cards:
@@ -1036,15 +1036,15 @@ def private_leads():
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
         '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
-        '<p><b>Private to your account.</b> Save genuine enquiries, then choose the right tradesperson and send the lead yourself. Private leads never appear in the public-tender list.</p>'
+        '<p><b>Private leads.</b> Each card shows the job, trade, location and contact so you can pass it to a suitable tradesperson. They stay separate from public tenders.</p>'
         '<p><a href="/leads/export.csv">Download private leads CSV (backup)</a></p>'
         '<p>Record the most precise location and only save customer contact details when they were provided for this enquiry and can legitimately be reused. A direct source URL is optional.</p>'
         + message +
         '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Urgent gutter cleaning needed"></label>'
         '<label>Trade category<select name="trade_category" required><option value="">Choose the right trade</option>' + options + '</select></label>'
         '<label>Exact job location<input name="location_text" required maxlength="300" placeholder="e.g. street/area and postcode, Allerton L18"></label>'
-        '<label>Urgency<select name="urgency" required>' + "".join(f'<option value="{safe(u)}"{" selected" if u == "Flexible / no rush" else ""}>{safe(u)}</option>' for u in LEAD_URGENCIES) + '</select></label>'
-        '<label>Where did you find it?<select name="source_name" required><option value="">Choose a source</option>' + source_options + '</select><span class="helper">Select a source type instead of typing its name.</span></label>'
+        '<label>Urgency (optional)<select name="urgency">' + "".join(f'<option value="{safe(u)}"{" selected" if u == "Flexible / no rush" else ""}>{safe(u)}</option>' for u in LEAD_URGENCIES) + '</select></label>'
+        '<label>Where did you find it? (optional)<select name="source_name"><option value="">Choose a source</option>' + source_options + '</select><span class="helper">Select a source type instead of typing its name.</span></label>'
         '<label>Original post / source link (optional)<input name="source_url" type="url" maxlength="1000" placeholder="Paste a link only if you have one"></label>'
         '<label>Customer / business contact <span class="helper">(only where provided for this enquiry and appropriate to reuse)</span><input name="contact_details" maxlength="500" placeholder="e.g. name and phone number"></label>'
         '<label>Job details (optional)<textarea name="details" rows="3" maxlength="4000" placeholder="What needs doing, timing, access, safety concerns, budget if stated…"></textarea></label>'
