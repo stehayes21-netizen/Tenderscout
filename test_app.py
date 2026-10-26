@@ -259,9 +259,9 @@ class RefreshTests(AppTestCase):
         self.assertNotIn(b"example.com/edi", self.client.get("/?view=review").data)
 
     def test_explicit_worldwide_scope_is_not_put_in_local_review_queue(self):
-        result = tenderscout.classify_geography(
+        result = self.app_module.collector.classify_geography(
             {"location_text": "North West, British Overseas Territories, Channel Islands, Europe, Isle of Man, Rest of the World"},
-            tenderscout.TARGET_AREA_LABEL,
+            self.app_module.collector.TARGET_AREA_LABEL,
         )
         self.assertEqual(result[0], "OUT_OF_AREA")
 
