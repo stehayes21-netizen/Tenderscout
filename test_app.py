@@ -350,7 +350,7 @@ class RefreshTests(AppTestCase):
         self.assertIn("Procurement Team", page)
         self.assertIn("procurement@example.gov.uk", page)
         self.assertIn("Registered cleaning providers", page)
-        self.assertIn("Who should apply", page)
+        self.assertIn("Who can bid", page)
         self.assertIn("Job location", page)
 
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
