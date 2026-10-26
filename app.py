@@ -303,7 +303,10 @@ def dashboard():
         trade_text = row["trade_category"] or ""
         if not trade_text or trade_text == "Other / unclassified":
             trade_text = row["service_match"] or "this type of work"
-        location_text = row["location_text"] or "Not confirmed in the feed — open the official notice"
+        location_text = row["location_text"] or "Delivery location not supplied — open the official notice";
+        location_display = location_text;
+        if location_text.strip().upper() in {"UK, UNITED KINGDOM", "UNITED KINGDOM", "UKD63"}:
+            location_display = ("Cheshire West and Chester region (UKD63); full site postcode not supplied" if location_text.strip().upper() == "UKD63" else "UK-wide location only; exact site postcode not supplied")
         stage_text = row["opportunity_stage"] or "Open for bids"
         region_badge = ("Location needs checking" if row["region_match"] == "REVIEW" else "Confirmed local" if row["region_match"] == "LOCAL" else "Manual entry")
         if stage_text == "Planning / upcoming":
@@ -375,7 +378,7 @@ def dashboard():
           <h2>{safe(row["title"]) or "Untitled opportunity"}</h2>
           <p class="board-buyer">{safe(buyer_text)}</p>
           <div class="board-facts">
-            <p><b>Location</b><span>{safe(location_text)}</span></p>
+            <p><b>Location / postcode</b><span>{safe(location_display)}</span></p>
             <p><b>Estimated value</b><span>{safe(value_label)}</span></p>
             <p><b>Deadline</b><span class="deadline {deadline_class}">{safe(deadline_label)}</span></p>
             <p><b>Opportunity type</b><span>{safe(stage_text)}</span></p>
@@ -970,10 +973,10 @@ def private_leads():
         urgency = (request.form.get("urgency") or "Flexible / no rush").strip()
         if urgency not in LEAD_URGENCIES:
             urgency = "Flexible / no rush"
-        if not title or not location:
-            message = '<p class="error">Please enter the job and location. Source type is optional.</p>'
-        elif trade not in TRADE_CATEGORIES:
+        if trade not in TRADE_CATEGORIES:
             message = '<p class="error">Please choose a valid trade category.</p>'
+        elif not title or not location or not details:
+            message = '<p class="error">Please enter the job title, exact location and what the customer actually wants. Source type is optional.</p>'
         elif source_name and source_name not in LEAD_SOURCES:
             message = '<p class="error">Please choose a valid source type or leave it blank.</p>'
         elif source_url and not source_url.startswith(("https://", "http://")):
@@ -1011,10 +1014,10 @@ def private_leads():
         urgency_class = "urgent" if str(row["urgency"] or "").startswith("Urgent") else ""
         cards += (
             f'<article class="lead-card {urgency_class}"><p class="lead-kicker">{safe(row["trade_category"])} · {safe(row["urgency"] or "Flexible / no rush")}</p>'
-            f'<h3>{safe(row["title"])}</h3><p><b>Exact job location:</b> {safe(row["location_text"])}</p>'
+            f'<h3>{safe(row["title"])}</h3><p class="lead-location"><b>WHERE:</b> {safe(row["location_text"])}</p>'
             f'<p><b>Original source:</b> {safe(row["source_name"])} {link}</p>'
             f'<p><b>Customer / business contact:</b> {safe(row["contact_details"]) or "Not supplied — check the original post or contact the source"}</p>'
-            f'<p><b>What they want:</b><br>{safe(row["details"]) or "No extra job details supplied."}</p>'
+            f'<section class="lead-request"><h4>WHAT THE CUSTOMER NEEDS</h4><p>{safe(row["details"]) or "Not recorded yet — check the original post before passing this lead on."}</p></section>'
             
             
             f'<p class="share-actions"><a href="{safe(whatsapp_url)}" target="_blank" rel="noopener">Send lead by WhatsApp</a> <a href="{safe(email_url)}">Send lead by email</a></p></article>'
@@ -1030,7 +1033,7 @@ def private_leads():
         'label{display:block;margin:14px 0;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b8c6bd;border-radius:8px;font:inherit;margin-top:6px;background:white}'
         'button{padding:13px 18px;background:#168447;color:white;border:0;border-radius:9px;font-weight:bold;font-size:16px;width:100%;margin-top:8px}'
         'article{background:#f3f6f4;border:1px solid #e0e8e2;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
-        '.lead-kicker{font-weight:bold;color:#08783c}.urgent{border:2px solid #b45309;background:#fffaf0}.status-form label{display:block;font-weight:600}.status-form select{margin-bottom:8px}.share-actions{display:flex;gap:8px;flex-wrap:wrap}.share-actions a{display:inline-block;padding:10px;background:#e8f2eb;border-radius:8px;text-decoration:none;font-weight:bold}'
+        '.lead-kicker{font-weight:bold;color:#08783c}.lead-location{font-size:18px;background:#e8f2eb;padding:10px;border-radius:8px}.lead-request{background:#fff;border:1px solid #cbd9cf;border-radius:8px;padding:12px;margin:12px 0}.lead-request h4{margin:0 0 6px;color:#145c35;font-size:14px;letter-spacing:.03em}.urgent{border:2px solid #b45309;background:#fffaf0}.status-form label{display:block;font-weight:600}.status-form select{margin-bottom:8px}.share-actions{display:flex;gap:8px;flex-wrap:wrap}.share-actions a{display:inline-block;padding:10px;background:#e8f2eb;border-radius:8px;text-decoration:none;font-weight:bold}'
         'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
         '.helper{font-size:13px;color:#53645a;font-weight:normal}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
@@ -1047,7 +1050,7 @@ def private_leads():
         '<label>Where did you find it? (optional)<select name="source_name"><option value="">Choose a source</option>' + source_options + '</select><span class="helper">Select a source type instead of typing its name.</span></label>'
         '<label>Original post / source link (optional)<input name="source_url" type="url" maxlength="1000" placeholder="Paste a link only if you have one"></label>'
         '<label>Customer / business contact <span class="helper">(only where provided for this enquiry and appropriate to reuse)</span><input name="contact_details" maxlength="500" placeholder="e.g. name and phone number"></label>'
-        '<label>Job details (optional)<textarea name="details" rows="3" maxlength="4000" placeholder="What needs doing, timing, access, safety concerns, budget if stated…"></textarea></label>'
+        '<label>What exactly does the customer want? <span class="helper">(required — copy the actual request, not just the trade)</span><textarea name="details" required rows="5" maxlength="4000" placeholder="Example: wants rear patio pressure-washed, approx. 20 m², at the address above; asks for a quote this week. Only include details stated in the original enquiry."></textarea></label>'
         '<button type="submit">Save private lead</button></form><hr><h2>Recent private leads</h2>' + cards +
         '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></main></body></html>'
     )
