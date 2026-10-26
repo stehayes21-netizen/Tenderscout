@@ -973,10 +973,10 @@ def private_leads():
         urgency = (request.form.get("urgency") or "Flexible / no rush").strip()
         if urgency not in LEAD_URGENCIES:
             urgency = "Flexible / no rush"
-        if not title or not location or not details:
-            message = '<p class="error">Please enter the job title, exact location and what the customer actually wants. Source type is optional.</p>'
-        elif trade not in TRADE_CATEGORIES:
+        if trade not in TRADE_CATEGORIES:
             message = '<p class="error">Please choose a valid trade category.</p>'
+        elif not title or not location or not details:
+            message = '<p class="error">Please enter the job title, exact location and what the customer actually wants. Source type is optional.</p>'
         elif source_name and source_name not in LEAD_SOURCES:
             message = '<p class="error">Please choose a valid source type or leave it blank.</p>'
         elif source_url and not source_url.startswith(("https://", "http://")):
