@@ -300,7 +300,9 @@ def dashboard():
         link = safe(row["notice_url"])
         title_text = row["title"] or "Untitled opportunity"
         buyer_text = row["buyer"] or "the organisation named in the notice"
-        trade_text = row["trade_category"] or row["service_match"] or "this type of work"
+        trade_text = row["trade_category"] or ""
+        if not trade_text or trade_text == "Other / unclassified":
+            trade_text = row["service_match"] or "this type of work"
         location_text = row["location_text"] or "Not confirmed in the feed — open the official notice"
         stage_text = row["opportunity_stage"] or "Open for bids"
         if stage_text == "Planning / upcoming":
