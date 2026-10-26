@@ -521,7 +521,8 @@ class RefreshSummaryTests(AppTestCase):
                         description="Annual software licences."),
         ]
         with patch.object(collector, "fetch_fts", return_value=records), \
-             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+             patch.object(collector, "fetch_contracts_finder", return_value=[]), \
+             patch.object(collector, "fetch_bearings", return_value=[]):
             r = self.client.post("/refresh")
         self.assertEqual(r.status_code, 302)
         self.assertTrue(r.headers["Location"].startswith("/?done=1"))
