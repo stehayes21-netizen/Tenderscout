@@ -918,7 +918,7 @@ def private_leads():
         '<label>Where did you find it?<select name="source_name" required><option value="">Choose a source</option>' + source_options + '</select><span class="helper">Select a source type instead of typing its name.</span></label>'
         '<label>Original post / source link (optional)<input name="source_url" type="url" maxlength="1000" placeholder="Paste a link only if you have one"></label>'
         '<label>Customer / business contact <span class="helper">(only where provided for this enquiry and appropriate to reuse)</span><input name="contact_details" maxlength="500" placeholder="e.g. name and phone number"></label>'
-        '<label>Job details (optional)<textarea name="details" rows="3" maxlength="4000" placeholder="What needs doing, timing, access, safety concerns, budget if stated…"></textarea></label>
+        '<label>Job details (optional)<textarea name="details" rows="3" maxlength="4000" placeholder="What needs doing, timing, access, safety concerns, budget if stated…"></textarea></label>'
         '<button type="submit">Save private lead</button></form><hr><h2>Recent private leads</h2>' + cards +
         '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></main></body></html>'
     )
