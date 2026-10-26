@@ -18,7 +18,7 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.
 
 ## How the area filter works
-The filter looks for evidence in this order: postcodes, government region codes, place names, then postcodes written in the notice text.
+The filter confirms geography from structured delivery/site evidence: postcodes, government region codes and place names. Mentions in a title or general description are sent to review, not treated as confirmed delivery locations.
 
 | Result | Meaning |
 | --- | --- |
@@ -30,7 +30,7 @@ The filter looks for evidence in this order: postcodes, government region codes,
 
 **Longer names win.** "Preston Brook" is Halton, not Preston; "Chester-le-Street" is Durham, not Chester; "Cheshire East" is outside the area.
 
-**Notice text.** A full postcode written in the title or description (for example `WA7 2PQ`) counts as confirmed if nothing there points elsewhere. The reason shown on the card says so, so check the notice.
+**Title and description.** Place names and postcodes mentioned only in the title or general description are not proof of delivery location. They stay in the review queue until the official delivery/site fields can confirm the area.
 
 Target postcode districts are listed at the top of `tenderscout.py`. Royal Mail postcode districts don't line up exactly with council boundaries, so check them against your own knowledge and edit them if needed.
 
