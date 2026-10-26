@@ -78,6 +78,19 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Tender Scout", r.data)
 
+    def test_jobs_board_shows_scope_and_contract_period_without_expanding_card(self):
+        self.refresh_with([feed_record(
+            "board-visible-1",
+            "Liverpool, L1 1AA",
+            title="Commercial cleaning at local offices",
+            description="Daily office cleaning, washroom servicing and periodic deep cleaning.",
+        )])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Job at a glance", page)
+        self.assertIn("Daily office cleaning, washroom servicing and periodic deep cleaning.", page)
+        self.assertIn("Contract period:", page)
+        self.assertLess(page.index('<section class="board-summary">'), page.index('<details class="full-details">'))
+
     def test_manual_opportunity_persists_and_exports(self):
         r = self.client.post("/add", data={
             "title": "Test cleaning contract", "buyer": "Test buyer",
