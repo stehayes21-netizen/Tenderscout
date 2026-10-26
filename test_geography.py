@@ -426,3 +426,53 @@ class FindATenderRequestTests(unittest.TestCase):
         self.assertTrue(all(source == "Find a Tender" for _, _, source in captured))
         self.assertTrue(all("stages" not in params for _, params, _ in captured))
         self.assertTrue(all(params["limit"] == "100" for _, params, _ in captured))
+
+
+class DeliveryLocationDescriptionTests(unittest.TestCase):
+    def test_extracts_description_inside_explicit_delivery_location(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9876",
+                "buyer": {
+                    "name": "Example Council",
+                    "address": {"postalCode": "EH1 1AA", "locality": "Edinburgh"},
+                },
+                "tender": {
+                    "title": "Cleaning services",
+                    "description": "General tender description must not be treated as a site",
+                    "items": [{
+                        "deliveryLocation": {
+                            "description": "Sites across Liverpool and Knowsley"
+                        }
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("Sites across Liverpool and Knowsley", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
+        )
+        self.assertNotIn("General tender description", records[0]["location_text"])
+
+    def test_does_not_treat_general_tender_description_as_delivery_location(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9877",
+                "buyer": {
+                    "name": "Liverpool Council",
+                    "address": {"postalCode": "L2 2DH", "locality": "Liverpool"},
+                },
+                "tender": {
+                    "title": "Cleaning services",
+                    "description": "Services will be delivered in Liverpool",
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["location_text"], "")
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "REVIEW"
+        )
