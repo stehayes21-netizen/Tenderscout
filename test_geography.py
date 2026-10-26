@@ -648,5 +648,43 @@ class AdditionalDeliveryLocationSchemaTests(unittest.TestCase):
         )
 
 
+class BearingsDiscoveryTests(unittest.TestCase):
+    def test_bearings_import_links_provider_and_never_infers_delivery_location(self):
+        payload = {"data": [{
+            "id": "opp-test-1",
+            "title": "Cleaning services contract",
+            "provider": "Test provider",
+            "url": "https://provider.example/notice",
+            "bearings_url": "https://getbearings.co.uk/o/opp-test-1",
+            "kind": "tender",
+            "summary": "Commercial cleaning services",
+            "conditions": "SMEs may apply",
+            "where": "Liverpool City Region",
+            "closes": "2099-12-31",
+            "first_seen": "2026-10-26",
+        }, {
+            "id": "opp-test-2", "title": "Grant for businesses",
+            "url": "https://provider.example/grant", "kind": "grant",
+        }]}
+        with patch.object(tenderscout, "get_json", return_value=payload) as mocked:
+            stats = {}
+            rows = tenderscout.fetch_bearings(5, stats)
+        self.assertEqual(len(rows), 1)
+        self.assertIn("kind=tender", mocked.call_args.args[0])
+        self.assertEqual(rows[0]["notice_url"], "https://provider.example/notice")
+        self.assertEqual(rows[0]["location_text"], "")
+        self.assertIn("Source credit: Bearings", rows[0]["description"])
+        self.assertEqual(
+            tenderscout.classify_geography(rows[0], "Target area")[0], "REVIEW"
+        )
+        self.assertEqual(stats["records"], 1)
+
+    def test_bearings_feed_failure_is_reported_without_crashing(self):
+        with patch.object(tenderscout, "get_json", side_effect=RuntimeError("feed offline")):
+            stats = {}
+            self.assertEqual(tenderscout.fetch_bearings(5, stats), [])
+        self.assertIn("feed offline", stats["error"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
