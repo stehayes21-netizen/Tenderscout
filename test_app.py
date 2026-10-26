@@ -146,6 +146,7 @@ class AppSmokeTest(AppTestCase):
         self.assertIn(b"ProContract", r.data)
         self.assertIn(b"The Chest", r.data)
         self.assertIn(b"Formby Bubble", r.data)
+        self.assertNotIn(b"Wirral Council", r.data)
         self.assertIn(b"does not automatically scrape Facebook", r.data)
 
     def test_private_lead_is_saved_separately_from_public_tenders(self):
