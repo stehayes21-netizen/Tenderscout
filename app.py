@@ -67,6 +67,7 @@ class Database:
 COLUMNS = """
     source TEXT, title TEXT, buyer TEXT,
     published_date TEXT, location_text TEXT, description TEXT,
+    estimated_value_gbp TEXT, contract_start_date TEXT, contract_end_date TEXT,
     contact_name TEXT, contact_email TEXT, contact_phone TEXT, eligibility_text TEXT,
     service_match TEXT, score INTEGER,
     deadline TEXT, notice_url TEXT UNIQUE,
@@ -84,6 +85,9 @@ ADDED_COLUMNS = [
     ("region_match", "TEXT DEFAULT 'REVIEW'"),
     ("opportunity_stage", "TEXT DEFAULT 'Open for bids'"),
     ("description", "TEXT"),
+    ("estimated_value_gbp", "TEXT"),
+    ("contract_start_date", "TEXT"),
+    ("contract_end_date", "TEXT"),
     ("contact_name", "TEXT"),
     ("contact_email", "TEXT"),
     ("contact_phone", "TEXT"),
@@ -222,6 +226,32 @@ def deadline_info(deadline):
     return f"Closes {date_text} ({days} days)", "", False
 
 
+def format_money(value):
+    """Format a published contract value without inventing a missing amount."""
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return "Not stated in the feed"
+    return f"£{amount:,.0f}" if amount.is_integer() else f"£{amount:,.2f}"
+
+
+def display_date(value):
+    parsed = collector.parse_date(value)
+    return parsed.strftime("%d %B %Y").lstrip("0") if parsed else ""
+
+
+def contract_length(start_date, end_date):
+    start = display_date(start_date)
+    end = display_date(end_date)
+    if start and end:
+        return f"From {start} to {end}"
+    if start:
+        return f"Starts {start}; end date not stated"
+    if end:
+        return f"End date {end}; start date not stated"
+    return "Not stated in the feed — check the official notice"
+
+
 def dashboard_url(view="", service=""):
     params = {k: v for k, v in (("view", view), ("service", service)) if v}
     return "/?" + urlencode(params) if params else "/"
@@ -268,6 +298,42 @@ def dashboard():
     cards = ""
     for row, deadline_label, deadline_class, _closed in decorated:
         link = safe(row["notice_url"])
+        title_text = row["title"] or "Untitled opportunity"
+        buyer_text = row["buyer"] or "the organisation named in the notice"
+        trade_text = row["trade_category"] or row["service_match"] or "this type of work"
+        location_text = row["location_text"] or "Not confirmed in the feed — open the official notice"
+        stage_text = row["opportunity_stage"] or "Open for bids"
+        if stage_text == "Planning / upcoming":
+            simple_explanation = (
+                f"This is an early warning that {buyer_text} may need {trade_text.lower()} work. "
+                "It is not an open invitation to bid yet. Use it to prepare and check back for the full tender notice."
+            )
+            how_to_apply = (
+                "You cannot submit a bid from this pipeline notice alone. Open the official notice, "
+                "note any planned dates, and look for the later tender notice with the application instructions."
+            )
+        elif stage_text == "Open for bids":
+            simple_explanation = (
+                f"{buyer_text} is looking for a business to provide {trade_text.lower()} work. "
+                "If your business can do this work, check the rules and submit an offer before the deadline."
+            )
+            how_to_apply = (
+                "Open the official notice and follow its submission instructions. The buyer may require "
+                "you to register on a procurement website and upload forms or supporting documents."
+            )
+        else:
+            simple_explanation = (
+                f"This is a procurement notice about {title_text}. It may be a planning update or another "
+                "notice type rather than a live invitation to bid. Check the official notice before taking action."
+            )
+            how_to_apply = "Open the official notice to confirm whether bids are being accepted and how to respond."
+        eligibility = row["eligibility_text"] or (
+            f"The notice feed does not say exactly who qualifies. Businesses that provide {trade_text.lower()} "
+            "may be relevant, but check the official notice for required experience, insurance, qualifications, "
+            "accreditations, financial checks and any limits on who can apply."
+        )
+        value_label = format_money(row["estimated_value_gbp"])
+        duration_label = contract_length(row["contract_start_date"], row["contract_end_date"])
         notice = (
             f'<a href="{link}" target="_blank" rel="noopener">View official notice</a>'
             if link.startswith("https://") else ""
@@ -305,13 +371,19 @@ def dashboard():
           <p class="job-kicker">{safe(row["trade_category"] or row["service_match"] or "Trade opportunity")}</p>
           <h2>{safe(row["title"]) or "Untitled opportunity"}</h2>
           <p class="deadline {deadline_class}">{safe(deadline_label)}</p>
-          <div class="job-facts">
-            <p><b>Buyer / hiring organisation</b><span>{safe(row["buyer"]) or "Not listed"}</span></p>
-            <p><b>Job location</b><span>{safe(row["location_text"]) or "Exact location not provided — open the original notice"}</span></p>
-            <p><b>Who should apply</b><span>{safe(row["eligibility_text"]) or ("Businesses providing " + str(row["trade_category"] or row["service_match"] or "the listed service") + ". Check the official notice for required qualifications, insurance, accreditations and tender eligibility.")}</span></p>
-            <p><b>Source</b><span>{safe(row["source"])}</span></p>
-          </div>
-          {('<p class="job-description"><b>Job details</b><br>' + safe(row["description"]) + '</p>') if row["description"] else '<p class="job-description"><b>Job details</b><br>Summary not supplied in the feed. Open the original notice for the full specification.</p>'}
+          <section class="plain-english">
+            <h3>In simple terms</h3>
+            <p>{safe(simple_explanation)}</p>
+            <div class="job-facts">
+              <p><b>Where is the work?</b><span>{safe(location_text)}</span></p>
+              <p><b>How much is it worth?</b><span>{safe(value_label)}{(" (published estimated value; check whether VAT, options and all contract years are included)" if row["estimated_value_gbp"] not in (None, "") else "")}</span></p>
+              <p><b>How long is the contract?</b><span>{safe(duration_label)}</span></p>
+              <p><b>Who can bid?</b><span>{safe(eligibility)}</span></p>
+              <p><b>How do you apply?</b><span>{safe(how_to_apply)}</span></p>
+              <p><b>Deadline</b><span>{safe(deadline_label)}</span></p>
+            </div>
+          </section>
+          {('<p class="job-description"><b>Official description</b><br>' + safe(row["description"]) + '</p>') if row["description"] else '<p class="job-description"><b>Official description</b><br>The feed does not include a description. Open the official notice for the full specification.</p>'}
           {('<div class="contact-box"><b>Buyer contact</b>' +
              ('<p>Contact: ' + safe(row["contact_name"]) + '</p>' if row["contact_name"] else '') +
              ('<p>Email: <a href="mailto:' + safe(row["contact_email"]) + '">' + safe(row["contact_email"]) + '</a></p>' if row["contact_email"] else '') +
@@ -423,7 +495,7 @@ def dashboard():
     <html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Tender Scout</title>
     <style>
-.job-kicker{{margin:0 0 .35rem;color:#08783c;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.88rem}}.job-facts{{display:grid;gap:.5rem;margin:1rem 0}}.job-facts p{{margin:0;padding:.65rem .75rem;background:#f0f6f2;border-radius:.55rem}}.job-facts b{{display:block;font-size:.88rem;color:#40534a}}.job-facts span{{display:block;margin-top:.18rem}}.job-description{{line-height:1.5}}.contact-box{{padding:.8rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}}.contact-box p{{margin:.4rem 0}}.notice-meta,.location-reason{{font-size:.9rem;color:#4b5b53}}.card h2{{line-height:1.18}}.share-actions{{display:flex;flex-wrap:wrap;gap:.5rem}}.share-actions a{{display:inline-block}}
+.job-kicker{{margin:0 0 .35rem;color:#08783c;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.88rem}}.plain-english{{padding:.9rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}}.plain-english h3{{margin:.1rem 0 .4rem}}.job-facts{{display:grid;gap:.5rem;margin:1rem 0}}.job-facts p{{margin:0;padding:.65rem .75rem;background:#f0f6f2;border-radius:.55rem}}.job-facts b{{display:block;font-size:.88rem;color:#40534a}}.job-facts span{{display:block;margin-top:.18rem}}.job-description{{line-height:1.5}}.contact-box{{padding:.8rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}}.contact-box p{{margin:.4rem 0}}.notice-meta,.location-reason{{font-size:.9rem;color:#4b5b53}}.card h2{{line-height:1.18}}.share-actions{{display:flex;flex-wrap:wrap;gap:.5rem}}.share-actions a{{display:inline-block}}
 
     *{{box-sizing:border-box}}
     html{{width:100%;max-width:100%;overflow-x:hidden}}
@@ -561,14 +633,18 @@ def run_refresh():
                 """
                 INSERT INTO tenders
                 (source, title, buyer, published_date, location_text, description,
+                 estimated_value_gbp, contract_start_date, contract_end_date,
                  contact_name, contact_email, contact_phone, eligibility_text,
                  service_match, score, deadline, notice_url,
                  geography_reason, region_match, trade_category, saved_at, pipeline_status, opportunity_stage)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(notice_url) DO UPDATE SET
                     title=excluded.title, buyer=excluded.buyer,
                     score=excluded.score, deadline=excluded.deadline,
                     location_text=excluded.location_text, description=excluded.description,
+                    estimated_value_gbp=excluded.estimated_value_gbp,
+                    contract_start_date=excluded.contract_start_date,
+                    contract_end_date=excluded.contract_end_date,
                     contact_name=excluded.contact_name, contact_email=excluded.contact_email,
                     contact_phone=excluded.contact_phone, eligibility_text=excluded.eligibility_text,
                     geography_reason=excluded.geography_reason,
@@ -584,6 +660,9 @@ def run_refresh():
                     match.get("published_date", ""),
                     match.get("location_text", ""),
                     match.get("description", ""),
+                    match.get("estimated_value_gbp", ""),
+                    match.get("contract_start_date", ""),
+                    match.get("contract_end_date", ""),
                     match.get("contact_name", ""),
                     match.get("contact_email", ""),
                     match.get("contact_phone", ""),
