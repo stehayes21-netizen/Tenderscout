@@ -970,8 +970,12 @@ def private_leads():
         urgency = (request.form.get("urgency") or "Flexible / no rush").strip()
         if urgency not in LEAD_URGENCIES:
             urgency = "Flexible / no rush"
-        if not title or trade not in TRADE_CATEGORIES or not location or (source_name and source_name not in LEAD_SOURCES):
-            message = '<p class="error">Please enter the job, trade and location. Source type is optional.</p>'
+        if not title or not location:
+            message = '<p class="error">Please enter the job and location. Source type is optional.</p>'
+        elif trade not in TRADE_CATEGORIES:
+            message = '<p class="error">Please choose a valid trade category.</p>'
+        elif source_name and source_name not in LEAD_SOURCES:
+            message = '<p class="error">Please choose a valid source type or leave it blank.</p>'
         elif source_url and not source_url.startswith(("https://", "http://")):
             message = '<p style="color:#a11">Source link must start with http:// or https://.</p>'
         else:
@@ -991,16 +995,12 @@ def private_leads():
         link = (f'<a href="{safe(row["source_url"])}" target="_blank" rel="noopener">Open original source</a>'
                 if row["source_url"] and row["source_url"].startswith(("https://", "http://")) else "")
         share_message = "\n".join([
-            "PRIVATE CUSTOMER LEAD — " + str(row["title"] or ""),
-            "Trade needed: " + str(row["trade_category"] or ""),
-            "Urgency: " + str(row["urgency"] or "Flexible / no rush"),
-            "Lead status: " + str(row["status"] or "New"),
-            "Captured: " + str(row["created_at"] or "")[:10],
-            "Location: " + str(row["location_text"] or ""),
-            "Job details: " + str(row["details"] or "See original source / confirm scope"),
-            "Customer/business contact: " + str(row["contact_details"] or "Not supplied — confirm via source"),
-            "Found via: " + str(row["source_name"] or ""),
-            "Original source: " + str(row["source_url"] or "No direct link saved"),
+            "JOB: " + str(row["title"] or ""),
+            "TRADE: " + str(row["trade_category"] or ""),
+            "LOCATION: " + str(row["location_text"] or ""),
+            "WHAT THEY WANT: " + str(row["details"] or "Confirm job scope with the customer"),
+            "CONTACT: " + str(row["contact_details"] or "Not supplied — check original source"),
+            "SOURCE: " + str(row["source_url"] or row["source_name"] or "Not recorded"),
         ])
         whatsapp_url = "https://wa.me/?" + urlencode({"text": share_message})
         email_url = "mailto:?" + urlencode({"subject": "Trade lead: " + str(row["title"] or ""), "body": share_message})
