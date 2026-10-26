@@ -932,6 +932,10 @@ def sources():
             ("Contracts Finder", "https://www.contractsfinder.service.gov.uk/Search", "UK public-sector opportunities"),
             ("Liverpool City Council — ProContract", "https://procontract.due-north.com/", "Liverpool Council says most of its opportunities are advertised through ProContract; some routes use other approved portals"),
             ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
+            ("Bearings — Liverpool City Region tenders", "https://getbearings.co.uk/rss", "Free North West opportunity aggregator with RSS feeds and an open API; use as a discovery source and verify every tender on the buyer's official notice"),
+            ("Standstill UK — North West tenders", "https://standstill.uk/alerts/", "Free daily RSS lists for UK public tenders, including a North West feed; aggregator summaries must be checked against the official notice"),
+            ("Merseyside Fire & Rescue procurement", "https://www.merseyfire.gov.uk/about/supplying-goods-and-services-to-mfra/", "Confirms openly advertised opportunities are on The Chest and national notices on Find a Tender / Contracts Finder"),
+            ("Sefton Council tenders and contracts", "https://www.sefton.gov.uk/business/tenders-contracts", "Confirms Sefton opportunities use The Chest and points suppliers to national notice sources"),
         ]),
         ("Community and private-lead channels", [
             ("HomeGuild — Liverpool homeowner jobs", "https://www.homeguild.co.uk/jobs/", "Public job-board page; current jobs may be empty and contact details are reserved for registered tradespeople"),
