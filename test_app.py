@@ -79,6 +79,22 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Tender Scout", r.data)
 
+    def test_review_queue_keeps_relevant_notice_when_deadline_is_missing(self):
+        record = feed_record(
+            "review-no-deadline",
+            "Greater Manchester",
+            title="Cleaning services framework",
+            description="Commercial cleaning for public buildings.",
+        )
+        record["deadline"] = ""
+        response = self.refresh_with([record])
+        self.assertEqual(response.status_code, 200)
+        review_page = self.client.get("/?view=review").data.decode()
+        self.assertIn("Cleaning services framework", review_page)
+        self.assertIn("Check official notice", review_page)
+        main_page = self.client.get("/").data.decode()
+        self.assertNotIn("Cleaning services framework", main_page)
+
     def test_jobs_board_shows_scope_and_contract_period_without_expanding_card(self):
         self.refresh_with([feed_record(
             "board-visible-1",

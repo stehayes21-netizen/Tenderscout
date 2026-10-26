@@ -649,7 +649,12 @@ def run_refresh():
                         samples["outside"].append(sample_line(record))
                 elif record["region_match"] == "REVIEW" and match and len(samples["review"]) < 40:
                     samples["review"].append(sample_line(record))
-            if not match or match.get("score", 0) < MIN_SCORE:
+            # Keep relevant but incomplete notices in REVIEW even when a missing deadline
+            # lowers their score. The score threshold applies to confirmed LOCAL matches;
+            # otherwise useful leads with uncertain locations/deadlines disappear silently.
+            if not match:
+                continue
+            if match.get("region_match") == "LOCAL" and match.get("score", 0) < MIN_SCORE:
                 continue
             region_match = match.get("region_match")
             if region_match not in ("LOCAL", "REVIEW"):
