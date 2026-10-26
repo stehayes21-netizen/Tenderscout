@@ -407,6 +407,85 @@ class OverlapAndTradeTests(unittest.TestCase):
         self.assertEqual(result["service_match"], "Cleaning")
 
 
+class DeliveryLocationExtractionRegressionTests(unittest.TestCase):
+    def test_extracts_nested_delivery_site_from_tender_items(self):
+        payload = {
+            "releases": [{
+                "id": "2026-1234",
+                "buyer": {
+                    "name": "Example Council",
+                    "address": {"streetAddress": "Buyer HQ", "postalCode": "EH1 1AA", "locality": "Edinburgh"},
+                },
+                "tender": {
+                    "title": "Commercial cleaning",
+                    "items": [{
+                        "deliveryLocation": {
+                            "address": {
+                                "streetAddress": "Civic Centre",
+                                "postalCode": "L2 2DH",
+                                "locality": "Liverpool",
+                            }
+                        }
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("L2 2DH", records[0]["location_text"])
+        self.assertIn("Liverpool", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
+        )
+
+    def test_buyer_headquarters_alone_never_confirms_local_delivery(self):
+        payload = {
+            "releases": [{
+                "id": "2026-1235",
+                "buyer": {
+                    "name": "Liverpool Council",
+                    "address": {"streetAddress": "Town Hall", "postalCode": "L2 2DH", "locality": "Liverpool"},
+                },
+                "tender": {
+                    "title": "Cleaning contract",
+                    "description": "Routine cleaning at facilities",
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["location_text"], "")
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "REVIEW"
+        )
+
+    def test_explicit_nonlocal_delivery_site_overrides_local_buyer_headquarters(self):
+        payload = {
+            "releases": [{
+                "id": "2026-1236",
+                "buyer": {
+                    "name": "Liverpool Council",
+                    "address": {"postalCode": "L2 2DH", "locality": "Liverpool"},
+                },
+                "tender": {
+                    "title": "Commercial cleaning",
+                    "items": [{
+                        "deliveryLocation": {
+                            "address": {"postalCode": "EH1 1AA", "locality": "Edinburgh"}
+                        }
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("EH1 1AA", records[0]["location_text"])
+        self.assertNotIn("L2 2DH", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "OUT_OF_AREA"
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
