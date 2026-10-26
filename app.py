@@ -443,10 +443,10 @@ def dashboard():
 
     if review_view:
         heading = f"{len(rows)} tenders need a location check"
-        switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
+        switch = f'<a href="{dashboard_url("", service)}">Back to jobs board ({counts["main"] + counts["review"]})</a>'
     elif pipeline_view:
         heading = f"{len(rows)} pipeline / upcoming opportunities"
-        switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
+        switch = f'<a href="{dashboard_url("", service)}">Back to jobs board ({counts["main"] + counts["review"]})</a>'
     else:
         heading = f"{len(rows)} saved opportunities"
         switch = f'<a href="{dashboard_url("pipeline", service)}">Pipeline / upcoming</a> · <a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
