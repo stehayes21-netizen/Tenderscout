@@ -270,7 +270,7 @@ def dashboard():
     db = connect_db()
     condition = (
         "region_match = 'REVIEW'" if review_view
-        else "region_match IN ('LOCAL', 'MANUAL')"
+        else "region_match IN ('LOCAL', 'MANUAL', 'REVIEW')"
     )
     params = []
     if pipeline_view:
@@ -305,6 +305,7 @@ def dashboard():
             trade_text = row["service_match"] or "this type of work"
         location_text = row["location_text"] or "Not confirmed in the feed — open the official notice"
         stage_text = row["opportunity_stage"] or "Open for bids"
+        region_badge = ("Location needs checking" if row["region_match"] == "REVIEW" else "Confirmed local" if row["region_match"] == "LOCAL" else "Manual entry")
         if stage_text == "Planning / upcoming":
             simple_explanation = (
                 f"This is an early warning that {buyer_text} may need {trade_text.lower()} work. "
@@ -370,9 +371,16 @@ def dashboard():
         )
         cards += f"""
         <article class="card">
-          <p class="job-kicker">{safe(row["trade_category"] or row["service_match"] or "Trade opportunity")}</p>
+          <p class="job-kicker">{safe(row["trade_category"] or row["service_match"] or "Trade opportunity")} · {safe(region_badge)}</p>
           <h2>{safe(row["title"]) or "Untitled opportunity"}</h2>
-          <p class="deadline {deadline_class}">{safe(deadline_label)}</p>
+          <p class="board-buyer">{safe(buyer_text)}</p>
+          <div class="board-facts">
+            <p><b>Location</b><span>{safe(location_text)}</span></p>
+            <p><b>Estimated value</b><span>{safe(value_label)}</span></p>
+            <p><b>Deadline</b><span class="deadline {deadline_class}">{safe(deadline_label)}</span></p>
+            <p><b>Opportunity type</b><span>{safe(stage_text)}</span></p>
+          </div>
+          <details class="full-details"><summary>Plain-English summary and full details</summary>
           <section class="plain-english">
             <h3>In simple terms</h3>
             <p>{safe(simple_explanation)}</p>
@@ -404,6 +412,7 @@ def dashboard():
           </form>
           {notice}
           {share_actions}
+          </details>
         </article>
         """
 
@@ -434,10 +443,10 @@ def dashboard():
 
     if review_view:
         heading = f"{len(rows)} tenders need a location check"
-        switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
+        switch = f'<a href="{dashboard_url("", service)}">Back to jobs board ({counts["main"] + counts["review"]})</a>'
     elif pipeline_view:
         heading = f"{len(rows)} pipeline / upcoming opportunities"
-        switch = f'<a href="{dashboard_url("", service)}">Back to confirmed tenders ({counts["main"]})</a>'
+        switch = f'<a href="{dashboard_url("", service)}">Back to jobs board ({counts["main"] + counts["review"]})</a>'
     else:
         heading = f"{len(rows)} saved opportunities"
         switch = f'<a href="{dashboard_url("pipeline", service)}">Pipeline / upcoming</a> · <a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
@@ -497,7 +506,7 @@ def dashboard():
     <html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Tender Scout</title>
     <style>
-.job-kicker{{margin:0 0 .35rem;color:#08783c;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.88rem}}.plain-english{{padding:.9rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}}.plain-english h3{{margin:.1rem 0 .4rem}}.job-facts{{display:grid;gap:.5rem;margin:1rem 0}}.job-facts p{{margin:0;padding:.65rem .75rem;background:#f0f6f2;border-radius:.55rem}}.job-facts b{{display:block;font-size:.88rem;color:#40534a}}.job-facts span{{display:block;margin-top:.18rem}}.job-description{{line-height:1.5}}.contact-box{{padding:.8rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}}.contact-box p{{margin:.4rem 0}}.notice-meta,.location-reason{{font-size:.9rem;color:#4b5b53}}.card h2{{line-height:1.18}}.share-actions{{display:flex;flex-wrap:wrap;gap:.5rem}}.share-actions a{{display:inline-block}}
+.job-kicker{{margin:0 0 .35rem;color:#08783c;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.82rem}}.board-buyer{{margin:.25rem 0 .7rem;color:#4b5b53;font-weight:600}}.board-facts{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem;margin:.7rem 0}}.board-facts p{{margin:0;padding:.65rem .7rem;background:#f0f6f2;border-radius:.55rem;min-width:0}}.board-facts b{{display:block;font-size:.78rem;color:#40534a}}.board-facts span{{display:block;margin-top:.18rem;font-size:.94rem}}.full-details{{margin-top:.8rem;border-top:1px solid #d7e4dc;padding-top:.65rem}}.full-details summary{{color:#08783c;font-weight:700;cursor:pointer;padding:.35rem 0}}.plain-english{{padding:.9rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}}.plain-english h3{{margin:.1rem 0 .4rem}}.job-facts{{display:grid;gap:.5rem;margin:1rem 0}}.job-facts p{{margin:0;padding:.65rem .75rem;background:#f0f6f2;border-radius:.55rem}}.job-facts b{{display:block;font-size:.88rem;color:#40534a}}.job-facts span{{display:block;margin-top:.18rem}}.job-description{{line-height:1.5}}.contact-box{{padding:.8rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}}.contact-box p{{margin:.4rem 0}}.notice-meta,.location-reason{{font-size:.9rem;color:#4b5b53}}.card h2{{line-height:1.18}}.share-actions{{display:flex;flex-wrap:wrap;gap:.5rem}}.share-actions a{{display:inline-block}}
 
     *{{box-sizing:border-box}}
     html{{width:100%;max-width:100%;overflow-x:hidden}}
@@ -531,7 +540,7 @@ def dashboard():
     .trade-chips{{display:flex;flex-wrap:wrap;gap:8px}}
     .trade-chip{{display:inline-block;background:#f3f8f4;border:1px solid #c8ddce;border-radius:20px;padding:8px 11px;text-decoration:none;font-size:14px}}
     details{{margin-top:12px}}summary{{cursor:pointer;font-weight:bold;padding:8px 0}}
-    @media(max-width:520px){{body{{padding:12px}}header{{padding:17px}}.card{{padding:14px}}.trade-browser{{padding:12px}}}}
+    @media(max-width:520px){{body{{padding:12px}}header{{padding:17px}}.card{{padding:14px}}.trade-browser{{padding:12px}}.board-facts{{grid-template-columns:1fr 1fr;gap:.4rem}}.board-facts p{{padding:.55rem}}.board-facts span{{font-size:.88rem}}}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
     <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
