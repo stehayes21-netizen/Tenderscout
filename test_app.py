@@ -271,6 +271,23 @@ class RefreshTests(AppTestCase):
         review = self.client.get("/?view=review").data
         self.assertIn(b"https://example.com/unk", review)
 
+    def test_job_board_card_shows_description_and_public_buyer_contact(self):
+        record = feed_record("contact-card", "Liverpool L2 2DH")
+        record.update({
+            "contact_name": "Procurement Team",
+            "contact_email": "procurement@example.gov.uk",
+            "contact_phone": "0151 555 0100",
+            "eligibility_text": "Registered cleaning providers",
+        })
+        self.refresh_with([record])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Routine cleaning services.", page)
+        self.assertIn("Procurement Team", page)
+        self.assertIn("procurement@example.gov.uk", page)
+        self.assertIn("Registered cleaning providers", page)
+        self.assertIn("Who should apply", page)
+        self.assertIn("Job location", page)
+
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
         self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
         db = self.app_module.connect_db()
