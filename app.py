@@ -269,7 +269,24 @@ def dashboard():
     view = "review" if review_view else ("pipeline" if pipeline_view else "")
 
     db = connect_db()
-    # Render free instances can lose local SQLite data on redeploy. If the board\n    # is empty, automatically repopulate it from the official feeds once per\n    # process rather than leaving the user with a blank board.\n    global _EMPTY_BOARD_REFRESH_ATTEMPTED\n    if not app.testing and not review_view and not pipeline_view and not request.args.get("done"):\n        existing = db.execute("SELECT COUNT(*) AS n FROM tenders").fetchone()["n"]\n        db.close()\n        if existing == 0 and not _EMPTY_BOARD_REFRESH_ATTEMPTED:\n            _EMPTY_BOARD_REFRESH_ATTEMPTED = True\n            try:\n                run_refresh()\n            except Exception:\n                app.logger.exception("Automatic first-load tender refresh failed")\n        db = connect_db()\n    condition = (\n        "region_match = 'REVIEW'" if review_view\n        else "region_match IN ('LOCAL', 'MANUAL', 'REVIEW')"\n    )
+    # Render free instances can lose local SQLite data on redeploy. If the board
+    # is empty, automatically repopulate it from the official feeds once per
+    # process rather than leaving the user with a blank board.
+    global _EMPTY_BOARD_REFRESH_ATTEMPTED
+    if not app.testing and not review_view and not pipeline_view and not request.args.get("done"):
+        existing = db.execute("SELECT COUNT(*) AS n FROM tenders").fetchone()["n"]
+        db.close()
+        if existing == 0 and not _EMPTY_BOARD_REFRESH_ATTEMPTED:
+            _EMPTY_BOARD_REFRESH_ATTEMPTED = True
+            try:
+                run_refresh()
+            except Exception:
+                app.logger.exception("Automatic first-load tender refresh failed")
+        db = connect_db()
+    condition = (
+        "region_match = 'REVIEW'" if review_view
+        else "region_match IN ('LOCAL', 'MANUAL', 'REVIEW')"
+    )
     params = []
     if pipeline_view:
         condition += " AND opportunity_stage = ?"
