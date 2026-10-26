@@ -868,6 +868,8 @@ def private_leads():
             "PRIVATE CUSTOMER LEAD — " + str(row["title"] or ""),
             "Trade needed: " + str(row["trade_category"] or ""),
             "Urgency: " + str(row["urgency"] or "Flexible / no rush"),
+            "Lead status: " + str(row["status"] or "New"),
+            "Captured: " + str(row["created_at"] or "")[:10],
             "Location: " + str(row["location_text"] or ""),
             "Job details: " + str(row["details"] or "See original source / confirm scope"),
             "Customer/business contact: " + str(row["contact_details"] or "Not supplied — confirm via source"),
