@@ -28,6 +28,7 @@ TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 
 _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
+_EMPTY_BOARD_REFRESH_ATTEMPTED = False
 
 
 def env_int(name, default):
@@ -268,10 +269,7 @@ def dashboard():
     view = "review" if review_view else ("pipeline" if pipeline_view else "")
 
     db = connect_db()
-    condition = (
-        "region_match = 'REVIEW'" if review_view
-        else "region_match IN ('LOCAL', 'MANUAL', 'REVIEW')"
-    )
+    # Render free instances can lose local SQLite data on redeploy. If the board\n    # is empty, automatically repopulate it from the official feeds once per\n    # process rather than leaving the user with a blank board.\n    global _EMPTY_BOARD_REFRESH_ATTEMPTED\n    if not review_view and not pipeline_view and not request.args.get("done"):\n        existing = db.execute("SELECT COUNT(*) AS n FROM tenders").fetchone()["n"]\n        db.close()\n        if existing == 0 and not _EMPTY_BOARD_REFRESH_ATTEMPTED:\n            _EMPTY_BOARD_REFRESH_ATTEMPTED = True\n            try:\n                run_refresh()\n            except Exception:\n                app.logger.exception("Automatic first-load tender refresh failed")\n        db = connect_db()\n    condition = (\n        "region_match = 'REVIEW'" if review_view\n        else "region_match IN ('LOCAL', 'MANUAL', 'REVIEW')"\n    )
     params = []
     if pipeline_view:
         condition += " AND opportunity_stage = ?"
@@ -1035,7 +1033,7 @@ def private_leads():
         'article{background:#f3f6f4;border:1px solid #e0e8e2;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
         '.lead-kicker{font-weight:bold;color:#08783c}.lead-location{font-size:18px;background:#e8f2eb;padding:10px;border-radius:8px}.lead-request{background:#fff;border:1px solid #cbd9cf;border-radius:8px;padding:12px;margin:12px 0}.lead-request h4{margin:0 0 6px;color:#145c35;font-size:14px;letter-spacing:.03em}.urgent{border:2px solid #b45309;background:#fffaf0}.status-form label{display:block;font-weight:600}.status-form select{margin-bottom:8px}.share-actions{display:flex;gap:8px;flex-wrap:wrap}.share-actions a{display:inline-block;padding:10px;background:#e8f2eb;border-radius:8px;text-decoration:none;font-weight:bold}'
         'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
-        '.helper{font-size:13px;color:#53645a;font-weight:normal}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
+        '.helper{font-size:13px;color:#53645a;font-weight:normal}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.share-actions a{min-height:40px}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
         '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
@@ -1043,7 +1041,7 @@ def private_leads():
         '<p><a href="/leads/export.csv">Download private leads CSV (backup)</a></p>'
         '<p>Record the most precise location and only save customer contact details when they were provided for this enquiry and can legitimately be reused. A direct source URL is optional.</p>'
         + message +
-        '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Urgent gutter cleaning needed"></label>'
+        '<details class="lead-entry"><summary>+ Add a private job manually</summary><form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Urgent gutter cleaning needed"></label>'
         '<label>Trade category<select name="trade_category" required><option value="">Choose the right trade</option>' + options + '</select></label>'
         '<label>Exact job location<input name="location_text" required maxlength="300" placeholder="e.g. street/area and postcode, Allerton L18"></label>'
         '<label>Urgency (optional)<select name="urgency">' + "".join(f'<option value="{safe(u)}"{" selected" if u == "Flexible / no rush" else ""}>{safe(u)}</option>' for u in LEAD_URGENCIES) + '</select></label>'
@@ -1051,7 +1049,7 @@ def private_leads():
         '<label>Original post / source link (optional)<input name="source_url" type="url" maxlength="1000" placeholder="Paste a link only if you have one"></label>'
         '<label>Customer / business contact <span class="helper">(only where provided for this enquiry and appropriate to reuse)</span><input name="contact_details" maxlength="500" placeholder="e.g. name and phone number"></label>'
         '<label>What exactly does the customer want? <span class="helper">(required — copy the actual request, not just the trade)</span><textarea name="details" required rows="5" maxlength="4000" placeholder="Example: wants rear patio pressure-washed, approx. 20 m², at the address above; asks for a quote this week. Only include details stated in the original enquiry."></textarea></label>'
-        '<button type="submit">Save private lead</button></form><hr><h2>Recent private leads</h2>' + cards +
+        '<button type="submit">Save private lead</button></form></details><hr><h2>Latest private job leads</h2><p class="helper">Job-board view · newest first · open the original source before contacting anyone.</p>' + cards +
         '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></main></body></html>'
     )
     return Response(page, mimetype="text/html")
