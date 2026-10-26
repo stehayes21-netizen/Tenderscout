@@ -18,6 +18,34 @@ class DeadlineParsingTests(unittest.TestCase):
         self.assertEqual(deadline.isoformat(), "2026-10-25T12:30:00+00:00")
 
 
+class TradeContextExtractionTests(unittest.TestCase):
+    def test_item_classification_and_description_are_preserved_for_trade_matching(self):
+        payload = {
+            "releases": [{
+                "id": "item-trade-1",
+                "ocid": "ocds-test-item-trade-1",
+                "date": "2026-10-25T10:00:00Z",
+                "tag": ["tender"],
+                "tender": {
+                    "title": "Property services framework",
+                    "description": "Framework for planned works.",
+                    "items": [{
+                        "description": "Commercial and office cleaning",
+                        "classification": {"id": "90910000", "description": "Cleaning services"},
+                    }],
+                },
+                "buyer": {"name": "Test Council"},
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(rows), 1)
+        self.assertIn("Commercial and office cleaning", rows[0]["trade_context"])
+        self.assertIn("Cleaning services", rows[0]["trade_context"])
+        scored = tenderscout.score_record(rows[0], tenderscout.SERVICE_ORDER, "North West", None, None)
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["trade_category"], "Commercial and office cleaning")
+
+
 class OpportunityStageTests(unittest.TestCase):
     def test_extract_records_identifies_planning_stage(self):
         payload = {
