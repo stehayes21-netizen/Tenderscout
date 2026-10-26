@@ -211,8 +211,14 @@ class AppSmokeTest(AppTestCase):
         db.close()
         r = self.client.post(f"/leads/{lead_id}/status", data={"status": "Passed to trade"})
         self.assertEqual(r.status_code, 302)
-        page = self.client.get("/leads").data
-        self.assertIn(b"Passed to trade", page)
+        db = self.app_module.connect_db()
+        status = db.execute("SELECT status FROM private_leads WHERE id = ?", (lead_id,)).fetchone()["status"]
+        db.close()
+        self.assertEqual(status, "Passed to trade")
+        page = self.client.get("/leads").data.decode()
+        self.assertIn("Fallen tree", page)
+        self.assertIn("West Derby, Liverpool", page)
+        self.assertNotIn("<b>Status:</b>", page)
 
     def test_private_leads_can_be_exported_as_csv_with_formula_protection(self):
         self.client.post("/leads", data={
@@ -329,8 +335,8 @@ class RefreshTests(AppTestCase):
         page = self.client.get("/").data
         self.assertIn(b"https://example.com/unk", page)
         self.assertIn(b"Location needs checking", page)
-        self.assertIn(b"1 tenders need a location check", page)
-        self.assertIn(b"Review location-uncertain tenders", page)
+        self.assertIn(b"Needs a location check (1)", page)
+        self.assertIn(b"Needs a location check", page)
         self.assertIn(b"view=review", page)
 
     def test_scottish_tenders_are_never_saved(self):
