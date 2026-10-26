@@ -483,6 +483,29 @@ class AdditionalDeliveryLocationSchemaTests(unittest.TestCase):
         )
         self.assertNotIn("General description mentions Liverpool", records[0]["location_text"])
 
+    def test_award_item_delivery_location_is_extracted(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9880",
+                "buyer": {"name": "Liverpool Council", "address": {"locality": "Liverpool"}},
+                "tender": {"title": "Cleaning contract", "description": "General text only"},
+                "awards": [{
+                    "id": "award-1",
+                    "items": [{
+                        "deliveryLocations": [
+                            {"description": "Contract sites in Leeds"}
+                        ]
+                    }]
+                }],
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("Contract sites in Leeds", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "OUT_OF_AREA"
+        )
+
     def test_explicit_out_of_area_performance_site_is_not_local(self):
         payload = {
             "releases": [{
