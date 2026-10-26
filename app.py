@@ -424,7 +424,7 @@ def dashboard():
     <html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Tender Scout</title>
     <style>
-.job-kicker{margin:0 0 .35rem;color:#08783c;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.88rem}.job-facts{display:grid;gap:.5rem;margin:1rem 0}.job-facts p{margin:0;padding:.65rem .75rem;background:#f0f6f2;border-radius:.55rem}.job-facts b{display:block;font-size:.88rem;color:#40534a}.job-facts span{display:block;margin-top:.18rem}.job-description{line-height:1.5}.contact-box{padding:.8rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}.contact-box p{margin:.4rem 0}.notice-meta,.location-reason{font-size:.9rem;color:#4b5b53}.card h2{line-height:1.18}.share-actions{display:flex;flex-wrap:wrap;gap:.5rem}.share-actions a{display:inline-block}
+.job-kicker{{margin:0 0 .35rem;color:#08783c;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.88rem}}.job-facts{{display:grid;gap:.5rem;margin:1rem 0}}.job-facts p{{margin:0;padding:.65rem .75rem;background:#f0f6f2;border-radius:.55rem}}.job-facts b{{display:block;font-size:.88rem;color:#40534a}}.job-facts span{{display:block;margin-top:.18rem}}.job-description{{line-height:1.5}}.contact-box{{padding:.8rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}}.contact-box p{{margin:.4rem 0}}.notice-meta,.location-reason{{font-size:.9rem;color:#4b5b53}}.card h2{{line-height:1.18}}.share-actions{{display:flex;flex-wrap:wrap;gap:.5rem}}.share-actions a{{display:inline-block}}
 
     *{{box-sizing:border-box}}
     html{{width:100%;max-width:100%;overflow-x:hidden}}
@@ -561,14 +561,17 @@ def run_refresh():
             db.execute(
                 """
                 INSERT INTO tenders
-                (source, title, buyer, published_date, location_text,
+                (source, title, buyer, published_date, location_text, description,
+                 contact_name, contact_email, contact_phone, eligibility_text,
                  service_match, score, deadline, notice_url,
                  geography_reason, region_match, trade_category, saved_at, pipeline_status, opportunity_stage)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(notice_url) DO UPDATE SET
                     title=excluded.title, buyer=excluded.buyer,
                     score=excluded.score, deadline=excluded.deadline,
-                    location_text=excluded.location_text,
+                    location_text=excluded.location_text, description=excluded.description,
+                    contact_name=excluded.contact_name, contact_email=excluded.contact_email,
+                    contact_phone=excluded.contact_phone, eligibility_text=excluded.eligibility_text,
                     geography_reason=excluded.geography_reason,
                     region_match=excluded.region_match,
                     trade_category=excluded.trade_category,
@@ -581,6 +584,11 @@ def run_refresh():
                     match.get("buyer", ""),
                     match.get("published_date", ""),
                     match.get("location_text", ""),
+                    match.get("description", ""),
+                    match.get("contact_name", ""),
+                    match.get("contact_email", ""),
+                    match.get("contact_phone", ""),
+                    match.get("eligibility_text", ""),
                     match.get("service_match", ""),
                     match.get("score", 0),
                     match.get("deadline", ""),
