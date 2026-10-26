@@ -351,7 +351,7 @@ class RefreshTests(AppTestCase):
         self.assertIn("procurement@example.gov.uk", page)
         self.assertIn("Registered cleaning providers", page)
         self.assertIn("Who can bid", page)
-        self.assertIn("Job location", page)
+        self.assertIn("Where is the work?", page)
 
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
         self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
