@@ -915,23 +915,18 @@ def classify_geography(record, region):
         )
 
     prose_full, _ = postcode_districts(prose)
-    # A full postcode written in the notice text is specific enough to trust when
-    # nothing in the text points anywhere else.
-    prose_local = sorted(d for d in prose_full if d in LOCAL_POSTCODE_DISTRICTS)
-    prose_elsewhere = [d for d in prose_full if d not in LOCAL_POSTCODE_DISTRICTS]
-    if prose_local and not prose_elsewhere and not place_hits(prose, OUT_OF_AREA_TERMS):
-        return "LOCAL", (
-            "Postcode found in the notice text, not a structured location "
-            "(verify on the notice): " + ", ".join(prose_local[:3])
-        )
+    # A title or general description is not authoritative delivery-site evidence,
+    # even if it contains a full local postcode. Structured delivery fields above
+    # are the only route to a confirmed LOCAL classification.
     prose_hits = (
-        sorted(d for d in prose_full if d in LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS)
+        sorted(prose_full)
         + place_hits(prose, LOCAL_PLACE_TERMS)
+        + place_hits(prose, OUT_OF_AREA_TERMS)
     )
     if prose_hits:
         return "REVIEW", (
-            "Nearby place appears only in title/description: "
-            + ", ".join(prose_hits[:3])
+            "Location appears only in title/description; verify the official "
+            "delivery/site field: " + ", ".join(dict.fromkeys(prose_hits[:5]))
         )
     if location_text.strip():
         return "REVIEW", "Structured location is too vague to confirm preferred area"
