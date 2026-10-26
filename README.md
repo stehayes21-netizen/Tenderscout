@@ -1,11 +1,13 @@
 # TenderScout
 
-A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and Chester**. Wirral is excluded from the initial service area.
+A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral (including Wallasey), Warrington, Wigan, West Lancashire and Cheshire West and Chester**.
 
 ## How it works
 - `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds, scores them, and decides whether each one is in the target area.
 - `app.py` is the Flask dashboard. **Refresh tenders** runs the collector and saves matches to the database.
 - Tenders confirmed in the target area appear on the main list. Anything whose location can't be confirmed goes to **Needs a location check** instead, so unclear tenders never mix into the main list.
+- Each tender card includes a plain-English explanation of what the buyer wants, where the work is, the published estimated value, contract dates/duration when available, who may qualify, the deadline and how to apply. Missing facts are labelled as not stated rather than guessed.
+- **Pipeline / upcoming** notices are early warnings: they are not necessarily open for bids yet. Open the official notice to confirm its status and next steps.
 
 ## Opportunity types and source directory
 
@@ -26,7 +28,7 @@ The filter confirms geography from structured delivery/site evidence: postcodes,
 | Needs a location check | No location, a vague one (e.g. "Merseyside", "Greater Manchester"), a borderline postcode (CH4), a name shared with other places (Halton, Leigh, Kirkby, Garston), or locations both inside and outside the area |
 | Dropped | Every location is outside the area, e.g. Scotland, Manchester, Preston, Cheshire East |
 
-**Region codes.** The government feeds often give the area as a code. `UKD61` (Warrington), `UKD63` (Cheshire West and Chester), `UKD71` (East Merseyside: Knowsley, St Helens, Halton), `UKD72` (Liverpool) and `UKD73` (Sefton) count as confirmed. `UKD74` (Wirral) is excluded from the initial service area. Codes that cover the area plus places outside it (Greater Manchester, Lancashire, the broad North West code) need a postcode or place name to confirm, because I could not verify which Greater Manchester code covers Wigan. Any other UK code is outside the area.
+**Region codes.** The government feeds often give the area as a code. `UKD61` (Warrington), `UKD63` (Cheshire West and Chester), `UKD71` (East Merseyside: Knowsley, St Helens, Halton), `UKD72` (Liverpool), `UKD73` (Sefton) and `UKD74` (Wirral, including Wallasey) count as confirmed. Codes that cover the area plus places outside it (Greater Manchester, Lancashire, the broad North West code) need a postcode or place name to confirm. Any other UK code is outside the area.
 
 **Longer names win.** "Preston Brook" is Halton, not Preston; "Chester-le-Street" is Durham, not Chester; "Cheshire East" is outside the area.
 
