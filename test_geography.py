@@ -224,11 +224,18 @@ class PostcodeAreaTests(unittest.TestCase):
         # "Canterbury" contains "bury"; it must not be treated as Bury.
         self.assertEqual(self.classify("Canterbury"), "REVIEW")
 
-    def test_full_postcode_in_notice_text_is_local(self):
-        record = {"location_text": "", "title": "Cleaning at Civic Centre WA7 2PQ", "description": ""}
-        geo_class, reason = tenderscout.classify_geography(record, "Target area")
-        self.assertEqual(geo_class, "LOCAL")
-        self.assertIn("notice text", reason)
+    def test_full_postcode_in_title_or_description_requires_review(self):
+        for field, value in (
+            ("title", "Cleaning at Civic Centre WA7 2PQ"),
+            ("description", "The service may cover sites at WA7 2PQ"),
+            ("description", "Cleaning services in Leeds LS1 1AA"),
+        ):
+            with self.subTest(field=field, value=value):
+                record = {"location_text": "", "title": "Cleaning", "description": ""}
+                record[field] = value
+                geo_class, reason = tenderscout.classify_geography(record, "Target area")
+                self.assertEqual(geo_class, "REVIEW")
+                self.assertIn("title/description", reason)
 
     def test_notice_text_postcode_is_not_trusted_when_text_points_elsewhere(self):
         for description in (
