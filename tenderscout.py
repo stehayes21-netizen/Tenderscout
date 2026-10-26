@@ -16,7 +16,7 @@ Outputs:
 Important:
 - Public feeds may be delayed or omit fields; always open the official notice.
 - Geography matching uses postcode districts first, then place names. It is a heuristic,
-  not a definitive location check. Target area: Liverpool, Sefton, Wirral, St Helens, Halton.
+  not a definitive location check. Target area: Liverpool, Sefton, St Helens, Halton, Knowsley and the agreed wider North West districts.
 - This script runs when you launch it. It is not a hosted service or scheduled job.
 """
 
@@ -206,7 +206,7 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Core areas: Liverpool, Sefton, Wirral, St Helens and Halton.
+# Core areas: Liverpool, Sefton, St Helens and Halton.
 # Wider areas: Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and
 # Chester (Chester, Ellesmere Port, Neston, Northwich, Winsford, Frodsham).
 # Postcodes are the main evidence because place names are ambiguous. Royal Mail
@@ -220,8 +220,6 @@ LOCAL_POSTCODE_DISTRICTS = {
     *(f"L{n}" for n in range(1, 20)), "L24", "L25", "L27",
     # Sefton
     "L20", "L21", "L22", "L23", "L29", "L30", "L31", "L37", "L38", "PR8", "PR9",
-    # Wirral
-    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
     # St Helens
     "WA9", "WA10", "WA11", "WA12",
     # Halton
@@ -240,6 +238,11 @@ LOCAL_POSTCODE_DISTRICTS = {
 # Districts that straddle the target area and a neighbour (CH4 includes parts of
 # Wales).
 REVIEW_POSTCODE_DISTRICTS = {"CH4"}
+# Known delivery districts for the excluded Wirral area. Keep these distinct from
+# unknown bare district codes so they can be safely rejected rather than reviewed.
+EXCLUDED_POSTCODE_DISTRICTS = {
+    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
+}
 
 LOCAL_PLACE_TERMS = [
     # Liverpool
@@ -250,12 +253,6 @@ LOCAL_PLACE_TERMS = [
     "sefton", "southport", "formby", "crosby", "great crosby", "blundellsands",
     "bootle", "litherland", "seaforth", "maghull", "lydiate", "melling",
     "netherton", "ainsdale", "birkdale", "aintree", "hightown", "churchtown",
-    # Wirral
-    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
-    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
-    "tranmere", "seacombe", "egremont", "leasowe", "meols", "bidston",
-    "port sunlight", "eastham", "clatterbridge", "pensby", "greasby", "irby",
-    "thingwall", "noctorum", "claughton",
     # St Helens
     "st helens", "saint helens", "rainhill", "haydock", "newton-le-willows",
     "earlestown", "billinge", "rainford", "thatto hector", "clock face",
@@ -294,6 +291,12 @@ WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire",
 # Places that clearly are not in the target area, including everything in Scotland.
 OUT_OF_AREA_TERMS = [
     "liverpool street", "chester-le-street", "crewe", "cheshire east",
+    # Wirral is deliberately excluded from TenderScout’s initial service area.
+    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
+    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
+    "tranmere", "seacombe", "egremont", "leasowe", "meols", "bidston",
+    "port sunlight", "eastham", "clatterbridge", "pensby", "greasby", "irby",
+    "thingwall", "noctorum", "claughton",
     "macclesfield", "knutsford", "altrincham",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
@@ -324,7 +327,7 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 # Lancashire, the broad Cheshire and North West codes) need a postcode or place
 # name to confirm. Every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
+LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
@@ -347,6 +350,18 @@ EXPLICIT_LOCATION_KEYS = (
     "deliveryLocation",
     "deliveryLocations",
     "delivery_location",
+    "placeOfPerformance",
+    "place_of_performance",
+    "performanceLocation",
+    "performance_location",
+    "serviceLocation",
+    "service_location",
+    "siteLocation",
+    "site_location",
+    "workLocation",
+    "work_location",
+    "deliveryPoint",
+    "delivery_point",
     "location",
     "locations",
     "address",
@@ -447,11 +462,12 @@ def money_value(value):
         return ""
 
 
-def add_location_values(obj, location_parts):
-    """Collect values only from explicit delivery/site location fields.
+def add_location_values(obj, location_parts, in_location=False):
+    """Collect delivery/site evidence without mistaking buyer metadata for a site.
 
-    We intentionally ignore buyer addresses and other generic organisation details
-    unless they are nested inside a contract/site delivery structure.
+    Location descriptions are common in OCDS feeds even when no structured
+    address is supplied. Read a description only after entering an explicit
+    delivery/site field; never read the tender's general description as a location.
     """
     if obj is None:
         return
@@ -462,19 +478,36 @@ def add_location_values(obj, location_parts):
         return
     if isinstance(obj, list):
         for item in obj:
-            add_location_values(item, location_parts)
+            add_location_values(item, location_parts, in_location=in_location)
         return
     if not isinstance(obj, dict):
         return
 
+    if in_location:
+        description = obj.get("description")
+        if isinstance(description, str) and description.strip():
+            location_parts.append(description.strip())
+
     for key in EXPLICIT_LOCATION_KEYS:
         if key in obj:
-            add_location_values(obj[key], location_parts)
+            # A location becomes trusted context only through a known delivery,
+            # site, or address field. Generic "description" is never a trigger.
+            child_is_location = in_location or key in {
+                "deliveryAddress", "deliveryAddresses", "delivery_address",
+                "deliveryLocation", "deliveryLocations", "delivery_location",
+                "placeOfPerformance", "place_of_performance",
+                "performanceLocation", "performance_location",
+                "serviceLocation", "service_location", "siteLocation",
+                "site_location", "workLocation", "work_location",
+                "deliveryPoint", "delivery_point", "location", "locations", "address", "addresses", "siteAddress",
+                "site_address", "site",
+            }
+            add_location_values(obj[key], location_parts, in_location=child_is_location)
 
-    # If the address/location object itself contains a nested address block, capture it.
+    # Some publishers wrap the actual site address one level deeper.
     for nested_key in ("address", "location", "deliveryAddress", "deliveryLocation"):
-        if nested_key in obj:
-            add_location_values(obj[nested_key], location_parts)
+        if nested_key in obj and nested_key not in EXPLICIT_LOCATION_KEYS:
+            add_location_values(obj[nested_key], location_parts, in_location=True)
 
 
 def extract_records(payload, source):
@@ -536,12 +569,29 @@ def extract_records(payload, source):
                     notice_url = f"https://www.find-tender.service.gov.uk/Notice/{release_id}"
 
             location_parts = []
-            for candidate in (
+            # OCDS location extensions can place delivery evidence on tender
+            # items, awards, or contracts. Inspect only those explicit
+            # procurement structures; never infer a site from buyer metadata.
+            location_candidates = [
                 tender,
                 rel,
                 rel.get("contract") or {},
                 *(tender.get("items") or []),
-            ):
+            ]
+            for group_key in ("awards", "contracts"):
+                groups = rel.get(group_key) or []
+                if isinstance(groups, dict):
+                    groups = [groups]
+                if not isinstance(groups, list):
+                    continue
+                for group in groups:
+                    if not isinstance(group, dict):
+                        continue
+                    location_candidates.append(group)
+                    items = group.get("items") or []
+                    if isinstance(items, list):
+                        location_candidates.extend(items)
+            for candidate in location_candidates:
                 add_location_values(candidate, location_parts)
 
             raw_tags = rel.get("tag") or rel.get("tags") or []
@@ -770,7 +820,7 @@ def postcode_districts(text, include_bare=False):
     full = {m.group(1) for m in FULL_POSTCODE_RE.finditer(upper)}
     bare = set()
     if include_bare:
-        known = LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS
+        known = LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS | EXCLUDED_POSTCODE_DISTRICTS
         bare = {m.group(1) for m in DISTRICT_RE.finditer(upper) if m.group(1) in known}
     return full, bare
 
@@ -795,7 +845,7 @@ def classify_geography(record, region):
     districts = full | bare
     pc_local = sorted(d for d in districts if d in LOCAL_POSTCODE_DISTRICTS)
     pc_review = sorted(d for d in districts if d in REVIEW_POSTCODE_DISTRICTS)
-    pc_other = sorted(d for d in full if d not in LOCAL_POSTCODE_DISTRICTS
+    pc_other = sorted(d for d in (full | bare) if d not in LOCAL_POSTCODE_DISTRICTS
                       and d not in REVIEW_POSTCODE_DISTRICTS)
 
     nuts = nuts_codes(location_text)
@@ -865,23 +915,18 @@ def classify_geography(record, region):
         )
 
     prose_full, _ = postcode_districts(prose)
-    # A full postcode written in the notice text is specific enough to trust when
-    # nothing in the text points anywhere else.
-    prose_local = sorted(d for d in prose_full if d in LOCAL_POSTCODE_DISTRICTS)
-    prose_elsewhere = [d for d in prose_full if d not in LOCAL_POSTCODE_DISTRICTS]
-    if prose_local and not prose_elsewhere and not place_hits(prose, OUT_OF_AREA_TERMS):
-        return "LOCAL", (
-            "Postcode found in the notice text, not a structured location "
-            "(verify on the notice): " + ", ".join(prose_local[:3])
-        )
+    # A title or general description is not authoritative delivery-site evidence,
+    # even if it contains a full local postcode. Structured delivery fields above
+    # are the only route to a confirmed LOCAL classification.
     prose_hits = (
-        sorted(d for d in prose_full if d in LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS)
+        sorted(prose_full)
         + place_hits(prose, LOCAL_PLACE_TERMS)
+        + place_hits(prose, OUT_OF_AREA_TERMS)
     )
     if prose_hits:
         return "REVIEW", (
-            "Nearby place appears only in title/description: "
-            + ", ".join(prose_hits[:3])
+            "Location appears only in title/description; verify the official "
+            "delivery/site field: " + ", ".join(dict.fromkeys(prose_hits[:5]))
         )
     if location_text.strip():
         return "REVIEW", "Structured location is too vague to confirm preferred area"
@@ -1003,7 +1048,7 @@ def main():
     parser.add_argument("--days", type=int, default=60, help="Look-back window for publication/update date (default 60)")
     parser.add_argument(
         "--region", choices=[TARGET_AREA_LABEL, "North West", "UK wide"], default=TARGET_AREA_LABEL,
-        help="'Target area' = Liverpool, Sefton, Wirral, St Helens, Halton ('North West' is an alias)")
+        help="'Target area' = Liverpool, Sefton, St Helens, Halton, Knowsley and agreed wider North West districts; Wirral excluded ('North West' is an alias)")
     parser.add_argument("--services", nargs="+", choices=SERVICE_ORDER, default=SERVICE_ORDER)
     parser.add_argument("--min-value", type=float, default=None, help="Minimum estimated GBP value")
     parser.add_argument("--max-value", type=float, default=None, help="Maximum estimated GBP value")

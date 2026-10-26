@@ -1,6 +1,6 @@
 # TenderScout
 
-A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, Wirral, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and Chester**.
+A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and Chester**. Wirral is excluded from the initial service area.
 
 ## How it works
 - `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds, scores them, and decides whether each one is in the target area.
@@ -18,7 +18,7 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.
 
 ## How the area filter works
-The filter looks for evidence in this order: postcodes, government region codes, place names, then postcodes written in the notice text.
+The filter confirms geography from structured delivery/site evidence: postcodes, government region codes and place names. Mentions in a title or general description are sent to review, not treated as confirmed delivery locations.
 
 | Result | Meaning |
 | --- | --- |
@@ -26,11 +26,11 @@ The filter looks for evidence in this order: postcodes, government region codes,
 | Needs a location check | No location, a vague one (e.g. "Merseyside", "Greater Manchester"), a borderline postcode (CH4), a name shared with other places (Halton, Leigh, Kirkby, Garston), or locations both inside and outside the area |
 | Dropped | Every location is outside the area, e.g. Scotland, Manchester, Preston, Cheshire East |
 
-**Region codes.** The government feeds often give the area as a code. `UKD61` (Warrington), `UKD63` (Cheshire West and Chester), `UKD71` (East Merseyside: Knowsley, St Helens, Halton), `UKD72` (Liverpool), `UKD73` (Sefton) and `UKD74` (Wirral) count as confirmed. Codes that cover the area plus places outside it (Greater Manchester, Lancashire, the broad North West code) need a postcode or place name to confirm, because I could not verify which Greater Manchester code covers Wigan. Any other UK code is outside the area.
+**Region codes.** The government feeds often give the area as a code. `UKD61` (Warrington), `UKD63` (Cheshire West and Chester), `UKD71` (East Merseyside: Knowsley, St Helens, Halton), `UKD72` (Liverpool) and `UKD73` (Sefton) count as confirmed. `UKD74` (Wirral) is excluded from the initial service area. Codes that cover the area plus places outside it (Greater Manchester, Lancashire, the broad North West code) need a postcode or place name to confirm, because I could not verify which Greater Manchester code covers Wigan. Any other UK code is outside the area.
 
 **Longer names win.** "Preston Brook" is Halton, not Preston; "Chester-le-Street" is Durham, not Chester; "Cheshire East" is outside the area.
 
-**Notice text.** A full postcode written in the title or description (for example `WA7 2PQ`) counts as confirmed if nothing there points elsewhere. The reason shown on the card says so, so check the notice.
+**Title and description.** Place names and postcodes mentioned only in the title or general description are not proof of delivery location. They stay in the review queue until the official delivery/site fields can confirm the area.
 
 Target postcode districts are listed at the top of `tenderscout.py`. Royal Mail postcode districts don't line up exactly with council boundaries, so check them against your own knowledge and edit them if needed.
 
@@ -44,7 +44,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 ## Settings (environment variables)
 | Name | Purpose |
 | --- | --- |
-| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Turn on password protection. **Set both before sharing the site.** If either is missing the site is open to anyone with the link. `/health` stays open for the host. |
+| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Required for dashboard access. If either is missing, the dashboard returns HTTP 503 and stays locked; if credentials are wrong, it returns HTTP 401. `/health` stays open for the host. |
 | `DATABASE_URL` | PostgreSQL connection string. Without it the app uses SQLite, which is wiped on every redeploy on Render's free tier. |
 | `TENDERSCOUT_DB` | SQLite file path (local use only) |
 | `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE` | Look-back window (default 60 days), pages per source (default 25) and the time limit per source (default 40 seconds) |
