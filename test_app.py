@@ -343,6 +343,9 @@ class RefreshTests(AppTestCase):
             "contact_email": "procurement@example.gov.uk",
             "contact_phone": "0151 555 0100",
             "eligibility_text": "Registered cleaning providers",
+            "estimated_value_gbp": 125000,
+            "contract_start_date": "2027-04-01T00:00:00Z",
+            "contract_end_date": "2029-03-31T23:59:59Z",
         })
         self.refresh_with([record])
         page = self.client.get("/").data.decode()
@@ -350,8 +353,11 @@ class RefreshTests(AppTestCase):
         self.assertIn("Procurement Team", page)
         self.assertIn("procurement@example.gov.uk", page)
         self.assertIn("Registered cleaning providers", page)
-        self.assertIn("Who should apply", page)
-        self.assertIn("Job location", page)
+        self.assertIn("Who can bid", page)
+        self.assertIn("Where is the work?", page)
+        self.assertIn("£125,000", page)
+        self.assertIn("From 1 April 2027 to 31 March 2029", page)
+        self.assertIn("How do you apply?", page)
 
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
         self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
