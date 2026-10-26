@@ -198,7 +198,7 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("https://example.com/allerton-job", page)
         self.assertIn("Gutter cleaning", page)
         self.assertIn("Lead+status%3A+New", page)
-        self.assertIn("Captured%3A+", page)
+        self.assertIn("Customer%2Fbusiness+contact", page)
 
     def test_private_lead_status_can_be_updated(self):
         self.client.post("/leads", data={
@@ -310,7 +310,7 @@ class AppSmokeTest(AppTestCase):
 
 
 class RefreshTests(AppTestCase):
-    def test_only_confirmed_target_area_tenders_reach_the_main_list(self):
+    def test_confirmed_and_review_tenders_are_visible_on_jobs_board(self):
         r = self.refresh_with([
             feed_record("liv", "Liverpool L2 2DH"),
             feed_record("edi", "Edinburgh EH1 1AA"),
@@ -321,7 +321,8 @@ class RefreshTests(AppTestCase):
         main = self.client.get("/").data
         self.assertIn(b"https://example.com/liv", main)
         self.assertNotIn(b"https://example.com/edi", main)
-        self.assertNotIn(b"https://example.com/unk", main)
+        self.assertIn(b"https://example.com/unk", main)
+        self.assertIn(b"Location needs checking", main)
 
     def test_empty_dashboard_points_to_saved_location_review_tenders(self):
         self.refresh_with([feed_record("unk", "")])
@@ -345,7 +346,7 @@ class RefreshTests(AppTestCase):
 
     def test_unclear_locations_wait_in_the_review_view(self):
         self.refresh_with([feed_record("unk", "")])
-        self.assertNotIn(b"https://example.com/unk", self.client.get("/").data)
+        self.assertIn(b"https://example.com/unk", self.client.get("/").data)
         review = self.client.get("/?view=review").data
         self.assertIn(b"https://example.com/unk", review)
 
