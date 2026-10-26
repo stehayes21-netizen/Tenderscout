@@ -774,7 +774,8 @@ def classify_geography(record, region):
     if normalise_region(region) == "UK wide":
         return "UK-wide search", "UK-wide search"
 
-    location_text = (record.get("location_text") or "").lower()
+    raw_location_text = str(record.get("location_text") or "")
+    location_text = raw_location_text.lower()
     prose = " ".join([
         record.get("title", ""),
         record.get("description", ""),
@@ -810,6 +811,23 @@ def classify_geography(record, region):
     # on their own they never rescue a tender whose named place is outside.
     weak_place = pc_review + ambiguous
     weak = weak_place + nuts_weak + broad
+
+    # Do not clutter the local review queue with contracts whose stated delivery
+    # scope is explicitly worldwide or a long country list. This rule only applies
+    # when no specific target-area site/postcode has been found; a real local site
+    # mixed with wider coverage must remain in REVIEW for human assessment.
+    global_scope_markers = (
+        "rest of the world", "rest of world", "worldwide", "world wide",
+        "global works", "global framework", "global services",
+        "british overseas territories", "channel islands",
+    )
+    global_scope = any(marker in location_text for marker in global_scope_markers)
+    # Some feeds enumerate dozens of country codes/names instead of saying
+    # "worldwide". A long list of two-letter country codes is a strong signal.
+    country_code_count = len(re.findall(r"(?<![A-Z])(?:AI|BM|FK|GI|KY|PN|MS|SH|TC|VG|AF|AL|DZ|AG|AR|AM|AU|AT|AZ|BH|BD|BB|BY|BE|BZ|BO|BA|BR|BN|BG|KH|CA|CL|CN|CO|CD|CR|HR|CU|CY|CZ|DK|DJ|DO|EC|EG|SV|ER|EE|SZ|ET|FJ|FI|FR|GE|DE|GH|GR|GD|GT|GN|GY|HT|HU|IS|IN|ID|IR|IQ|IE|IL|IT|JM|JP|JO|KZ|KE|KI|KW|KG|LA|LV|LB|LS|LR|LY|LT|MG|MW|MY|MX|MA|NP|NL|NZ|NG|NO|PK|PA|PE|PH|PL|PT|QA|RO|RU|SA|SN|RS|SG|SK|SI|ZA|KR|ES|LK|SE|CH|TW|TH|TR|UA|AE|GB|US|UY|UZ|VE|VN|YE|ZM|ZW)(?![A-Z])", raw_location_text.upper()))
+    enumerated_global_scope = country_code_count >= 12
+    if not strong_local and (global_scope or enumerated_global_scope):
+        return "OUT_OF_AREA", "Explicit worldwide / multi-country delivery scope; no specific target-area site identified"
 
     if strong_local and strong_out:
         return "REVIEW", (
