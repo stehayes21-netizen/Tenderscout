@@ -115,9 +115,16 @@ def ensure_schema(db):
         source_url TEXT,
         contact_details TEXT,
         details TEXT,
+        urgency TEXT DEFAULT 'Normal',
         status TEXT DEFAULT 'New',
         created_at TEXT NOT NULL
     )""")
+    if USE_POSTGRES:
+        db.execute("ALTER TABLE private_leads ADD COLUMN IF NOT EXISTS urgency TEXT DEFAULT 'Normal'")
+    else:
+        lead_columns = {row[1] for row in db.execute("PRAGMA table_info(private_leads)").fetchall()}
+        if "urgency" not in lead_columns:
+            db.execute("ALTER TABLE private_leads ADD COLUMN urgency TEXT DEFAULT 'Normal'")
     if USE_POSTGRES:
         for name, ddl in ADDED_COLUMNS:
             db.execute(f"ALTER TABLE tenders ADD COLUMN IF NOT EXISTS {name} {ddl}")
@@ -140,25 +147,17 @@ def connect_db():
 
 @app.before_request
 def require_login():
-    """Basic auth for everything except /health, once both variables are set."""
+    """Fail closed: dashboard and private customer leads are never public."""
     if request.path == "/health":
         return None
     user = os.environ.get("DASHBOARD_USER", "")
     password = os.environ.get("DASHBOARD_PASSWORD", "")
     if not (user and password):
-        return None
+        return Response("TenderScout is locked until DASHBOARD_USER and DASHBOARD_PASSWORD are configured.", 503, {"Cache-Control": "no-store"})
     auth = request.authorization
-    if (
-        auth
-        and hmac.compare_digest((auth.username or "").encode(), user.encode())
-        and hmac.compare_digest((auth.password or "").encode(), password.encode())
-    ):
+    if auth and hmac.compare_digest((auth.username or "").encode(), user.encode()) and hmac.compare_digest((auth.password or "").encode(), password.encode()):
         return None
-    return Response(
-        "Authentication required",
-        401,
-        {"WWW-Authenticate": 'Basic realm="TenderScout"'},
-    )
+    return Response("Authentication required", 401, {"WWW-Authenticate": 'Basic realm="TenderScout"', "Cache-Control": "no-store"})
 
 
 @app.before_request
@@ -760,10 +759,25 @@ def export_csv():
 
 TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 LEAD_STATUSES = ["New", "Contacted", "Qualified", "Passed to trade", "Won", "Closed"]
+LEAD_URGENCIES = ["Urgent — today", "Urgent — within 48 hours", "This week", "Flexible / no rush"]
 LEAD_SOURCES = [
     "Facebook community group", "Nextdoor / neighbourhood group", "Local business or letting agent",
     "Direct customer enquiry", "Council / procurement portal", "Trade directory", "Other"
 ]
+
+
+@app.route("/leads/<int:lead_id>/status", methods=["POST"])
+def update_private_lead_status(lead_id):
+    status = (request.form.get("status") or "").strip()
+    if status not in LEAD_STATUSES:
+        return Response("Unknown lead status", 400)
+    db = connect_db()
+    try:
+        db.execute("UPDATE private_leads SET status = ? WHERE id = ?", (status, lead_id))
+        db.commit()
+    finally:
+        db.close()
+    return redirect("/leads")
 
 
 @app.route("/sources")
@@ -827,14 +841,17 @@ def private_leads():
         source_url = (request.form.get("source_url") or "").strip()
         contact = (request.form.get("contact_details") or "").strip()
         details = (request.form.get("details") or "").strip()
+        urgency = (request.form.get("urgency") or "Flexible / no rush").strip()
+        if urgency not in LEAD_URGENCIES:
+            urgency = "Flexible / no rush"
         if not title or trade not in TRADE_CATEGORIES or not location or source_name not in LEAD_SOURCES:
             message = '<p class="error">Please enter a title, valid trade, location and choose a source type.</p>'
         elif source_url and not source_url.startswith(("https://", "http://")):
             message = '<p style="color:#a11">Source link must start with http:// or https://.</p>'
         else:
             db.execute(
-                "INSERT INTO private_leads (title,trade_category,location_text,source_name,source_url,contact_details,details,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                (title, trade, location, source_name, source_url, contact, details, "New",
+                "INSERT INTO private_leads (title,trade_category,location_text,source_name,source_url,contact_details,details,urgency,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (title, trade, location, source_name, source_url, contact, details, urgency, "New",
                  datetime.now(timezone.utc).isoformat()),
             )
             db.commit()
@@ -845,13 +862,34 @@ def private_leads():
     source_options = "".join(f'<option value="{safe(s)}">{safe(s)}</option>' for s in LEAD_SOURCES)
     cards = ""
     for row in rows:
-        link = (f'<a href="{safe(row["source_url"])}" target="_blank" rel="noopener">Original source</a>'
+        link = (f'<a href="{safe(row["source_url"])}" target="_blank" rel="noopener">Open original source</a>'
                 if row["source_url"] and row["source_url"].startswith(("https://", "http://")) else "")
+        share_message = "\n".join([
+            "PRIVATE CUSTOMER LEAD — " + str(row["title"] or ""),
+            "Trade needed: " + str(row["trade_category"] or ""),
+            "Urgency: " + str(row["urgency"] or "Flexible / no rush"),
+            "Location: " + str(row["location_text"] or ""),
+            "Job details: " + str(row["details"] or "See original source / confirm scope"),
+            "Customer/business contact: " + str(row["contact_details"] or "Not supplied — confirm via source"),
+            "Found via: " + str(row["source_name"] or ""),
+            "Original source: " + str(row["source_url"] or "No direct link saved"),
+        ])
+        whatsapp_url = "https://wa.me/?" + urlencode({"text": share_message})
+        email_url = "mailto:?" + urlencode({"subject": "Trade lead: " + str(row["title"] or ""), "body": share_message})
+        status_options = "".join(
+            f'<option value="{safe(st)}"{" selected" if st == row["status"] else ""}>{safe(st)}</option>'
+            for st in LEAD_STATUSES
+        )
+        urgency_class = "urgent" if str(row["urgency"] or "").startswith("Urgent") else ""
         cards += (
-            f'<article><h3>{safe(row["title"])}</h3><p><b>Trade:</b> {safe(row["trade_category"])} · '
-            f'<b>Location:</b> {safe(row["location_text"])}</p><p><b>Source:</b> {safe(row["source_name"])} {link}</p>'
-            f'<p><b>Status:</b> {safe(row["status"])} · <b>Added:</b> {safe(row["created_at"][:10])}</p>'
-            f'<p>{safe(row["details"])}</p></article>'
+            f'<article class="lead-card {urgency_class}"><p class="lead-kicker">{safe(row["trade_category"])} · {safe(row["urgency"] or "Flexible / no rush")}</p>'
+            f'<h3>{safe(row["title"])}</h3><p><b>Exact job location:</b> {safe(row["location_text"])}</p>'
+            f'<p><b>Original source:</b> {safe(row["source_name"])} {link}</p>'
+            f'<p><b>Customer / business contact:</b> {safe(row["contact_details"]) or "Not supplied — check the original post or contact the source"}</p>'
+            f'<p><b>Job details:</b><br>{safe(row["details"]) or "No extra details saved yet."}</p>'
+            f'<p><b>Status:</b> {safe(row["status"])} · <b>Captured:</b> {safe(row["created_at"][:10])}</p>'
+            f'<form method="post" action="/leads/{int(row["id"])}/status" class="status-form"><label>Lead progress<select name="status">{status_options}</select></label><button type="submit">Update status</button></form>'
+            f'<p class="share-actions"><a href="{safe(whatsapp_url)}" target="_blank" rel="noopener">Send lead by WhatsApp</a> <a href="{safe(email_url)}">Send lead by email</a></p></article>'
         )
     if not cards:
         cards = "<p>No private leads have been entered yet. This list is separate from public-sector tenders.</p>"
@@ -864,20 +902,23 @@ def private_leads():
         'label{display:block;margin:14px 0;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b8c6bd;border-radius:8px;font:inherit;margin-top:6px;background:white}'
         'button{padding:13px 18px;background:#168447;color:white;border:0;border-radius:9px;font-weight:bold;font-size:16px;width:100%;margin-top:8px}'
         'article{background:#f3f6f4;border:1px solid #e0e8e2;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
+        '.lead-kicker{font-weight:bold;color:#08783c}.urgent{border:2px solid #b45309;background:#fffaf0}.status-form label{display:block;font-weight:600}.status-form select{margin-bottom:8px}.share-actions{display:flex;gap:8px;flex-wrap:wrap}.share-actions a{display:inline-block;padding:10px;background:#e8f2eb;border-radius:8px;text-decoration:none;font-weight:bold}'
         'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
         '.helper{font-size:13px;color:#53645a;font-weight:normal}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
         '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
-        '<p>Choose where you found the enquiry. A direct URL is optional; you do not need to paste a link just to save a lead.</p>'
+        '<p><b>Private to your account.</b> Save genuine enquiries, then choose the right tradesperson and send the lead yourself. Private leads never appear in the public-tender list.</p>'
+        '<p>Record the most precise location and only save customer contact details when they were provided for this enquiry and can legitimately be reused. A direct source URL is optional.</p>'
         + message +
-        '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Gutter cleaning on a semi-detached house"></label>'
-        '<label>Trade category<select name="trade_category" required><option value="">Choose a trade</option>' + options + '</select></label>'
-        '<label>Location<input name="location_text" required maxlength="200" placeholder="e.g. Liverpool L15"></label>'
+        '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Urgent gutter cleaning needed"></label>'
+        '<label>Trade category<select name="trade_category" required><option value="">Choose the right trade</option>' + options + '</select></label>'
+        '<label>Exact job location<input name="location_text" required maxlength="300" placeholder="e.g. street/area and postcode, Allerton L18"></label>'
+        '<label>Urgency<select name="urgency" required>' + "".join(f'<option value="{safe(u)}"{" selected" if u == "Flexible / no rush" else ""}>{safe(u)}</option>' for u in LEAD_URGENCIES) + '</select></label>'
         '<label>Where did you find it?<select name="source_name" required><option value="">Choose a source</option>' + source_options + '</select><span class="helper">Select a source type instead of typing its name.</span></label>'
         '<label>Original post / source link (optional)<input name="source_url" type="url" maxlength="1000" placeholder="Paste a link only if you have one"></label>'
-        '<label>Business contact details <span class="helper">(only if publicly provided for this enquiry)</span><input name="contact_details" maxlength="500"></label>'
-        '<label>Job details (optional)<textarea name="details" rows="3" maxlength="4000" placeholder="Scope, timing, access notes…"></textarea></label>'
+        '<label>Customer / business contact <span class="helper">(only where provided for this enquiry and appropriate to reuse)</span><input name="contact_details" maxlength="500" placeholder="e.g. name and phone number"></label>'
+        '<label>Job details (optional)<textarea name="details" rows="3" maxlength="4000" placeholder="What needs doing, timing, access, safety concerns, budget if stated…"></textarea></label>
         '<button type="submit">Save private lead</button></form><hr><h2>Recent private leads</h2>' + cards +
         '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></main></body></html>'
     )
