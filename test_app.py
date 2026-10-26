@@ -145,6 +145,8 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"ProContract", r.data)
         self.assertIn(b"The Chest", r.data)
+        self.assertIn(b"HomeGuild", r.data)
+        self.assertIn(b"BuildPair", r.data)
         self.assertIn(b"Formby Bubble", r.data)
         self.assertNotIn(b"Wirral Council", r.data)
         self.assertIn(b"does not automatically scrape Facebook", r.data)
