@@ -31,10 +31,14 @@ class AppTestCase(unittest.TestCase):
         os.environ["TENDERSCOUT_DB"] = str(Path(self.tmp.name) / "test.db")
         for name in ("DASHBOARD_USER", "DASHBOARD_PASSWORD", "DATABASE_URL"):
             os.environ.pop(name, None)
+        os.environ["DASHBOARD_USER"] = "test-user"
+        os.environ["DASHBOARD_PASSWORD"] = "test-password"
         import app
         self.app_module = importlib.reload(app)
         self.app_module.app.config["TESTING"] = True
         self.client = self.app_module.app.test_client()
+        import base64
+        self.client.environ_base["HTTP_AUTHORIZATION"] = "Basic " + base64.b64encode(b"test-user:test-password").decode()
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -157,6 +161,40 @@ class AppSmokeTest(AppTestCase):
         self.assertIn(b"Private lead saved", r.data)
         self.assertIn(b"Repair leaking roof", r.data)
         self.assertNotIn(b"Repair leaking roof", self.client.get("/").data)
+
+    def test_private_lead_has_urgency_and_one_tap_whatsapp_email_sharing(self):
+        r = self.client.post("/leads", data={
+            "title": "Urgent gutter cleaning",
+            "trade_category": "Gutter cleaning",
+            "location_text": "Allerton, Liverpool L18",
+            "source_name": "Facebook community group",
+            "source_url": "https://example.com/allerton-job",
+            "contact_details": "Customer contact shared in original post",
+            "details": "Clear blocked gutters today",
+            "urgency": "Urgent — today",
+        })
+        self.assertEqual(r.status_code, 200)
+        page = r.data.decode()
+        self.assertIn("Urgent — today", page)
+        self.assertIn("Exact job location", page)
+        self.assertIn("Send lead by WhatsApp", page)
+        self.assertIn("Send lead by email", page)
+        self.assertIn("https://example.com/allerton-job", page)
+        self.assertIn("Gutter cleaning", page)
+
+    def test_private_lead_status_can_be_updated(self):
+        self.client.post("/leads", data={
+            "title": "Fallen tree", "trade_category": "Tree surgery",
+            "location_text": "West Derby, Liverpool", "source_name": "Direct customer enquiry",
+            "details": "Tree blown over in garden", "urgency": "Urgent — today",
+        })
+        db = self.app_module.connect_db()
+        lead_id = db.execute("SELECT id FROM private_leads").fetchone()["id"]
+        db.close()
+        r = self.client.post(f"/leads/{lead_id}/status", data={"status": "Passed to trade"})
+        self.assertEqual(r.status_code, 302)
+        page = self.client.get("/leads").data
+        self.assertIn(b"Passed to trade", page)
 
     def test_private_lead_rejects_unknown_trade_category(self):
         r = self.client.post("/leads", data={
@@ -316,12 +354,16 @@ class RefreshTests(AppTestCase):
 
 
 class LoginTests(AppTestCase):
-    def test_site_is_open_when_no_password_is_configured(self):
-        self.assertEqual(self.client.get("/").status_code, 200)
+    def test_site_is_locked_when_password_is_not_configured(self):
+        os.environ.pop("DASHBOARD_USER", None)
+        os.environ.pop("DASHBOARD_PASSWORD", None)
+        self.assertEqual(self.client.get("/").status_code, 503)
+        self.assertIn(b"locked until", self.client.get("/").data)
 
-    def test_site_requires_login_once_password_is_configured(self):
+    def test_site_requires_login_without_valid_credentials(self):
         os.environ["DASHBOARD_USER"] = "admin"
         os.environ["DASHBOARD_PASSWORD"] = "s3cret"
+        self.client.environ_base.pop("HTTP_AUTHORIZATION", None)
         self.assertEqual(self.client.get("/").status_code, 401)
         self.assertEqual(self.client.post("/refresh").status_code, 401)
         self.assertEqual(self.client.post("/add", data={"title": "x"}).status_code, 401)
