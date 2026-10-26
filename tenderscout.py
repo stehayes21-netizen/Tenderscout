@@ -620,6 +620,29 @@ def extract_records(payload, source):
             else:
                 opportunity_stage = "Open for bids" if (tender.get("tenderPeriod") or tender.get("tender_period")) else "Other notice"
 
+            # Trade/category evidence is often published on tender line items rather
+            # than in the notice summary. Preserve readable item text for matching.
+            item_parts = []
+            tender_items = tender.get("items") or []
+            if isinstance(tender_items, list):
+                for item in tender_items:
+                    if not isinstance(item, dict):
+                        continue
+                    for key in ("description", "name", "classification", "additionalClassifications"):
+                        if key not in item:
+                            continue
+                        value_part = item[key]
+                        if isinstance(value_part, dict):
+                            value_part = first(value_part, "description", "name", "id")
+                        elif isinstance(value_part, list):
+                            value_part = " ".join(
+                                as_text(first(v, "description", "name", "id") if isinstance(v, dict) else v)
+                                for v in value_part
+                            )
+                        text_part = as_text(value_part).strip()
+                        if text_part:
+                            item_parts.append(text_part)
+
             output.append({
                 "source": source,
                 "opportunity_stage": opportunity_stage,
@@ -628,6 +651,7 @@ def extract_records(payload, source):
                 "title": title.strip(),
                 "buyer": buyer_name.strip(),
                 "description": desc.strip(),
+                "trade_context": " ".join(dict.fromkeys(item_parts)),
                 "contact_name": contact_name.strip(),
                 "contact_email": contact_email.strip(),
                 "contact_phone": contact_phone.strip(),
@@ -1017,7 +1041,7 @@ def classify_geography(record, region):
 def score_record(record, services, region, min_value, max_value):
     fulltext = " ".join([
         record.get("title", ""), record.get("description", ""),
-        record.get("buyer", ""),
+        record.get("trade_context", ""), record.get("buyer", ""),
     ]).lower()
     trade_hits = {
         "cleaning": keyword_hits(fulltext, CLEANING_TERMS),
