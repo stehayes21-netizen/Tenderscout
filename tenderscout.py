@@ -16,7 +16,7 @@ Outputs:
 Important:
 - Public feeds may be delayed or omit fields; always open the official notice.
 - Geography matching uses postcode districts first, then place names. It is a heuristic,
-  not a definitive location check. Target area: Liverpool, Sefton, Wirral, St Helens, Halton.
+  not a definitive location check. Target area: Liverpool, Sefton, St Helens, Halton, Knowsley and the agreed wider North West districts.
 - This script runs when you launch it. It is not a hosted service or scheduled job.
 """
 
@@ -206,7 +206,7 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Core areas: Liverpool, Sefton, Wirral, St Helens and Halton.
+# Core areas: Liverpool, Sefton, St Helens and Halton.
 # Wider areas: Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and
 # Chester (Chester, Ellesmere Port, Neston, Northwich, Winsford, Frodsham).
 # Postcodes are the main evidence because place names are ambiguous. Royal Mail
@@ -220,8 +220,6 @@ LOCAL_POSTCODE_DISTRICTS = {
     *(f"L{n}" for n in range(1, 20)), "L24", "L25", "L27",
     # Sefton
     "L20", "L21", "L22", "L23", "L29", "L30", "L31", "L37", "L38", "PR8", "PR9",
-    # Wirral
-    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
     # St Helens
     "WA9", "WA10", "WA11", "WA12",
     # Halton
@@ -250,12 +248,6 @@ LOCAL_PLACE_TERMS = [
     "sefton", "southport", "formby", "crosby", "great crosby", "blundellsands",
     "bootle", "litherland", "seaforth", "maghull", "lydiate", "melling",
     "netherton", "ainsdale", "birkdale", "aintree", "hightown", "churchtown",
-    # Wirral
-    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
-    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
-    "tranmere", "seacombe", "egremont", "leasowe", "meols", "bidston",
-    "port sunlight", "eastham", "clatterbridge", "pensby", "greasby", "irby",
-    "thingwall", "noctorum", "claughton",
     # St Helens
     "st helens", "saint helens", "rainhill", "haydock", "newton-le-willows",
     "earlestown", "billinge", "rainford", "thatto hector", "clock face",
@@ -294,6 +286,12 @@ WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire",
 # Places that clearly are not in the target area, including everything in Scotland.
 OUT_OF_AREA_TERMS = [
     "liverpool street", "chester-le-street", "crewe", "cheshire east",
+    # Wirral is deliberately excluded from TenderScout’s initial service area.
+    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
+    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
+    "tranmere", "seacombe", "egremont", "leasowe", "meols", "bidston",
+    "port sunlight", "eastham", "clatterbridge", "pensby", "greasby", "irby",
+    "thingwall", "noctorum", "claughton",
     "macclesfield", "knutsford", "altrincham",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
@@ -324,7 +322,7 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 # Lancashire, the broad Cheshire and North West codes) need a postcode or place
 # name to confirm. Every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
+LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
