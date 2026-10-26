@@ -1032,15 +1032,16 @@ def private_leads():
             f'<option value="{safe(st)}"{" selected" if st == row["status"] else ""}>{safe(st)}</option>'
             for st in LEAD_STATUSES
         )
+        created_label = display_date(row["created_at"])
         urgency_class = "urgent" if str(row["urgency"] or "").startswith("Urgent") else ""
         cards += (
             f'<article class="lead-card {urgency_class}"><p class="lead-kicker">{safe(row["trade_category"])} · {safe(row["urgency"] or "Flexible / no rush")}</p>'
             f'<h3>{safe(row["title"])}</h3><p class="lead-location"><b>WHERE:</b> {safe(row["location_text"])}</p>'
-            f'<p><b>Original source:</b> {safe(row["source_name"])} {link}</p>'
+            f'<div class="lead-facts"><p><b>Status</b><span>{safe(row["status"] or "New")}</span></p><p><b>Added</b><span>{safe(created_label or "Date not available")}</span></p></div>'
+            f'<p><b>Original source:</b> {safe(row["source_name"] or "Not recorded")} {link}</p>'
             f'<p><b>Customer / business contact:</b> {safe(row["contact_details"]) or "Not supplied — check the original post or contact the source"}</p>'
             f'<section class="lead-request"><h4>WHAT THE CUSTOMER NEEDS</h4><p>{safe(row["details"]) or "Not recorded yet — check the original post before passing this lead on."}</p></section>'
-            
-            
+            f'<form method="post" action="/leads/{int(row["id"])}/status" class="status-form"><label>Lead progress<select name="status">{status_options}</select></label><button type="submit">Save status</button></form>'
             f'<p class="share-actions"><a href="{safe(whatsapp_url)}" target="_blank" rel="noopener">Send lead by WhatsApp</a> <a href="{safe(email_url)}">Send lead by email</a></p></article>'
         )
     if not cards:
@@ -1056,7 +1057,7 @@ def private_leads():
         'article{background:#f3f6f4;border:1px solid #e0e8e2;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
         '.lead-kicker{font-weight:bold;color:#08783c}.lead-location{font-size:18px;background:#e8f2eb;padding:10px;border-radius:8px}.lead-request{background:#fff;border:1px solid #cbd9cf;border-radius:8px;padding:12px;margin:12px 0}.lead-request h4{margin:0 0 6px;color:#145c35;font-size:14px;letter-spacing:.03em}.urgent{border:2px solid #b45309;background:#fffaf0}.status-form label{display:block;font-weight:600}.status-form select{margin-bottom:8px}.share-actions{display:flex;gap:8px;flex-wrap:wrap}.share-actions a{display:inline-block;padding:10px;background:#e8f2eb;border-radius:8px;text-decoration:none;font-weight:bold}'
         'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
-        '.helper{font-size:13px;color:#53645a;font-weight:normal}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.share-actions a{min-height:40px}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
+        '.helper{font-size:13px;color:#53645a;font-weight:normal}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.lead-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.lead-facts p{margin:0;padding:10px;background:#f3f6f4;border-radius:8px}.lead-facts b,.lead-facts span{display:block}.lead-facts b{font-size:12px;color:#53645a;text-transform:uppercase}.status-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.status-form label{flex:1;min-width:180px;margin:0}.status-form button{width:auto;margin:0;white-space:nowrap}.share-actions a{min-height:40px}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
         '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
