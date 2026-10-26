@@ -66,7 +66,8 @@ class Database:
 
 COLUMNS = """
     source TEXT, title TEXT, buyer TEXT,
-    published_date TEXT, location_text TEXT,
+    published_date TEXT, location_text TEXT, description TEXT,
+    contact_name TEXT, contact_email TEXT, contact_phone TEXT, eligibility_text TEXT,
     service_match TEXT, score INTEGER,
     deadline TEXT, notice_url TEXT UNIQUE,
     geography_reason TEXT,
@@ -82,6 +83,11 @@ ADDED_COLUMNS = [
     ("pipeline_status", "TEXT DEFAULT 'Reviewing'"),
     ("region_match", "TEXT DEFAULT 'REVIEW'"),
     ("opportunity_stage", "TEXT DEFAULT 'Open for bids'"),
+    ("description", "TEXT"),
+    ("contact_name", "TEXT"),
+    ("contact_email", "TEXT"),
+    ("contact_phone", "TEXT"),
+    ("eligibility_text", "TEXT"),
 ]
 
 
@@ -297,14 +303,24 @@ def dashboard():
         )
         cards += f"""
         <article class="card">
-          <h2>{safe(row["title"]) or "Untitled tender"}</h2>
+          <p class="job-kicker">{safe(row["trade_category"] or row["service_match"] or "Trade opportunity")}</p>
+          <h2>{safe(row["title"]) or "Untitled opportunity"}</h2>
           <p class="deadline {deadline_class}">{safe(deadline_label)}</p>
-          <p><b>Buyer:</b> {safe(row["buyer"]) or "Not listed"}</p>
-          <p><b>Trade:</b> {safe(row["trade_category"] or row["service_match"])} · <b>Score:</b> {safe(row["score"])}</p>
-          <p><b>Opportunity stage:</b> {safe(row["opportunity_stage"] or "Open for bids")}</p>
-          <p><b>Location:</b> {safe(row["location_text"]) or "Needs checking"}</p>
-          <p><b>Source:</b> {safe(row["source"])}</p>
-          <p>{safe(row["geography_reason"])}</p>
+          <div class="job-facts">
+            <p><b>Buyer / hiring organisation</b><span>{safe(row["buyer"]) or "Not listed"}</span></p>
+            <p><b>Job location</b><span>{safe(row["location_text"]) or "Exact location not provided — open the original notice"}</span></p>
+            <p><b>Who should apply</b><span>{safe(row["eligibility_text"]) or ("Businesses providing " + str(row["trade_category"] or row["service_match"] or "the listed service") + ". Check the official notice for required qualifications, insurance, accreditations and tender eligibility.")}</span></p>
+            <p><b>Source</b><span>{safe(row["source"])}</span></p>
+          </div>
+          {('<p class="job-description"><b>Job details</b><br>' + safe(row["description"]) + '</p>') if row["description"] else '<p class="job-description"><b>Job details</b><br>Summary not supplied in the feed. Open the original notice for the full specification.</p>'}
+          {('<div class="contact-box"><b>Buyer contact</b>' +
+             ('<p>Contact: ' + safe(row["contact_name"]) + '</p>' if row["contact_name"] else '') +
+             ('<p>Email: <a href="mailto:' + safe(row["contact_email"]) + '">' + safe(row["contact_email"]) + '</a></p>' if row["contact_email"] else '') +
+             ('<p>Telephone: <a href="tel:' + safe(row["contact_phone"]) + '">' + safe(row["contact_phone"]) + '</a></p>' if row["contact_phone"] else '') +
+             ('<p>Contact details not supplied in the feed; use the official notice.</p>' if not (row["contact_name"] or row["contact_email"] or row["contact_phone"]) else '') +
+             '</div>')}
+          <p class="notice-meta"><b>Opportunity type:</b> {safe(row["opportunity_stage"] or "Open for bids")} · <b>Relevance score:</b> {safe(row["score"])}</p>
+          <p class="location-reason">{safe(row["geography_reason"])}</p>
           <form method="post" action="/tender/{int(row["id"])}/stage" class="stage">
             <input type="hidden" name="view" value="{view}">
             <input type="hidden" name="service" value="{service}">
@@ -408,6 +424,8 @@ def dashboard():
     <html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Tender Scout</title>
     <style>
+.job-kicker{margin:0 0 .35rem;color:#08783c;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:.88rem}.job-facts{display:grid;gap:.5rem;margin:1rem 0}.job-facts p{margin:0;padding:.65rem .75rem;background:#f0f6f2;border-radius:.55rem}.job-facts b{display:block;font-size:.88rem;color:#40534a}.job-facts span{display:block;margin-top:.18rem}.job-description{line-height:1.5}.contact-box{padding:.8rem 1rem;background:#f7f8f7;border:1px solid #d7e4dc;border-radius:.65rem;margin:1rem 0}.contact-box p{margin:.4rem 0}.notice-meta,.location-reason{font-size:.9rem;color:#4b5b53}.card h2{line-height:1.18}.share-actions{display:flex;flex-wrap:wrap;gap:.5rem}.share-actions a{display:inline-block}
+
     *{{box-sizing:border-box}}
     html{{width:100%;max-width:100%;overflow-x:hidden}}
     body{{font:16px Arial;background:#f3f6f4;color:#18251e;
