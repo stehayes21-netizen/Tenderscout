@@ -566,12 +566,29 @@ def extract_records(payload, source):
                     notice_url = f"https://www.find-tender.service.gov.uk/Notice/{release_id}"
 
             location_parts = []
-            for candidate in (
+            # OCDS location extensions can place delivery evidence on tender
+            # items, awards, or contracts. Inspect only those explicit
+            # procurement structures; never infer a site from buyer metadata.
+            location_candidates = [
                 tender,
                 rel,
                 rel.get("contract") or {},
                 *(tender.get("items") or []),
-            ):
+            ]
+            for group_key in ("awards", "contracts"):
+                groups = rel.get(group_key) or []
+                if isinstance(groups, dict):
+                    groups = [groups]
+                if not isinstance(groups, list):
+                    continue
+                for group in groups:
+                    if not isinstance(group, dict):
+                        continue
+                    location_candidates.append(group)
+                    items = group.get("items") or []
+                    if isinstance(items, list):
+                        location_candidates.extend(items)
+            for candidate in location_candidates:
                 add_location_values(candidate, location_parts)
 
             raw_tags = rel.get("tag") or rel.get("tags") or []
