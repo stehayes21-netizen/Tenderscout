@@ -1048,7 +1048,7 @@ def main():
     parser.add_argument("--days", type=int, default=60, help="Look-back window for publication/update date (default 60)")
     parser.add_argument(
         "--region", choices=[TARGET_AREA_LABEL, "North West", "UK wide"], default=TARGET_AREA_LABEL,
-        help="'Target area' = Liverpool, Sefton, Wirral, St Helens, Halton ('North West' is an alias)")
+        help="'Target area' = Liverpool, Sefton, St Helens, Halton, Knowsley and agreed wider North West districts; Wirral excluded ('North West' is an alias)")
     parser.add_argument("--services", nargs="+", choices=SERVICE_ORDER, default=SERVICE_ORDER)
     parser.add_argument("--min-value", type=float, default=None, help="Minimum estimated GBP value")
     parser.add_argument("--max-value", type=float, default=None, help="Maximum estimated GBP value")
