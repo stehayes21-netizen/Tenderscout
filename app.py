@@ -270,7 +270,7 @@ def dashboard():
     db = connect_db()
     condition = (
         "region_match = 'REVIEW'" if review_view
-        else "region_match IN ('LOCAL', 'MANUAL', 'REVIEW')"
+        else "region_match IN ('LOCAL', 'MANUAL')"
     )
     params = []
     if pipeline_view:
