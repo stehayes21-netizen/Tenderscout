@@ -176,10 +176,14 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
 
-    def test_wirral_is_excluded_from_the_initial_service_area(self):
-        for text in ("Wirral", "Birkenhead CH41 6AB", "Bebington CH62 5AA", "CH43", "UKD74"):
+    def test_wirral_and_wallasey_are_included_in_the_service_area(self):
+        for text in (
+            "Wirral", "Birkenhead CH41 6AB", "Bebington CH62 5AA",
+            "Wallasey CH45 4AA", "Wallasey CH44", "CH43", "UKD74",
+            "Moreton CH46 6AA", "West Kirby CH48 4AA",
+        ):
             with self.subTest(text=text):
-                self.assertEqual(self.classify(text), "OUT_OF_AREA")
+                self.assertEqual(self.classify(text), "LOCAL")
 
     def test_scotland_is_out_of_area(self):
         for text in (
@@ -247,9 +251,9 @@ class PostcodeAreaTests(unittest.TestCase):
                 record = {"location_text": "", "title": "Cleaning", "description": description}
                 self.assertEqual(tenderscout.classify_geography(record, "Target area")[0], "REVIEW")
 
-    def test_north_west_alias_does_not_override_excluded_wirral(self):
+    def test_north_west_alias_includes_wirral(self):
         record = {"location_text": "Birkenhead CH41 6AB"}
-        self.assertEqual(tenderscout.classify_geography(record, "North West")[0], "OUT_OF_AREA")
+        self.assertEqual(tenderscout.classify_geography(record, "North West")[0], "LOCAL")
 
     def test_uk_wide_skips_the_area_filter(self):
         record = {"location_text": "Edinburgh EH1 1AA"}
@@ -273,7 +277,7 @@ class PostcodeCoverageTests(unittest.TestCase):
                 self.assertEqual(self.classify(postcode), "LOCAL")
 
     def test_postcodes_outside_the_service_area_are_not_local(self):
-        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA", "CH41 1AA", "CH63 1AA"):
+        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA"):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "OUT_OF_AREA")
 
@@ -322,7 +326,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
         self.assertEqual(self.classify("Greater Manchester, Bolton"), "OUT_OF_AREA")
 
     def test_region_codes_for_other_areas_are_out_of_area(self):
-        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD62", "UKD41", "UKC11", "UKD74"):
+        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD62", "UKD41", "UKC11"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "OUT_OF_AREA")
 
@@ -415,6 +419,38 @@ class OverlapAndTradeTests(unittest.TestCase):
     def test_cleaning_wins_when_a_tender_matches_several_trades(self):
         result = self.score("Cleaning after refurbishment works")
         self.assertEqual(result["service_match"], "Cleaning")
+
+
+class ContractMetadataExtractionTests(unittest.TestCase):
+    def test_value_and_contract_period_are_extracted_for_plain_english_summary(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9870",
+                "date": "2026-10-01T00:00:00Z",
+                "tag": ["planning"],
+                "buyer": {"name": "Example Council"},
+                "tender": {
+                    "title": "Cleaning services",
+                    "value": {"amount": 125000, "currency": "GBP"},
+                    "contractPeriod": {
+                        "startDate": "2027-04-01T00:00:00Z",
+                        "endDate": "2029-03-31T23:59:59Z",
+                    },
+                    "tenderPeriod": {"endDate": "2027-01-15T12:00:00Z"},
+                    "items": [{
+                        "deliveryLocation": {
+                            "address": {"locality": "Liverpool", "postalCode": "L2 2DH"}
+                        }
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["estimated_value_gbp"], 125000.0)
+        self.assertEqual(records[0]["contract_start_date"], "2027-04-01T00:00:00Z")
+        self.assertEqual(records[0]["contract_end_date"], "2029-03-31T23:59:59Z")
+        self.assertEqual(records[0]["opportunity_stage"], "Planning / upcoming")
 
 
 class DeliveryLocationExtractionRegressionTests(unittest.TestCase):
