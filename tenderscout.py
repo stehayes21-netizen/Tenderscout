@@ -238,6 +238,11 @@ LOCAL_POSTCODE_DISTRICTS = {
 # Districts that straddle the target area and a neighbour (CH4 includes parts of
 # Wales).
 REVIEW_POSTCODE_DISTRICTS = {"CH4"}
+# Known delivery districts for the excluded Wirral area. Keep these distinct from
+# unknown bare district codes so they can be safely rejected rather than reviewed.
+EXCLUDED_POSTCODE_DISTRICTS = {
+    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
+}
 
 LOCAL_PLACE_TERMS = [
     # Liverpool
@@ -815,7 +820,7 @@ def postcode_districts(text, include_bare=False):
     full = {m.group(1) for m in FULL_POSTCODE_RE.finditer(upper)}
     bare = set()
     if include_bare:
-        known = LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS
+        known = LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS | EXCLUDED_POSTCODE_DISTRICTS
         bare = {m.group(1) for m in DISTRICT_RE.finditer(upper) if m.group(1) in known}
     return full, bare
 
@@ -840,7 +845,7 @@ def classify_geography(record, region):
     districts = full | bare
     pc_local = sorted(d for d in districts if d in LOCAL_POSTCODE_DISTRICTS)
     pc_review = sorted(d for d in districts if d in REVIEW_POSTCODE_DISTRICTS)
-    pc_other = sorted(d for d in full if d not in LOCAL_POSTCODE_DISTRICTS
+    pc_other = sorted(d for d in (full | bare) if d not in LOCAL_POSTCODE_DISTRICTS
                       and d not in REVIEW_POSTCODE_DISTRICTS)
 
     nuts = nuts_codes(location_text)
