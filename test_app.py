@@ -68,7 +68,8 @@ class AppTestCase(unittest.TestCase):
 
         with patch.object(self.app_module, "ThreadPoolExecutor", InlineExecutor), \
              patch.object(collector, "fetch_fts", side_effect=lambda *args, **kwargs: records), \
-             patch.object(collector, "fetch_contracts_finder", side_effect=lambda *args, **kwargs: []):
+             patch.object(collector, "fetch_contracts_finder", side_effect=lambda *args, **kwargs: []), \
+             patch.object(collector, "fetch_bearings", side_effect=lambda *args, **kwargs: []):
             return self.client.post("/refresh", follow_redirects=True)
 
 
