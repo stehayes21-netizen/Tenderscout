@@ -219,7 +219,10 @@ class AppSmokeTest(AppTestCase):
         page = self.client.get("/leads").data.decode()
         self.assertIn("Fallen tree", page)
         self.assertIn("West Derby, Liverpool", page)
-        self.assertNotIn("<b>Status:</b>", page)
+        self.assertIn("Passed to trade", page)
+        self.assertIn('action="/leads/1/status"', page)
+        self.assertIn("Lead progress", page)
+        self.assertIn("Added", page)
 
     def test_private_leads_can_be_exported_as_csv_with_formula_protection(self):
         self.client.post("/leads", data={
