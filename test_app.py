@@ -68,7 +68,8 @@ class AppTestCase(unittest.TestCase):
 
         with patch.object(self.app_module, "ThreadPoolExecutor", InlineExecutor), \
              patch.object(collector, "fetch_fts", side_effect=lambda *args, **kwargs: records), \
-             patch.object(collector, "fetch_contracts_finder", side_effect=lambda *args, **kwargs: []):
+             patch.object(collector, "fetch_contracts_finder", side_effect=lambda *args, **kwargs: []), \
+             patch.object(collector, "fetch_bearings", side_effect=lambda *args, **kwargs: []):
             return self.client.post("/refresh", follow_redirects=True)
 
 
@@ -507,7 +508,8 @@ class RefreshSummaryTests(AppTestCase):
         # Keep this test deterministic and offline: empty mocked feeds must
         # produce a failure response rather than a false "zero tenders" success.
         with patch.object(collector, "fetch_fts", return_value=[]), \
-             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+             patch.object(collector, "fetch_contracts_finder", return_value=[]), \
+             patch.object(collector, "fetch_bearings", return_value=[]):
             r = self.client.post("/refresh")
         self.assertEqual(r.status_code, 502)
         self.assertIn(b"does not mean there are no tenders", r.data)
@@ -519,7 +521,8 @@ class RefreshSummaryTests(AppTestCase):
                         description="Annual software licences."),
         ]
         with patch.object(collector, "fetch_fts", return_value=records), \
-             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+             patch.object(collector, "fetch_contracts_finder", return_value=[]), \
+             patch.object(collector, "fetch_bearings", return_value=[]):
             r = self.client.post("/refresh")
         self.assertEqual(r.status_code, 302)
         self.assertTrue(r.headers["Location"].startswith("/?done=1"))

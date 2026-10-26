@@ -798,6 +798,69 @@ def fetch_contracts_finder(days, max_pages, max_seconds=None, stats=None):
     return results
 
 
+def fetch_bearings(max_seconds=None, stats=None):
+    """Fetch free Bearings tender listings as discovery leads, never as proof of delivery location.
+
+    Bearings explicitly permits commercial use with attribution and links to the
+    provider's own page. Its area filter means business eligibility rather than
+    contract delivery location, so imported records deliberately have blank
+    location_text and must pass through TenderScout's normal REVIEW safeguards.
+    """
+    stats = _start_stats(stats)
+    started = time.monotonic()
+    results = []
+    params = {"area": "lcr,cheshire", "kind": "tender", "limit": "200", "sort": "newest"}
+    url = "https://getbearings.co.uk/api/v1/opportunities?" + urllib.parse.urlencode(params)
+    try:
+        payload = get_json(url)
+    except Exception as exc:
+        stats["error"] = str(exc)[:320]
+        print(f"[WARN] Bearings fetch failed: {exc}", file=sys.stderr)
+        return results
+    data = payload.get("data", []) if isinstance(payload, dict) else []
+    if not isinstance(data, list):
+        stats["error"] = "Unexpected Bearings API response shape"
+        return results
+    for item in data:
+        if max_seconds and time.monotonic() - started > max_seconds:
+            stats["stopped"] = "time limit"
+            break
+        if not isinstance(item, dict) or str(item.get("kind", "")).lower() != "tender":
+            continue
+        title = as_text(item.get("title")).strip()
+        provider_url = as_text(item.get("url")).strip()
+        if not title or not provider_url.startswith("https://"):
+            continue
+        bearings_url = as_text(item.get("bearings_url")).strip()
+        description_parts = [as_text(item.get("summary")).strip(), as_text(item.get("conditions")).strip()]
+        where = as_text(item.get("where")).strip()
+        if where:
+            description_parts.append("Eligibility/location wording from Bearings (not verified delivery site): " + where)
+        if bearings_url.startswith("https://"):
+            description_parts.append("Source credit: Bearings — " + bearings_url)
+        results.append({
+            "source": "Bearings (discovery; verify provider notice)",
+            "opportunity_stage": "Open for bids",
+            "location_text": "",
+            "published_date": as_text(item.get("first_seen") or ""),
+            "title": title,
+            "buyer": as_text(item.get("provider") or ""),
+            "description": " ".join(part for part in description_parts if part),
+            "contact_name": "", "contact_email": "", "contact_phone": "",
+            "eligibility_text": as_text(item.get("conditions") or ""),
+            "estimated_value_gbp": "",
+            "contract_start_date": "", "contract_end_date": "",
+            "deadline": as_text(item.get("closes") or ""),
+            "status": "Bearings discovery listing — verify provider notice",
+            "notice_url": provider_url,
+            "ocid": as_text(item.get("id") or provider_url),
+            "_raw": item,
+        })
+    stats.update({"pages": 1 if data else 0, "records": len(results), "last_batch": len(results),
+                  "windows": 1, "more": False, "full_end": len(data) >= 200})
+    return results
+
+
 def keyword_hits(text, terms):
     lower = text.lower()
     return [term for term in terms if term in lower]
