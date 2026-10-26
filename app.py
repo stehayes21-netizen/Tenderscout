@@ -461,7 +461,7 @@ def dashboard():
     </style></head><body>
     <header><h1>Tender Scout</h1>
     <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
-    <p>Liverpool, Sefton, Wirral, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West</p>
+    <p>Liverpool, Sefton, St Helens, Halton, Knowsley, Warrington, Wigan, West Lancashire and Cheshire West. Wirral is excluded initially.</p>
     <form method="post" action="/refresh"
       onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
@@ -789,7 +789,6 @@ def sources():
             ("Contracts Finder", "https://www.contractsfinder.service.gov.uk/Search", "UK public-sector opportunities"),
             ("Liverpool City Council — ProContract", "https://procontract.due-north.com/", "Liverpool Council says most of its opportunities are advertised through ProContract; some routes use other approved portals"),
             ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
-            ("Wirral Council tender guidance", "https://www.wirral.gov.uk/business/tenders-and-contracts", "Wirral directs suppliers to The Chest"),
         ]),
         ("Community and private-lead channels", [
             ("Formby Bubble Approved Trader List", "https://www.formbybubble.com/bubbleapprovedtraderlist", "Local trader directory; use as a contact/discovery source, not proof of a live job"),
