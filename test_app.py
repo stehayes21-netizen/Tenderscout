@@ -258,11 +258,35 @@ class RefreshTests(AppTestCase):
         self.assertNotIn(b"example.com/edi", self.client.get("/export.csv").data)
         self.assertNotIn(b"example.com/edi", self.client.get("/?view=review").data)
 
+    def test_explicit_worldwide_scope_is_not_put_in_local_review_queue(self):
+        result = self.app_module.collector.classify_geography(
+            {"location_text": "North West, British Overseas Territories, Channel Islands, Europe, Isle of Man, Rest of the World"},
+            self.app_module.collector.TARGET_AREA_LABEL,
+        )
+        self.assertEqual(result[0], "OUT_OF_AREA")
+
     def test_unclear_locations_wait_in_the_review_view(self):
         self.refresh_with([feed_record("unk", "")])
         self.assertNotIn(b"https://example.com/unk", self.client.get("/").data)
         review = self.client.get("/?view=review").data
         self.assertIn(b"https://example.com/unk", review)
+
+    def test_job_board_card_shows_description_and_public_buyer_contact(self):
+        record = feed_record("contact-card", "Liverpool L2 2DH")
+        record.update({
+            "contact_name": "Procurement Team",
+            "contact_email": "procurement@example.gov.uk",
+            "contact_phone": "0151 555 0100",
+            "eligibility_text": "Registered cleaning providers",
+        })
+        self.refresh_with([record])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Routine cleaning services.", page)
+        self.assertIn("Procurement Team", page)
+        self.assertIn("procurement@example.gov.uk", page)
+        self.assertIn("Registered cleaning providers", page)
+        self.assertIn("Who should apply", page)
+        self.assertIn("Job location", page)
 
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
         self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
