@@ -206,7 +206,8 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Core areas: Liverpool, Sefton, St Helens and Halton.
+# Core areas: Liverpool, Sefton, St Helens, Halton and the full Wirral peninsula
+# including Wallasey and Birkenhead.
 # Wider areas: Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and
 # Chester (Chester, Ellesmere Port, Neston, Northwich, Winsford, Frodsham).
 # Postcodes are the main evidence because place names are ambiguous. Royal Mail
@@ -234,15 +235,14 @@ LOCAL_POSTCODE_DISTRICTS = {
     "L39", "L40", "WN8",
     # Cheshire West and Chester
     "CH1", "CH2", "CH3", "CH64", "CH65", "CH66", "WA6", "CW6", "CW7", "CW8", "CW9",
+    # Wirral peninsula, including Wallasey and Birkenhead
+    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
 # Districts that straddle the target area and a neighbour (CH4 includes parts of
 # Wales).
 REVIEW_POSTCODE_DISTRICTS = {"CH4"}
-# Known delivery districts for the excluded Wirral area. Keep these distinct from
-# unknown bare district codes so they can be safely rejected rather than reviewed.
-EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
-}
+# Retained as an empty compatibility set: Wirral is now included in the service area.
+EXCLUDED_POSTCODE_DISTRICTS = set()
 
 LOCAL_PLACE_TERMS = [
     # Liverpool
@@ -277,6 +277,12 @@ LOCAL_PLACE_TERMS = [
     # Cheshire West and Chester
     "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
     "northwich", "winsford", "frodsham", "helsby", "tarporley",
+    # Wirral peninsula, including Wallasey
+    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
+    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
+    "tranmere", "seacombe", "egremont", "leasowe", "meols", "bidston",
+    "port sunlight", "eastham", "clatterbridge", "pensby", "greasby", "irby",
+    "thingwall", "noctorum", "claughton", "moreton", "upton",
 ]
 # Names that also exist in other parts of the UK. On their own they only send a
 # tender to the review list; a postcode or a clear place name must confirm them.
@@ -291,12 +297,6 @@ WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire",
 # Places that clearly are not in the target area, including everything in Scotland.
 OUT_OF_AREA_TERMS = [
     "liverpool street", "chester-le-street", "crewe", "cheshire east",
-    # Wirral is deliberately excluded from TenderScout’s initial service area.
-    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
-    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
-    "tranmere", "seacombe", "egremont", "leasowe", "meols", "bidston",
-    "port sunlight", "eastham", "clatterbridge", "pensby", "greasby", "irby",
-    "thingwall", "noctorum", "claughton",
     "macclesfield", "knutsford", "altrincham",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
@@ -327,7 +327,7 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 # Lancashire, the broad Cheshire and North West codes) need a postcode or place
 # name to confirm. Every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73"}
+LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
@@ -340,6 +340,7 @@ def nuts_codes(text):
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
     "service_match", "region_match", "geography_reason", "estimated_value_gbp",
+    "contract_start_date", "contract_end_date",
     "deadline", "status", "opportunity_stage", "score", "score_reasons", "notice_url", "ocid",
 ]
 
@@ -549,12 +550,26 @@ def extract_records(payload, source):
             contact_phone = as_text(first(contact_point, "telephone", "phone"))
             eligibility = first(tender, "eligibility", "selectionCriteria", "selection_criteria")
             eligibility_text = as_text(eligibility)
-            value = first(tender, "value", "budget")
+            planning = rel.get("planning") or {}
+            value = (
+                first(tender, "value", "budget")
+                or first(planning, "budget", "value")
+                or first(rel, "value", "budget")
+            )
             published = first(rel, "date", "publishedDate", "publicationDate")
             deadline = ""
             period = tender.get("tenderPeriod") or tender.get("tender_period") or {}
             if isinstance(period, dict):
                 deadline = as_text(first(period, "endDate", "end_date", "end"))
+            contract_period = (
+                tender.get("contractPeriod") or tender.get("contract_period")
+                or (rel.get("contract") or {}).get("period")
+                or rel.get("contractPeriod") or rel.get("contract_period") or {}
+            )
+            if not isinstance(contract_period, dict):
+                contract_period = {}
+            contract_start_date = as_text(first(contract_period, "startDate", "start_date", "start"))
+            contract_end_date = as_text(first(contract_period, "endDate", "end_date", "end"))
             notice_url = ""
             for doc in (tender.get("documents") or []) + (rel.get("documents") or []):
                 if isinstance(doc, dict):
@@ -618,6 +633,8 @@ def extract_records(payload, source):
                 "contact_phone": contact_phone.strip(),
                 "eligibility_text": eligibility_text.strip(),
                 "estimated_value_gbp": money_value(value),
+                "contract_start_date": contract_start_date,
+                "contract_end_date": contract_end_date,
                 "deadline": deadline,
                 "status": as_text(first(tender, "status") or first(rel, "tag")),
                 "notice_url": notice_url,
