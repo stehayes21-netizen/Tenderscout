@@ -510,6 +510,12 @@ def extract_records(payload, source):
             title = as_text(first(tender, "title", "name") or first(rel, "title", "description"))
             desc = as_text(first(tender, "description", "summary") or first(rel, "description"))
             buyer_name = as_text(first(buyer, "name", "legalName"))
+            contact_point = buyer.get("contactPoint") or buyer.get("contact_point") or {}
+            contact_name = as_text(first(contact_point, "name", "contactName"))
+            contact_email = as_text(first(contact_point, "email", "emailAddress"))
+            contact_phone = as_text(first(contact_point, "telephone", "phone"))
+            eligibility = first(tender, "eligibility", "selectionCriteria", "selection_criteria")
+            eligibility_text = as_text(eligibility)
             value = first(tender, "value", "budget")
             published = first(rel, "date", "publishedDate", "publicationDate")
             deadline = ""
@@ -557,6 +563,10 @@ def extract_records(payload, source):
                 "title": title.strip(),
                 "buyer": buyer_name.strip(),
                 "description": desc.strip(),
+                "contact_name": contact_name.strip(),
+                "contact_email": contact_email.strip(),
+                "contact_phone": contact_phone.strip(),
+                "eligibility_text": eligibility_text.strip(),
                 "estimated_value_gbp": money_value(value),
                 "deadline": deadline,
                 "status": as_text(first(tender, "status") or first(rel, "tag")),
