@@ -1138,7 +1138,14 @@ def main():
     args = parser.parse_args()
 
     print("TenderScout v1 — fetching official public procurement feeds...")
-    all_rows = fetch_fts(args.days, args.pages) + fetch_contracts_finder(args.days, args.pages)
+    # Keep the scheduled/CLI collector aligned with the hosted dashboard's three free feeds.
+    # Bearings records have no trusted delivery location and therefore remain in REVIEW
+    # until a structured site location is verified; they are never auto-labelled LOCAL.
+    all_rows = (
+        fetch_fts(args.days, args.pages)
+        + fetch_contracts_finder(args.days, args.pages)
+        + fetch_bearings()
+    )
     all_rows = dedupe(all_rows)
     if not all_rows:
         print("No feed records retrieved. Check your internet connection/API availability and try again.")
