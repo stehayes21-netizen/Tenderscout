@@ -10,7 +10,7 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 ## Opportunity types and source directory
 
 - `/sources` lists official public procurement portals and community/business discovery channels, including Liverpool City Council's ProContract route and The Chest.
-- `/leads` is a separate manual capture area for private customer enquiries. Private leads are stored in their own table and are not mixed into public-sector tenders.
+- `/leads` is a separate manual capture area for private customer enquiries. Private leads are stored in their own table and are not mixed into public-sector tenders. Each lead records the trade, precise location, urgency, source, contact details where appropriate, job scope, status, and one-tap WhatsApp/email sharing.
 - Community sites such as Facebook and Nextdoor are **not scraped automatically**. Add only genuine enquiries from sources where access and reuse are permitted; supplier portals may require registration and may not offer a public feed.
 - Council portals are listed as sources, not falsely described as connected live feeds. Automated ingestion should be added only where an official feed/API or written permission is available.
 
@@ -44,7 +44,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 ## Settings (environment variables)
 | Name | Purpose |
 | --- | --- |
-| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Turn on password protection. **Set both before sharing the site.** If either is missing the site is open to anyone with the link. `/health` stays open for the host. |
+| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Required HTTP Basic Authentication for the entire dashboard and all lead/tender data. If either is missing, the app fails closed with HTTP 503 instead of exposing customer leads. `/health` stays open for the host. Use a strong unique password and do not put credentials in GitHub code. |
 | `DATABASE_URL` | PostgreSQL connection string. Without it the app uses SQLite, which is wiped on every redeploy on Render's free tier. |
 | `TENDERSCOUT_DB` | SQLite file path (local use only) |
 | `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE` | Look-back window (default 60 days), pages per source (default 25) and the time limit per source (default 40 seconds) |
@@ -65,7 +65,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 - `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)
 - `/export.csv` download public-sector tender records
 - `/sources` council procurement and community source directory
-- `/leads` manually capture and view private customer enquiries separately
+- `/leads` manually capture and view private customer enquiries separately; record exact location and urgency, then send the selected lead directly by WhatsApp/email and update its status
 - `/health` readiness check
 
 ## Tests
