@@ -407,6 +407,124 @@ class OverlapAndTradeTests(unittest.TestCase):
         self.assertEqual(result["service_match"], "Cleaning")
 
 
+
+
+class DeliveryLocationDescriptionTests(unittest.TestCase):
+    def test_extracts_description_inside_explicit_delivery_location(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9876",
+                "buyer": {
+                    "name": "Example Council",
+                    "address": {"postalCode": "EH1 1AA", "locality": "Edinburgh"},
+                },
+                "tender": {
+                    "title": "Cleaning services",
+                    "description": "General tender description must not be treated as a site",
+                    "items": [{
+                        "deliveryLocation": {
+                            "description": "Sites across Liverpool and Knowsley"
+                        }
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("Sites across Liverpool and Knowsley", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
+        )
+        self.assertNotIn("General tender description", records[0]["location_text"])
+
+    def test_does_not_treat_general_tender_description_as_delivery_location(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9877",
+                "buyer": {
+                    "name": "Liverpool Council",
+                    "address": {"postalCode": "L2 2DH", "locality": "Liverpool"},
+                },
+                "tender": {
+                    "title": "Cleaning services",
+                    "description": "Services will be delivered in Liverpool",
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["location_text"], "")
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "REVIEW"
+        )
+
+
+
+class AdditionalDeliveryLocationSchemaTests(unittest.TestCase):
+    def test_place_of_performance_description_is_used_as_site_evidence(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9878",
+                "buyer": {"name": "Example Council", "address": {"locality": "Edinburgh"}},
+                "tender": {
+                    "title": "Facilities contract",
+                    "description": "General description mentions Liverpool but is not location evidence",
+                    "placeOfPerformance": {
+                        "description": "Service delivery at sites in Liverpool and Sefton"
+                    },
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("Service delivery at sites in Liverpool and Sefton", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
+        )
+        self.assertNotIn("General description mentions Liverpool", records[0]["location_text"])
+
+    def test_award_item_delivery_location_is_extracted(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9880",
+                "buyer": {"name": "Liverpool Council", "address": {"locality": "Liverpool"}},
+                "tender": {"title": "Cleaning contract", "description": "General text only"},
+                "awards": [{
+                    "id": "award-1",
+                    "items": [{
+                        "deliveryLocations": [
+                            {"description": "Contract sites in Leeds"}
+                        ]
+                    }]
+                }],
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("Contract sites in Leeds", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "OUT_OF_AREA"
+        )
+
+    def test_explicit_out_of_area_performance_site_is_not_local(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9879",
+                "buyer": {"name": "Liverpool Council"},
+                "tender": {
+                    "title": "Regional maintenance contract",
+                    "service_location": {"description": "All works delivered in Leeds"},
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("All works delivered in Leeds", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "OUT_OF_AREA"
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
