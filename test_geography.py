@@ -459,6 +459,49 @@ class DeliveryLocationDescriptionTests(unittest.TestCase):
         )
 
 
+
+class AdditionalDeliveryLocationSchemaTests(unittest.TestCase):
+    def test_place_of_performance_description_is_used_as_site_evidence(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9878",
+                "buyer": {"name": "Example Council", "address": {"locality": "Edinburgh"}},
+                "tender": {
+                    "title": "Facilities contract",
+                    "description": "General description mentions Liverpool but is not location evidence",
+                    "placeOfPerformance": {
+                        "description": "Service delivery at sites in Liverpool and Sefton"
+                    },
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("Service delivery at sites in Liverpool and Sefton", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
+        )
+        self.assertNotIn("General description mentions Liverpool", records[0]["location_text"])
+
+    def test_explicit_out_of_area_performance_site_is_not_local(self):
+        payload = {
+            "releases": [{
+                "id": "2026-9879",
+                "buyer": {"name": "Liverpool Council"},
+                "tender": {
+                    "title": "Regional maintenance contract",
+                    "service_location": {"description": "All works delivered in Leeds"},
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("All works delivered in Leeds", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "OUT_OF_AREA"
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
