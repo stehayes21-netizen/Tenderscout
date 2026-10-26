@@ -327,16 +327,16 @@ class RefreshTests(AppTestCase):
         main = self.client.get("/").data
         self.assertIn(b"https://example.com/liv", main)
         self.assertNotIn(b"https://example.com/edi", main)
-        self.assertIn(b"https://example.com/unk", main)
-        self.assertIn(b"Location needs checking", main)
+        self.assertNotIn(b"https://example.com/unk", main)
+        self.assertNotIn(b"Location needs checking", main)
+        self.assertIn(b"https://example.com/unk", self.client.get("/?view=review").data)
 
     def test_empty_dashboard_points_to_saved_location_review_tenders(self):
         self.refresh_with([feed_record("unk", "")])
         page = self.client.get("/").data
-        self.assertIn(b"https://example.com/unk", page)
-        self.assertIn(b"Location needs checking", page)
+        self.assertNotIn(b"https://example.com/unk", page)
+        self.assertIn(b"https://example.com/unk", self.client.get("/?view=review").data)
         self.assertIn(b"Needs a location check (1)", page)
-        self.assertIn(b"Needs a location check", page)
         self.assertIn(b"view=review", page)
 
     def test_scottish_tenders_are_never_saved(self):
@@ -353,7 +353,7 @@ class RefreshTests(AppTestCase):
 
     def test_unclear_locations_wait_in_the_review_view(self):
         self.refresh_with([feed_record("unk", "")])
-        self.assertIn(b"https://example.com/unk", self.client.get("/").data)
+        self.assertNotIn(b"https://example.com/unk", self.client.get("/").data)
         review = self.client.get("/?view=review").data
         self.assertIn(b"https://example.com/unk", review)
 
