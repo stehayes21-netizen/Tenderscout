@@ -791,6 +791,8 @@ def sources():
             ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
         ]),
         ("Community and private-lead channels", [
+            ("HomeGuild — Liverpool homeowner jobs", "https://www.homeguild.co.uk/jobs/", "Public job-board page; current jobs may be empty and contact details are reserved for registered tradespeople"),
+            ("BuildPair — latest job requests", "https://www.buildpair.co.uk/jobs", "Public job-board page; review the source's terms before any automated reuse"),
             ("Formby Bubble Approved Trader List", "https://www.formbybubble.com/bubbleapprovedtraderlist", "Local trader directory; use as a contact/discovery source, not proof of a live job"),
             ("Grafters Network Liverpool", "https://www.grafterssupergroups.co.uk/events/liverpoolflagship/", "Local business networking"),
             ("Liverpool Business Forum", "https://liverpoolbusinessforum.co.uk/about-lbf/", "Local business contacts and networking"),
