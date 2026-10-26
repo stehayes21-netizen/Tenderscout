@@ -267,6 +267,29 @@ def dashboard():
             f'<a href="{link}" target="_blank" rel="noopener">View official notice</a>'
             if link.startswith("https://") else ""
         )
+        share_actions = ""
+        if link.startswith("https://"):
+            share_title = row["title"] or "Tender opportunity"
+            share_message = "\n".join([
+                share_title,
+                "Buyer: " + str(row["buyer"] or "Not listed"),
+                "Trade: " + str(row["trade_category"] or row["service_match"] or "Unclassified"),
+                "Location: " + str(row["location_text"] or "Check official notice"),
+                "Source: " + str(row["source"] or "Public procurement notice"),
+                "Official notice: " + str(row["notice_url"]),
+            ])
+            whatsapp_url = "https://wa.me/?text=" + urlencode({"text": share_message})[5:]
+            email_url = "mailto:?" + urlencode({
+                "subject": "Tender opportunity: " + share_title,
+                "body": share_message,
+            })
+            share_actions = (
+                '<p class="share-actions">'
+                f'<a href="{safe(whatsapp_url)}" target="_blank" rel="noopener">Share by WhatsApp</a>'
+                ' · '
+                f'<a href="{safe(email_url)}">Share by Email</a>'
+                '</p>'
+            )
         current = row["pipeline_status"] or "Reviewing"
         options = "".join(
             f'<option{" selected" if stage == current else ""}>{safe(stage)}</option>'
@@ -291,6 +314,7 @@ def dashboard():
             <noscript><button type="submit">Save</button></noscript>
           </form>
           {notice}
+          {share_actions}
         </article>
         """
 
@@ -406,6 +430,8 @@ def dashboard():
     .deadline.soon{{color:#b45309}}
     .deadline.closed{{color:#8a8f8c}}
     .stage select{{font-size:16px;padding:8px;margin-left:6px}}
+    .share-actions{{margin-top:12px;font-weight:bold}}
+    .share-actions a{{display:inline-block;padding:9px 11px;background:#e8f2eb;border:1px solid #c8ddce;border-radius:8px;text-decoration:none}}
     a{{color:#08783c}}.note{{font-size:13px;line-height:1.45}}
     .trade-browser{{background:#e8f2eb;border:1px solid #d0e2d5;border-radius:14px;padding:16px;margin:18px 0}}
     .trade-browser h2{{margin:0 0 6px}}

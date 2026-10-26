@@ -149,7 +149,7 @@ class AppSmokeTest(AppTestCase):
             "title": "Repair leaking roof",
             "trade_category": "Roofing and roof repairs",
             "location_text": "Liverpool L15",
-            "source_name": "Community group",
+            "source_name": "Facebook community group",
             "source_url": "https://example.com/request",
             "details": "Customer requests a roof inspection",
         })
@@ -202,7 +202,7 @@ class AppSmokeTest(AppTestCase):
         page = self.client.get("/?trade=Roofing%20and%20roof%20repairs").data
         self.assertIn(b"example.com/roof", page)
         self.assertNotIn(b"example.com/clean", page)
-        self.assertIn(b"Filter by trade (71 categories)", page)
+        self.assertIn(b"Browse all 71 trade categories", page)
 
     def test_empty_trade_filter_explains_no_matches_and_offers_all_trades(self):
         self.client.post("/add", data={
