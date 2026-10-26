@@ -756,6 +756,35 @@ def export_csv():
     )
 
 
+@app.route("/leads/export.csv")
+def export_private_leads_csv():
+    """Export the private lead pipeline so records can be backed up or reused."""
+    fields = [
+        "title", "trade_category", "location_text", "source_name", "source_url",
+        "contact_details", "details", "urgency", "status", "created_at",
+    ]
+    db = connect_db()
+    try:
+        rows = db.execute(
+            f"SELECT {', '.join(fields)} FROM private_leads ORDER BY created_at DESC"
+        ).fetchall()
+    finally:
+        db.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(fields)
+    for row in rows:
+        writer.writerow([csv_safe(row[field]) for field in fields])
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=tenderscout_private_leads.csv",
+                 "Cache-Control": "no-store"},
+    )
+
+
 
 TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 LEAD_STATUSES = ["New", "Contacted", "Qualified", "Passed to trade", "Won", "Closed"]
@@ -912,6 +941,7 @@ def private_leads():
         '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
         '<p><b>Private to your account.</b> Save genuine enquiries, then choose the right tradesperson and send the lead yourself. Private leads never appear in the public-tender list.</p>'
+        '<p><a href="/leads/export.csv">Download private leads CSV (backup)</a></p>'
         '<p>Record the most precise location and only save customer contact details when they were provided for this enquiry and can legitimately be reused. A direct source URL is optional.</p>'
         + message +
         '<form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Urgent gutter cleaning needed"></label>'
