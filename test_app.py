@@ -201,6 +201,28 @@ class AppSmokeTest(AppTestCase):
         page = self.client.get("/leads").data
         self.assertIn(b"Passed to trade", page)
 
+    def test_private_leads_can_be_exported_as_csv_with_formula_protection(self):
+        self.client.post("/leads", data={
+            "title": "=HYPERLINK(\"https://bad.example\",\"click\")",
+            "trade_category": "Roofing and roof repairs",
+            "location_text": "Liverpool L15",
+            "source_name": "Direct customer enquiry",
+            "source_url": "https://example.com/lead",
+            "contact_details": "Customer asked for a callback",
+            "details": "Repair a leaking roof",
+            "urgency": "This week",
+        })
+        response = self.client.get("/leads/export.csv")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.content_type)
+        self.assertIn("attachment; filename=tenderscout_private_leads.csv",
+                      response.headers.get("Content-Disposition", ""))
+        csv_text = response.data.decode("utf-8")
+        self.assertIn("trade_category", csv_text)
+        self.assertIn("Liverpool L15", csv_text)
+        self.assertIn("https://example.com/lead", csv_text)
+        self.assertIn("'=HYPERLINK", csv_text)
+
     def test_private_lead_rejects_unknown_trade_category(self):
         r = self.client.post("/leads", data={
             "title": "Job", "trade_category": "Not a real category",
