@@ -197,8 +197,8 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Send lead by email", page)
         self.assertIn("https://example.com/allerton-job", page)
         self.assertIn("Gutter cleaning", page)
-        self.assertIn("Lead+status%3A+New", page)
-        self.assertIn("Customer%2Fbusiness+contact", page)
+        self.assertIn("JOB%3A+Urgent+gutter+cleaning", page)
+        self.assertIn("CONTACT%3A+Customer+contact+shared+in+original+post", page)
 
     def test_private_lead_status_can_be_updated(self):
         self.client.post("/leads", data={
