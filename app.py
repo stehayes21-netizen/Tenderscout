@@ -974,8 +974,9 @@ def export_csv():
 @app.route("/leads/export.csv")
 def export_private_leads_csv():
     """Export the private lead pipeline so records can be backed up or reused."""
+    # Include the database ID as well as all private-lead fields for recovery.
     fields = [
-        "title", "trade_category", "location_text", "source_name", "source_url",
+        "id", "title", "trade_category", "location_text", "source_name", "source_url",
         "contact_details", "details", "urgency", "status", "created_at",
     ]
     db = connect_db()
