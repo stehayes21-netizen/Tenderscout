@@ -3,7 +3,7 @@
 A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Knowsley, Sefton, St Helens and Halton**. Wirral and the wider North West are excluded from the initial service area.
 
 ## How it works
-- `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds plus two free discovery sources: Bearings and the Standstill UK North West RSS feed. Discovery feeds are attributed and never treated as proof of a delivery location.
+- `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds plus free discovery sources: Bearings and seven Standstill RSS feeds (North West region, cleaning, construction, building-installation maintenance, refurbishment, grounds maintenance and waste services). Discovery feeds are attributed and never treated as proof of a delivery location.
 - `app.py` is the Flask dashboard. **Refresh tenders** runs the collector and saves matches to the database.
 - Confirmed local tenders appear on the main list. Notices that mention a target-area place in their title/description or buyer name can also appear, clearly labelled **POTENTIAL LOCAL — verify delivery site**. This surfaces candidates without treating buyer HQ or text mentions as proof of delivery. The full location-review queue remains available separately.
 - Each tender card includes a plain-English explanation of what the buyer wants, where the work is, the published estimated value, contract dates/duration when available, who may qualify, the deadline and how to apply. Missing facts are labelled as not stated rather than guessed.
