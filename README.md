@@ -1,6 +1,6 @@
 # TenderScout
 
-A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral (including Wallasey), Warrington, Wigan, West Lancashire and Cheshire West and Chester**.
+A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Knowsley, Sefton, St Helens and Halton**. Wirral and the wider North West are excluded from the initial service area.
 
 ## How it works
 - `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds, scores them, and decides whether each one is in the target area.
