@@ -773,7 +773,12 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        results.extend(_page_through(FTS_URL, params, "Find a Tender", max_pages,
+        # Always sample every date window before spending the time budget
+        # paging deeply into the newest week. FTS rate-limits pagination, so a
+        # 25-page first window can otherwise consume the entire hosted refresh
+        # and leave the other 7–8 weeks completely unsearched.
+        window_page_limit = min(max_pages, 1)
+        results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
                                      started, max_seconds, stats))
         if stats["error"]:
             break
