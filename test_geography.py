@@ -182,7 +182,7 @@ class OpportunityStageTests(unittest.TestCase):
             "url": "https://provider.example/jobs/roof",
             "provider": "Example provider",
         }
-        with patch("tenderscout.get_json", return_value={"items": [bearings]}):
+        with patch("tenderscout.get_json", return_value={"data": [bearings]}):
             rows = tenderscout.fetch_bearings()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["opportunity_stage"], "Other notice")
@@ -194,7 +194,7 @@ class OpportunityStageTests(unittest.TestCase):
         <link>https://example.com/notice</link>
         <description>Cleaning contract</description>
         </item></channel></rss>"""
-        with patch("tenderscout.urllib.request.urlopen", return_value=BytesIO(feed)):
+        with patch("tenderscout.urllib.request.urlopen", side_effect=lambda *args, **kwargs: BytesIO(feed)):
             rows = tenderscout.fetch_standstill_northwest()
         self.assertTrue(rows)
         self.assertEqual(rows[0]["opportunity_stage"], "Other notice")
