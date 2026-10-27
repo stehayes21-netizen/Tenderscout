@@ -1088,16 +1088,16 @@ def _project_location_check(text):
     """Only accept clear target-area mentions; never treat a broad region as proof."""
     lower = " " + re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip() + " "
     local_hits = [term for term in collector.LOCAL_PLACE_TERMS if (" " + term + " ") in lower]
-    # Exact postcode district checks can identify target locations even if no town is named.
+    # Exact postcode district checks can identify target locations, including Wirral, even if no town is named.
     try:
         full, bare = collector.postcode_districts(text or "", include_bare=True)
         postcode_hits = sorted((full | bare) & collector.LOCAL_POSTCODE_DISTRICTS)
     except Exception:
         postcode_hits = []
     if not local_hits and not postcode_hits:
-        return False, "Location not confirmed in the five target areas"
+        return False, "Location not confirmed in the six target areas"
     excluded_terms = [
-        "wirral", "birkenhead", "wallasey", "warrington", "wigan", "west lancashire",
+        "warrington", "wigan", "west lancashire",
         "ormskirk", "skelmersdale", "chester", "ellesmere port", "manchester",
         "salford", "bolton", "preston", "blackpool", "north west", "cheshire west",
     ]
