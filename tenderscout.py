@@ -225,11 +225,12 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA7", "WA8",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
+    # Wirral
+    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
 REVIEW_POSTCODE_DISTRICTS = set()
 EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(1, 50)), "CH60", "CH61", "CH62", "CH63",
-    "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
+    *(f"CH{n}" for n in range(1, 41)), "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
     "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
@@ -255,6 +256,10 @@ LOCAL_PLACE_TERMS = [
     # Knowsley
     "knowsley", "huyton", "prescot", "halewood", "stockbridge village",
     "tarbock", "roby", "cronton",
+    # Wirral
+    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
+    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
+    "tranmere", "moreton", "upton",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -274,9 +279,6 @@ OUT_OF_AREA_TERMS = [
     "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton", "up holland",
     "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
     "northwich", "winsford", "frodsham", "helsby", "tarporley",
-    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
-    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
-    "tranmere",
     "macclesfield", "knutsford", "altrincham",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
