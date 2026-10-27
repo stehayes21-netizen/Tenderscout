@@ -80,14 +80,14 @@ COLUMNS = """
     trade_category TEXT DEFAULT 'Other / unclassified',
     saved_at TEXT,
     pipeline_status TEXT DEFAULT 'Reviewing',
-    opportunity_stage TEXT DEFAULT 'Open for bids'
+    opportunity_stage TEXT DEFAULT 'Other notice'
 """
 # Columns added after the first release; added to older databases on start-up.
 # Older rows default to REVIEW because their location was never confirmed.
 ADDED_COLUMNS = [
     ("pipeline_status", "TEXT DEFAULT 'Reviewing'"),
     ("region_match", "TEXT DEFAULT 'REVIEW'"),
-    ("opportunity_stage", "TEXT DEFAULT 'Open for bids'"),
+    ("opportunity_stage", "TEXT DEFAULT 'Other notice'"),
     ("description", "TEXT"),
     ("estimated_value_gbp", "TEXT"),
     ("contract_start_date", "TEXT"),
@@ -107,13 +107,13 @@ def ensure_schema(db):
     db.execute(f"CREATE TABLE IF NOT EXISTS tenders (id {id_column}, {COLUMNS})")
     if USE_POSTGRES:
         db.execute("ALTER TABLE tenders ADD COLUMN IF NOT EXISTS trade_category TEXT DEFAULT 'Other / unclassified'")
-        db.execute("ALTER TABLE tenders ADD COLUMN IF NOT EXISTS opportunity_stage TEXT DEFAULT 'Open for bids'")
+        db.execute("ALTER TABLE tenders ADD COLUMN IF NOT EXISTS opportunity_stage TEXT DEFAULT 'Other notice'")
     else:
         existing_columns = {row[1] for row in db.execute("PRAGMA table_info(tenders)").fetchall()}
         if "trade_category" not in existing_columns:
             db.execute("ALTER TABLE tenders ADD COLUMN trade_category TEXT DEFAULT 'Other / unclassified'")
         if "opportunity_stage" not in existing_columns:
-            db.execute("ALTER TABLE tenders ADD COLUMN opportunity_stage TEXT DEFAULT 'Open for bids'")
+            db.execute("ALTER TABLE tenders ADD COLUMN opportunity_stage TEXT DEFAULT 'Other notice'")
     db.execute(f"""CREATE TABLE IF NOT EXISTS private_leads (
         id {id_column},
         title TEXT NOT NULL,
@@ -360,7 +360,7 @@ def dashboard():
         # and CSV export; planning notices have their own pipeline view.
         decorated = [
             item for item in decorated
-            if (item[0]["opportunity_stage"] or "Open for bids") == "Open for bids"
+            if (item[0]["opportunity_stage"] or "Other notice") == "Open for bids"
             and not item[3]
         ]
     # Open tenders first; soon-to-close opportunities remain visible at the top.
@@ -378,7 +378,7 @@ def dashboard():
         location_display = location_text;
         if location_text.strip().upper() in {"UK, UNITED KINGDOM", "UNITED KINGDOM", "UKD63"}:
             location_display = ("Cheshire West and Chester region (UKD63); full site postcode not supplied" if location_text.strip().upper() == "UKD63" else "UK-wide location only; exact site postcode not supplied")
-        stage_text = row["opportunity_stage"] or "Open for bids"
+        stage_text = row["opportunity_stage"] or "Other notice"
         region_badge = (
             "POTENTIAL LOCAL — verify delivery site" if row["region_match"] == "REVIEW"
             else "Confirmed local" if row["region_match"] == "LOCAL"
@@ -464,10 +464,10 @@ def dashboard():
             <p><b>Opportunity type</b><span>{safe(stage_text)}</span></p>
           </div>
           <section class="board-summary">
-            <h3>Job at a glance</h3>
-            <p>{safe(simple_explanation)}</p>
-            <p><b>Contract period:</b> {safe(duration_label)}</p>
-            <p><b>Job scope:</b> {safe((row["description"] or "The feed does not include a job description. Open the official notice for the full specification.")[:600])}</p>
+            <h3>10-second check</h3>
+            <p><b>JOB:</b> {safe(title_text)} — {safe((row["description"] or simple_explanation or "Open the notice for the job specification.")[:240])}</p>
+            <p><b>WHERE:</b> {safe(location_display)} · {safe(region_badge)}</p>
+            <p><b>VALUE / DEADLINE / CONTRACT:</b> {safe(value_label)} · {safe(deadline_label)} · {safe(duration_label)}</p>
           </section>
           <details class="full-details"><summary>More details, eligibility and buyer contact</summary>
           <section class="plain-english">
@@ -762,7 +762,9 @@ def run_refresh():
                  geography_reason, region_match, trade_category, saved_at, pipeline_status, opportunity_stage)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(notice_url) DO UPDATE SET
-                    title=excluded.title, buyer=excluded.buyer,
+                    source=excluded.source, title=excluded.title, buyer=excluded.buyer,
+                    published_date=excluded.published_date,
+                    service_match=excluded.service_match,
                     score=excluded.score, deadline=excluded.deadline,
                     location_text=excluded.location_text, description=excluded.description,
                     estimated_value_gbp=excluded.estimated_value_gbp,
@@ -1275,7 +1277,7 @@ def private_leads():
         cards = "<p>No private leads have been entered yet. This list is separate from public-sector tenders.</p>"
     project_cards = ""
     for project in project_rows:
-        share_text = "\\n".join([
+        share_text = "\n".join([
             "PROJECT OPPORTUNITY (location must be verified)",
             "JOB: " + str(project["title"] or ""),
             "TRADE: " + str(project["trade_category"] or ""),
