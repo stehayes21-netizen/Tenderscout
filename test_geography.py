@@ -139,7 +139,7 @@ class TradeContextExtractionTests(unittest.TestCase):
             "buyer": "West Derby School",
             "trade_context": "",
             "location_text": "L13 7HQ",
-            "deadline": "2026-10-16T10:00:00+01:00",
+            "deadline": "2099-10-16T10:00:00+01:00",
             "opportunity_stage": "Open for bids",
         }
         scored = tenderscout.score_record(
