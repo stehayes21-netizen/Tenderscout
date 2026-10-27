@@ -47,6 +47,11 @@ class TradeContextExtractionTests(unittest.TestCase):
 
 
 class OpportunityStageTests(unittest.TestCase):
+    def test_only_open_or_planned_notices_are_shortlist_eligible(self):
+        self.assertTrue(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Open for bids"}))
+        self.assertTrue(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Planning / upcoming"}))
+        self.assertFalse(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Other notice"}))
+
     def test_extract_records_identifies_planning_stage(self):
         payload = {
             "releases": [{
