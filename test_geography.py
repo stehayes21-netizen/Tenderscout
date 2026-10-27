@@ -279,6 +279,23 @@ class PostcodeAreaTests(unittest.TestCase):
                 record = {"location_text": "", "title": "Cleaning", "description": description}
                 self.assertEqual(tenderscout.classify_geography(record, "Target area")[0], "REVIEW")
 
+    def test_mixed_area_contract_is_review_not_discarded_as_out_of_area(self):
+        record = {
+            "title": "Cleaning services across schools",
+            "description": (
+                "Schools located across Manchester, Trafford, Knowsley and Wigan; "
+                "routine and periodic cleaning across 11 schools."
+            ),
+            "location_text": (
+                "M33 5BP, British Oversea Territories, Channel Islands, Europe, "
+                "Isle of Man, Rest of the World, United Kingdom"
+            ),
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("Knowsley", reason)
+        self.assertNotEqual(geo_class, "LOCAL")
+
     def test_north_west_alias_includes_wirral(self):
         record = {"location_text": "Birkenhead CH41 6AB"}
         self.assertEqual(tenderscout.classify_geography(record, "North West")[0], "LOCAL")
