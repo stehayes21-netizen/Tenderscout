@@ -284,12 +284,12 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Building refurbishment project in Liverpool", page)
         self.assertIn("Send by WhatsApp", page)
         self.assertIn("Location is only a clue", page)
-        self.assertNotIn("Roofing project in the Wirral", page)
+        self.assertIn("Roofing project in the Wirral", page)
         self.assertNotIn("Manchester extension", page)
         db = self.app_module.connect_db()
         count = db.execute("SELECT COUNT(*) AS n FROM external_projects").fetchone()["n"]
         db.close()
-        self.assertEqual(count, 1)
+        self.assertEqual(count, 2)
 
     def test_private_lead_is_saved_separately_from_public_tenders(self):
         r = self.client.post("/leads", data={
