@@ -1001,6 +1001,35 @@ def export_private_leads_csv():
     )
 
 
+@app.route("/projects/export.csv")
+def export_external_projects_csv():
+    """Export public external-project summaries for backup; these are not private leads."""
+    fields = [
+        "id", "title", "trade_category", "location_text", "details", "source_name",
+        "source_url", "published_date", "location_status", "imported_at",
+    ]
+    db = connect_db()
+    try:
+        rows = db.execute(
+            f"SELECT {', '.join(fields)} FROM external_projects ORDER BY imported_at DESC"
+        ).fetchall()
+    finally:
+        db.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(fields)
+    for row in rows:
+        writer.writerow([csv_safe(row[field]) for field in fields])
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=tenderscout_external_projects.csv",
+                 "Cache-Control": "no-store"},
+    )
+
+
 
 TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 LEAD_STATUSES = ["New", "Contacted", "Qualified", "Passed to trade", "Won", "Closed"]
