@@ -832,8 +832,13 @@ def feed_notes():
             text += f" over {st['windows']} week(s) searched"
         if st.get("first_date"):
             text += f", published {st['first_date']} to {st['last_date']}"
+        if st.get("feed_counts"):
+            feed_detail = ", ".join(f"{label}: {count}" for label, count in st["feed_counts"].items())
+            text += f". Feed breakdown — {feed_detail}"
         if st.get("error"):
             text += f". Problem: {st['error']}"
+        elif st.get("partial_errors"):
+            text += f". Some feeds failed: {st['partial_errors']}"
         elif st.get("stopped"):
             text += ". Stopped early (time limit), so there may be more"
         elif st.get("more"):
