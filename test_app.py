@@ -132,9 +132,13 @@ class AppSmokeTest(AppTestCase):
             description="Daily office cleaning, washroom servicing and periodic deep cleaning.",
         )])
         page = self.client.get("/").data.decode()
-        self.assertIn("Job at a glance", page)
+        self.assertIn("10-second check", page)
+        self.assertIn("JOB:", page)
         self.assertIn("Daily office cleaning, washroom servicing and periodic deep cleaning.", page)
-        self.assertIn("Contract period:", page)
+        self.assertIn("WHERE:", page)
+        self.assertIn("VALUE / DEADLINE / CONTRACT:", page)
+        summary = page[page.index('<section class="board-summary">'):page.index('</section>', page.index('<section class="board-summary">'))]
+        self.assertEqual(summary.count("<p>"), 3)
         self.assertLess(page.index('<section class="board-summary">'), page.index('<details class="full-details">'))
 
     def test_location_review_notice_with_target_area_clue_is_visible_on_main_board_as_unverified(self):
@@ -284,6 +288,9 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Building refurbishment project in Liverpool", page)
         self.assertIn("Send by WhatsApp", page)
         self.assertIn("Location is only a clue", page)
+        # Share links must contain real line breaks, not literal backslash-n text.
+        self.assertIn("%0A", page)
+        self.assertNotIn("%5Cn", page)
         self.assertIn("Roofing project in the Wirral", page)
         self.assertNotIn("Manchester extension", page)
         db = self.app_module.connect_db()
@@ -510,6 +517,26 @@ class RefreshTests(AppTestCase):
         self.assertIn("From 1 April 2027 to 31 March 2029", page)
         self.assertIn("How do you apply?", page)
 
+    def test_refresh_updates_source_publication_and_match_metadata_without_resetting_pipeline(self):
+        first = feed_record("metadata-refresh", "Liverpool L2 2DH", title="Commercial cleaning contract")
+        first["published_date"] = "2026-10-01"
+        self.refresh_with([first])
+        db = self.app_module.connect_db()
+        db.execute("UPDATE tenders SET pipeline_status = 'Bidding' WHERE notice_url = ?", ("https://example.com/metadata-refresh",))
+        db.commit()
+        db.close()
+
+        updated = feed_record("metadata-refresh", "Liverpool L2 2DH", title="Roof repair contract", description="Roof repairs and maintenance.")
+        updated["source"] = "Contracts Finder updated"
+        updated["published_date"] = "2026-10-25"
+        self.refresh_with([updated])
+        db = self.app_module.connect_db()
+        row = db.execute("SELECT source, published_date, service_match, pipeline_status FROM tenders WHERE notice_url = ?", ("https://example.com/metadata-refresh",)).fetchone()
+        db.close()
+        self.assertEqual(row["source"], "Contracts Finder updated")
+        self.assertEqual(row["published_date"], "2026-10-25")
+        self.assertIn("Property maintenance", row["service_match"])
+        self.assertEqual(row["pipeline_status"], "Bidding")
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
         self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
         db = self.app_module.connect_db()

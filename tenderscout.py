@@ -852,7 +852,7 @@ def fetch_bearings(max_seconds=None, stats=None):
             description_parts.append("Source credit: Bearings — " + bearings_url)
         results.append({
             "source": "Bearings (discovery; verify provider notice)",
-            "opportunity_stage": "Open for bids",
+            "opportunity_stage": "Other notice",
             "location_text": "",
             "published_date": as_text(item.get("first_seen") or ""),
             "title": title,
@@ -993,7 +993,7 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
             buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
             output.append({
                 "source": "Standstill UK (RSS discovery; verify official notice)",
-                "opportunity_stage": "Open for bids",
+                "opportunity_stage": "Other notice",
                 "location_text": "North West England (aggregator region only; delivery site not confirmed)",
                 "published_date": published,
                 "title": title,
@@ -1290,7 +1290,7 @@ def score_record(record, services, region, min_value, max_value):
 
 def shortlist_eligible_stage(record):
     """Only open tenders and explicitly planned opportunities belong in the shortlist."""
-    stage = record.get("opportunity_stage") or "Open for bids"
+    stage = record.get("opportunity_stage") or "Other notice"
     return stage in {"Open for bids", "Planning / upcoming"}
 
 
