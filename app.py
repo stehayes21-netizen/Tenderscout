@@ -400,8 +400,13 @@ def dashboard():
         )
         value_label = format_money(row["estimated_value_gbp"])
         duration_label = contract_length(row["contract_start_date"], row["contract_end_date"])
+        notice_label = (
+            "Open source listing — verify official notice"
+            if "Standstill UK" in str(row["source"] or "")
+            else "View official notice"
+        )
         notice = (
-            f'<a href="{link}" target="_blank" rel="noopener">View official notice</a>'
+            f'<a href="{link}" target="_blank" rel="noopener">{notice_label}</a>'
             if link.startswith("https://") else ""
         )
         share_actions = ""
@@ -998,7 +1003,7 @@ def sources():
             ("Liverpool City Council — ProContract", "https://procontract.due-north.com/", "Liverpool Council says most of its opportunities are advertised through ProContract; some routes use other approved portals"),
             ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
             ("Bearings — Liverpool City Region tenders", "https://getbearings.co.uk/rss", "Free North West opportunity aggregator with RSS feeds and an open API; use as a discovery source and verify every tender on the buyer's official notice"),
-            ("Standstill UK — North West tenders", "https://standstill.uk/alerts/", "Free daily RSS lists for UK public tenders, including a North West feed; aggregator summaries must be checked against the official notice"),
+            ("Standstill UK — North West tenders", "https://standstill.uk/region/north-west/", "Free daily RSS discovery feed now included in TenderScout; regional label is not proof of the delivery site, and every item must be verified on the official notice"),
             ("Merseyside Fire & Rescue procurement", "https://www.merseyfire.gov.uk/about/supplying-goods-and-services-to-mfra/", "Confirms openly advertised opportunities are on The Chest and national notices on Find a Tender / Contracts Finder"),
             ("Sefton Council tenders and contracts", "https://www.sefton.gov.uk/business/tenders-contracts", "Confirms Sefton opportunities use The Chest and points suppliers to national notice sources"),
         ]),
@@ -1148,7 +1153,7 @@ def private_leads():
         '<p><b>Private leads.</b> Each card shows the job, trade, location, requested work and contact so you can pass it to a suitable tradesperson. They stay separate from public tenders.</p>'
         '<div class="lead-facts"><p><b>Total captured leads</b><span>' + str(lead_counts["total"]) + '</span></p><p><b>New</b><span>' + str(lead_counts["new"]) + '</span></p><p><b>Passed to trade</b><span>' + str(lead_counts["passed"]) + '</span></p></div>'
         '<p><a href="/leads/export.csv">Download private leads CSV (backup)</a></p>'
-        '<p class="source-warning"><b>Source status:</b> this list currently contains leads captured in TenderScout. The source directory is not a live private-job feed. HomeGuild currently reports no open jobs on its public board; BuildPair’s public page loads requests dynamically. Facebook and Nextdoor are not scraped. I will not invent leads or copy customer contact details from a source without an authorised feed or permission.</p>'
+        '<p class="source-warning"><b>Source status:</b> this list currently contains leads captured in TenderScout. The source directory is not a live private-job feed. As checked 27 October 2026, HomeGuild reports no open jobs on its public board; BuildPair’s public page loads requests dynamically. Facebook and Nextdoor are not scraped. I will not invent leads or copy customer contact details from a source without an authorised feed or permission.</p>'
         '<form class="lead-filters" method="get" action="/leads"><label>Filter by trade<select name="trade"><option value="">All trades</option>' + "".join(f'<option value="{safe(t)}"{" selected" if t == lead_trade else ""}>{safe(t)}</option>' for t in TRADE_CATEGORIES) + '</select></label><label>Filter by status<select name="status"><option value="">All statuses</option>' + "".join(f'<option value="{safe(st)}"{" selected" if st == lead_status else ""}>{safe(st)}</option>' for st in LEAD_STATUSES) + '</select></label><button type="submit">Apply filters</button><a href="/leads">Clear filters</a></form>'
         '<p>Record the most precise location and only save customer contact details when they were provided for this enquiry and can legitimately be reused. A direct source URL is optional.</p>'
         + message +
