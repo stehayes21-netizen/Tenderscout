@@ -202,13 +202,36 @@ def health():
 
 
 def count_by_region(db):
-    counts = {"main": 0, "review": 0}
+    """Count stored opportunities without treating unverified locations as confirmed."""
+    counts = {"main": 0, "review": 0, "confirmed_local": 0, "manual": 0}
     for row in db.execute(
         "SELECT region_match, COUNT(*) AS n FROM tenders GROUP BY region_match"
     ).fetchall():
-        key = "review" if row["region_match"] == "REVIEW" else "main"
-        counts[key] += row["n"]
+        region = row["region_match"]
+        if region == "REVIEW":
+            counts["review"] += row["n"]
+        else:
+            counts["main"] += row["n"]
+        if region == "LOCAL":
+            counts["confirmed_local"] += row["n"]
+        elif region == "MANUAL":
+            counts["manual"] += row["n"]
     return counts
+
+
+def has_target_area_clue(row):
+    """True only when a review record names a target-area clue worth surfacing.
+
+    This does not promote a record to LOCAL. It lets the main board surface
+    potentially relevant notices while preserving the explicit location-check
+    badge. Records with no target-area evidence remain in the full review queue.
+    """
+    text = " ".join(str(row[field] or "") for field in ("location_text", "title", "description")).lower()
+    local_hits = collector.place_hits(text, collector.LOCAL_PLACE_TERMS)
+    out_hits = collector.place_hits(text, collector.OUT_OF_AREA_TERMS)
+    local_hits = collector.drop_contained(local_hits, out_hits)
+    full, bare = collector.postcode_districts(text, include_bare=True)
+    return bool(local_hits or ((full | bare) & collector.LOCAL_POSTCODE_DISTRICTS))
 
 
 def deadline_info(deadline):
@@ -283,9 +306,12 @@ def dashboard():
             except Exception:
                 app.logger.exception("Automatic first-load tender refresh failed")
         db = connect_db()
+    # The default board includes confirmed local jobs plus *potentially relevant*
+    # location-review notices that mention one of the target areas. They are
+    # labelled as unverified below; the full review view remains available.
     condition = (
         "region_match = 'REVIEW'" if review_view
-        else "region_match IN ('LOCAL', 'MANUAL')"
+        else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
     )
     params = []
     if pipeline_view:
@@ -304,6 +330,11 @@ def dashboard():
         params,
     ).fetchall()
     counts = count_by_region(db)
+    if not review_view:
+        rows = [
+            row for row in rows
+            if row["region_match"] != "REVIEW" or has_target_area_clue(row)
+        ]
     db.close()
 
     decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
@@ -332,7 +363,11 @@ def dashboard():
         if location_text.strip().upper() in {"UK, UNITED KINGDOM", "UNITED KINGDOM", "UKD63"}:
             location_display = ("Cheshire West and Chester region (UKD63); full site postcode not supplied" if location_text.strip().upper() == "UKD63" else "UK-wide location only; exact site postcode not supplied")
         stage_text = row["opportunity_stage"] or "Open for bids"
-        region_badge = ("Location needs checking" if row["region_match"] == "REVIEW" else "Confirmed local" if row["region_match"] == "LOCAL" else "Manual entry")
+        region_badge = (
+            "POTENTIAL LOCAL — verify delivery site" if row["region_match"] == "REVIEW"
+            else "Confirmed local" if row["region_match"] == "LOCAL"
+            else "Manual entry"
+        )
         if stage_text == "Planning / upcoming":
             simple_explanation = (
                 f"This is an early warning that {buyer_text} may need {trade_text.lower()} work. "
@@ -466,8 +501,8 @@ def dashboard():
             )
         elif counts["review"] and not pipeline_view:
             cards = (
-                f'<p>No confirmed local opportunities are currently saved. '
-                f'{counts["review"]} tenders need a location check. '
+                f'<p>No confirmed local opportunities or target-area candidates are currently visible. '
+                f'{counts["review"]} notices are in the full location-review queue. '
                 f'<a href="{safe(dashboard_url("review", service))}">Review location-uncertain tenders</a>, '
                 "or refresh to check for new notices.</p>"
             )
@@ -481,8 +516,17 @@ def dashboard():
         heading = f"{len(rows)} pipeline / upcoming opportunities"
         switch = f'<a href="{dashboard_url("", service)}">Back to jobs board ({counts["main"] + counts["review"]})</a>'
     else:
-        heading = f"{len(rows)} saved opportunities"
-        switch = f'<a href="{dashboard_url("pipeline", service)}">Pipeline / upcoming</a> · <a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
+        if review_view:
+            heading = f"{len(rows)} notices in the full location-review queue"
+        elif pipeline_view:
+            heading = f"{len(rows)} pipeline / upcoming opportunities"
+        else:
+            potential_count = sum(1 for row in rows if row["region_match"] == "REVIEW")
+            heading = (
+                f"{len(rows)} open opportunities · {counts['confirmed_local']} confirmed local overall · "
+                f"{potential_count} possible local match(es) shown with location unverified"
+            )
+        switch = f'<a href="{dashboard_url("pipeline", service)}">Pipeline / upcoming</a> · <a href="{dashboard_url("review", service)}">Full location review ({counts["review"]})</a>'
 
     selected_trade = trade
     filters = "".join(
