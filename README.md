@@ -6,7 +6,7 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 - `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds plus free discovery sources: Bearings and seven Standstill RSS feeds (North West region, cleaning, construction, building-installation maintenance, refurbishment, grounds maintenance and waste services). Discovery feeds are attributed and never treated as proof of a delivery location.
 - `app.py` is the Flask dashboard. **Refresh tenders** runs the collector and saves matches to the database.
 - Confirmed local tenders appear on the main list. Notices that mention a target-area place in their title/description or buyer name can also appear, clearly labelled **POTENTIAL LOCAL — verify delivery site**. This surfaces candidates without treating buyer HQ or text mentions as proof of delivery. The full location-review queue remains available separately.
-- Each tender card includes a plain-English explanation of what the buyer wants, where the work is, the published estimated value, contract dates/duration when available, who may qualify, the deadline and how to apply. Missing facts are labelled as not stated rather than guessed.
+- Each tender card starts with a **10-second check** in three scan lines: **JOB** (work required), **WHERE** (delivery location and whether it is verified), and **VALUE / DEADLINE / CONTRACT**. Full eligibility, buyer contact, application instructions and the official notice remain underneath. Missing facts are labelled as not stated rather than guessed.
 - **Pipeline / upcoming** notices are early warnings: they are not necessarily open for bids yet. Open the official notice to confirm its status and next steps.
 
 ## Opportunity types and source directory
