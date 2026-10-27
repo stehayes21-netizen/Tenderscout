@@ -59,7 +59,7 @@ class StandstillDiscoveryFeedTests(unittest.TestCase):
           <link>https://standstill.uk/tenders/roof-repairs</link>
           <guid>standstill-roof-1</guid>
           <pubDate>Tue, 27 Oct 2026 10:00:00 GMT</pubDate>
-          <description><![CDATA[Roof maintenance services. Official notice:
+          <description><![CDATA[Roof maintenance services. Closing: 16 Nov 2026, 12:00 UK time. Official notice:
             <a href="https://www.find-tender.service.gov.uk/Notice/123456-2026">notice</a>]]></description>
         </item></channel></rss>'''
         class FakeResponse:
@@ -83,6 +83,7 @@ class StandstillDiscoveryFeedTests(unittest.TestCase):
         self.assertEqual(rows[0]["source"], "Standstill UK (RSS discovery; verify official notice)")
         self.assertIn("North West England", rows[0]["location_text"])
         self.assertEqual(rows[0]["notice_url"], "https://www.find-tender.service.gov.uk/Notice/123456-2026")
+        self.assertEqual(rows[0]["deadline"], "2026-11-16T12:00:00+00:00")
         self.assertEqual(
             tenderscout.classify_geography(rows[0], "Target area")[0],
             "REVIEW",
