@@ -692,7 +692,7 @@ def run_refresh():
     LAST_FEEDS["Find a Tender"] = fts_stats
     LAST_FEEDS["Contracts Finder"] = cf_stats
     LAST_FEEDS["Bearings (discovery; verify provider notice)"] = bearings_stats
-    LAST_FEEDS["Standstill UK North West (discovery; verify official notice)"] = standstill_stats
+    LAST_FEEDS["Standstill UK RSS discovery"] = standstill_stats
     app.logger.warning("REFRESH feeds: %s", LAST_FEEDS)
     samples = {"review": [], "outside": []}
     stats = {"fetched": len(records), "service": 0, "outside": 0, "local": 0, "review": 0}
