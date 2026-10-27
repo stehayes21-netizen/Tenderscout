@@ -228,7 +228,8 @@ LOCAL_POSTCODE_DISTRICTS = {
     # Wirral
     *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
-REVIEW_POSTCODE_DISTRICTS = set()
+# CH4 is a boundary district and needs a site-level check.
+REVIEW_POSTCODE_DISTRICTS = {"CH4"}
 EXCLUDED_POSTCODE_DISTRICTS = {
     *(f"CH{n}" for n in range(1, 41)), "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
     "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
@@ -304,11 +305,11 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 # Find a Tender and Contracts Finder often give the region as a NUTS code instead
 # of a postcode. These codes are confirmed against the published code lists:
 # UKD71 covers East Merseyside (Knowsley, St Helens, Halton), UKD72 Liverpool,
-# and UKD73 Sefton. Wirral, Warrington and Cheshire West codes are outside the
-# initial service area. Broad codes that overlap target and non-target places
+# and UKD73 Sefton and UKD74 Wirral. Broad codes that overlap target and non-target
+# places
 # require a postcode or place name; every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD71", "UKD72", "UKD73"}
+LOCAL_NUTS = {"UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
