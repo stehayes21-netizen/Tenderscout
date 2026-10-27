@@ -1135,6 +1135,12 @@ def score_record(record, services, region, min_value, max_value):
     return record
 
 
+def shortlist_eligible_stage(record):
+    """Only open tenders and explicitly planned opportunities belong in the shortlist."""
+    stage = record.get("opportunity_stage") or "Open for bids"
+    return stage in {"Open for bids", "Planning / upcoming"}
+
+
 def dedupe(records):
     """Deduplicate procurement processes, preferring the most actionable stage."""
     priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
@@ -1193,6 +1199,7 @@ def main():
     filtered = []
     review_rows = []
     rejected_by_scoring = 0
+    excluded_by_stage = 0
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
@@ -1208,7 +1215,10 @@ def main():
             review_rows.append(scored)
             continue
         if geo == "LOCAL" and scored["score"] >= args.min_score:
-            filtered.append(scored)
+            if shortlist_eligible_stage(scored):
+                filtered.append(scored)
+            else:
+                excluded_by_stage += 1
     filtered.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
     review_rows.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
 
@@ -1264,6 +1274,7 @@ def main():
     print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
+    print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
