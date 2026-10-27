@@ -1,4 +1,5 @@
 import csv
+from io import BytesIO
 import os
 import sys
 import tempfile
@@ -193,7 +194,7 @@ class OpportunityStageTests(unittest.TestCase):
         <link>https://example.com/notice</link>
         <description>Cleaning contract</description>
         </item></channel></rss>"""
-        with patch("tenderscout.get_text", return_value=feed.decode()):
+        with patch("tenderscout.urllib.request.urlopen", return_value=BytesIO(feed)):
             rows = tenderscout.fetch_standstill_northwest()
         self.assertTrue(rows)
         self.assertEqual(rows[0]["opportunity_stage"], "Other notice")
