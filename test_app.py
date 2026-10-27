@@ -132,9 +132,13 @@ class AppSmokeTest(AppTestCase):
             description="Daily office cleaning, washroom servicing and periodic deep cleaning.",
         )])
         page = self.client.get("/").data.decode()
-        self.assertIn("Job at a glance", page)
+        self.assertIn("10-second check", page)
+        self.assertIn("JOB:", page)
         self.assertIn("Daily office cleaning, washroom servicing and periodic deep cleaning.", page)
-        self.assertIn("Contract period:", page)
+        self.assertIn("WHERE:", page)
+        self.assertIn("VALUE / DEADLINE / CONTRACT:", page)
+        summary = page[page.index('<section class="board-summary">'):page.index('</section>', page.index('<section class="board-summary">'))]
+        self.assertEqual(summary.count("<p>"), 3)
         self.assertLess(page.index('<section class="board-summary">'), page.index('<details class="full-details">'))
 
     def test_location_review_notice_with_target_area_clue_is_visible_on_main_board_as_unverified(self):
@@ -284,6 +288,9 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Building refurbishment project in Liverpool", page)
         self.assertIn("Send by WhatsApp", page)
         self.assertIn("Location is only a clue", page)
+        # Share links must contain real line breaks, not literal backslash-n text.
+        self.assertIn("%0A", page)
+        self.assertNotIn("%5Cn", page)
         self.assertIn("Roofing project in the Wirral", page)
         self.assertNotIn("Manchester extension", page)
         db = self.app_module.connect_db()
