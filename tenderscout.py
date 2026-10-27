@@ -870,32 +870,26 @@ def fetch_bearings(max_seconds=None, stats=None):
 
 
 def fetch_standstill_northwest(max_seconds=None, stats=None):
-    """Fetch the publisher's public North West RSS discovery feed.
+    """Fetch free Standstill RSS discovery feeds, retaining source attribution.
 
-    The feed aggregates Find a Tender and Contracts Finder notices and is
-    refreshed daily. Its regional label can reflect the buyer's location when
-    a delivery location is missing, so records are discovery-only and must
-    remain REVIEW unless independent structured delivery evidence confirms them.
-    Keep attribution and the original feed link.
+    The regional feed and CPV-specific feeds widen discovery beyond the two
+    official feeds. Aggregator geography is not delivery-site evidence, so all
+    records still pass through normal geography classification and REVIEW.
     """
     stats = _start_stats(stats)
-    url = "https://standstill.uk/region/north-west/feed.xml"
+    feeds = [
+        ("North West region", "https://standstill.uk/region/north-west/feed.xml"),
+        ("Cleaning CPV 90910000", "https://standstill.uk/cpv/90910000/feed.xml"),
+        ("Construction CPV 45000000", "https://standstill.uk/cpv/45000000/feed.xml"),
+        ("Building installation maintenance CPV 50710000", "https://standstill.uk/cpv/50710000/feed.xml"),
+        ("Refurbishment CPV 45453100", "https://standstill.uk/cpv/45453100/feed.xml"),
+        ("Grounds maintenance CPV 77314000", "https://standstill.uk/cpv/77314000/feed.xml"),
+        ("Waste services CPV 90500000", "https://standstill.uk/cpv/90500000/feed.xml"),
+    ]
     started = time.monotonic()
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "TenderScout/1.0 (public procurement research; source attribution retained)",
-                "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=20) as response:
-            payload = response.read()
-        root = ET.fromstring(payload)
-    except Exception as exc:
-        stats["error"] = str(exc)[:320]
-        print(f"[WARN] Standstill North West RSS fetch failed: {exc}", file=sys.stderr)
-        return []
+    output = []
+    errors = []
+    feed_counts = {}
 
     def local_name(tag):
         return tag.rsplit("}", 1)[-1].lower()
@@ -910,55 +904,84 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
                     return href
         return ""
 
-    items = [node for node in root.iter() if local_name(node.tag) in {"item", "entry"}]
-    output = []
-    for item in items:
-        if max_seconds and time.monotonic() - started > max_seconds:
+    for feed_label, url in feeds:
+        elapsed = time.monotonic() - started
+        if max_seconds and elapsed >= max_seconds:
             stats["stopped"] = "time limit"
             break
-        title = html.unescape(child_text(item, "title"))
-        feed_link = child_text(item, "link")
-        raw_description = child_text(item, "description", "summary", "content")
-        description = html.unescape(re.sub(r"<[^>]+>", " ", raw_description))
-        description = " ".join(description.split())
-        if not title or not feed_link.startswith("https://"):
+        timeout = min(20, max(1, int(max_seconds - elapsed))) if max_seconds else 20
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "TenderScout/1.0 (public procurement research; source attribution retained)",
+                    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                payload = response.read()
+            root = ET.fromstring(payload)
+        except Exception as exc:
+            errors.append(f"{feed_label}: {str(exc)[:180]}")
+            print(f"[WARN] Standstill {feed_label} RSS fetch failed: {exc}", file=sys.stderr)
             continue
-        official_match = re.search(
-            r"https?://(?:www\.)?(?:find-tender\.service\.gov\.uk/Notice/[^\s\"'<>]+|contractsfinder\.service\.gov\.uk/Notice/[^\s\"'<>]+)",
-            html.unescape(raw_description),
-            re.IGNORECASE,
-        )
-        official_url = html.unescape(official_match.group(0)).rstrip(".,);") if official_match else feed_link
-        published = child_text(item, "pubdate", "published", "updated")
-        guid = child_text(item, "guid", "id")
-        buyer_match = re.search(r"(?:Buyer|Organisation|Organization)\s*:\s*([^|;]+)", description, re.IGNORECASE)
-        buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
-        output.append({
-            "source": "Standstill UK North West (discovery; verify official notice)",
-            "opportunity_stage": "Open for bids",
-            "location_text": "North West England (aggregator region only; delivery site not confirmed)",
-            "published_date": published,
-            "title": title,
-            "buyer": buyer,
-            "description": description or "Open the source page for the summary and official notice.",
-            "trade_context": description,
-            "contact_name": "", "contact_email": "", "contact_phone": "",
-            "eligibility_text": "",
-            "estimated_value_gbp": "",
-            "contract_start_date": "", "contract_end_date": "",
-            "deadline": "",
-            "status": "Standstill UK discovery listing — verify official notice",
-            "notice_url": official_url,
-            "ocid": guid or official_url,
-            "_raw": {"feed_url": url, "item_title": title, "feed_link": feed_link},
-        })
+
+        items = [node for node in root.iter() if local_name(node.tag) in {"item", "entry"}]
+        before = len(output)
+        for item in items:
+            if max_seconds and time.monotonic() - started >= max_seconds:
+                stats["stopped"] = "time limit"
+                break
+            title = html.unescape(child_text(item, "title"))
+            feed_link = child_text(item, "link")
+            raw_description = child_text(item, "description", "summary", "content")
+            description = html.unescape(re.sub(r"<[^>]+>", " ", raw_description))
+            description = " ".join(description.split())
+            if not title or not feed_link.startswith("https://"):
+                continue
+            official_match = re.search(
+                r"https?://(?:www\.)?(?:find-tender\.service\.gov\.uk/Notice/[^\s\"'<>]+|contractsfinder\.service\.gov\.uk/Notice/[^\s\"'<>]+)",
+                html.unescape(raw_description),
+                re.IGNORECASE,
+            )
+            official_url = html.unescape(official_match.group(0)).rstrip(".,);") if official_match else feed_link
+            published = child_text(item, "pubdate", "published", "updated")
+            guid = child_text(item, "guid", "id")
+            buyer_match = re.search(r"(?:Buyer|Organisation|Organization)\s*:\s*([^|;]+)", description, re.IGNORECASE)
+            buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
+            output.append({
+                "source": "Standstill UK (RSS discovery; verify official notice)",
+                "opportunity_stage": "Open for bids",
+                "location_text": "North West England (aggregator region only; delivery site not confirmed)",
+                "published_date": published,
+                "title": title,
+                "buyer": buyer,
+                "description": description or "Open the source page for the summary and official notice.",
+                "trade_context": description,
+                "contact_name": "", "contact_email": "", "contact_phone": "",
+                "eligibility_text": "",
+                "estimated_value_gbp": "",
+                "contract_start_date": "", "contract_end_date": "",
+                "deadline": "",
+                "status": "Standstill UK discovery listing — verify official notice",
+                "notice_url": official_url,
+                "ocid": guid or official_url,
+                "_raw": {"feed_url": url, "feed_label": feed_label, "item_title": title, "feed_link": feed_link},
+            })
+        feed_counts[feed_label] = len(output) - before
+
+    raw_count = len(output)
+    output = dedupe(output)
     stats.update({
-        "pages": 1 if items else 0,
+        "pages": sum(1 for value in feed_counts.values() if value >= 0),
         "records": len(output),
+        "raw_records": raw_count,
         "last_batch": len(output),
-        "windows": 1,
+        "windows": len(feed_counts),
         "more": False,
-        "full_end": len(items) >= 50,
+        "full_end": any(value >= 50 for value in feed_counts.values()),
+        "feed_counts": feed_counts,
+        "error": "; ".join(errors)[:320],
     })
     return output
 
