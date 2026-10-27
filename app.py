@@ -1068,7 +1068,28 @@ def private_leads():
             )
             db.commit()
             message = '<p style="color:#08783c"><b>Private lead saved.</b></p>'
-    rows = db.execute("SELECT * FROM private_leads ORDER BY created_at DESC LIMIT 100").fetchall()
+    lead_trade = request.args.get("trade", "")
+    lead_trade = lead_trade if lead_trade in TRADE_CATEGORIES else ""
+    lead_status = request.args.get("status", "")
+    lead_status = lead_status if lead_status in LEAD_STATUSES else ""
+    where = []
+    query_params = []
+    if lead_trade:
+        where.append("trade_category = ?")
+        query_params.append(lead_trade)
+    if lead_status:
+        where.append("status = ?")
+        query_params.append(lead_status)
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    rows = db.execute(
+        "SELECT * FROM private_leads" + where_sql + " ORDER BY created_at DESC LIMIT 100",
+        tuple(query_params),
+    ).fetchall()
+    lead_counts = {
+        "total": db.execute("SELECT COUNT(*) AS n FROM private_leads").fetchone()["n"],
+        "new": db.execute("SELECT COUNT(*) AS n FROM private_leads WHERE status = 'New'").fetchone()["n"],
+        "passed": db.execute("SELECT COUNT(*) AS n FROM private_leads WHERE status = 'Passed to trade'").fetchone()["n"],
+    }
     db.close()
     options = "".join(f'<option value="{safe(t)}">{safe(t)}</option>' for t in TRADE_CATEGORIES)
     source_options = "".join(f'<option value="{safe(s)}">{safe(s)}</option>' for s in LEAD_SOURCES)
@@ -1115,12 +1136,15 @@ def private_leads():
         'article{background:#f3f6f4;border:1px solid #e0e8e2;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
         '.lead-kicker{font-weight:bold;color:#08783c}.lead-location{font-size:18px;background:#e8f2eb;padding:10px;border-radius:8px}.lead-request{background:#fff;border:1px solid #cbd9cf;border-radius:8px;padding:12px;margin:12px 0}.lead-request h4{margin:0 0 6px;color:#145c35;font-size:14px;letter-spacing:.03em}.urgent{border:2px solid #b45309;background:#fffaf0}.status-form label{display:block;font-weight:600}.status-form select{margin-bottom:8px}.share-actions{display:flex;gap:8px;flex-wrap:wrap}.share-actions a{display:inline-block;padding:10px;background:#e8f2eb;border-radius:8px;text-decoration:none;font-weight:bold}'
         'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
-        '.helper{font-size:13px;color:#53645a;font-weight:normal}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.lead-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.lead-facts p{margin:0;padding:10px;background:#f3f6f4;border-radius:8px}.lead-facts b,.lead-facts span{display:block}.lead-facts b{font-size:12px;color:#53645a;text-transform:uppercase}.status-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.status-form label{flex:1;min-width:180px;margin:0}.status-form button{width:auto;margin:0;white-space:nowrap}.share-actions a{min-height:40px}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
+        '.helper{font-size:13px;color:#53645a;font-weight:normal}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.lead-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}.lead-facts p{margin:0;padding:10px;background:#f3f6f4;border-radius:8px}.lead-facts b,.lead-facts span{display:block}.lead-facts b{font-size:12px;color:#53645a;text-transform:uppercase}.status-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.status-form label{flex:1;min-width:180px;margin:0}.status-form button{width:auto;margin:0;white-space:nowrap}.share-actions a{min-height:40px}.source-warning{padding:12px;border:1px solid #d8c28b;background:#fff9e8;border-radius:9px}.lead-filters{display:grid;grid-template-columns:2fr 1fr auto auto;gap:10px;align-items:end;background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-filters label{margin:0}.lead-filters button{width:auto;margin:0}.lead-filters a{align-self:center}@media(max-width:620px){.lead-filters{grid-template-columns:1fr}.lead-facts{grid-template-columns:1fr 1fr}}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
         '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
-        '<p><b>Private leads.</b> Each card shows the job, trade, location and contact so you can pass it to a suitable tradesperson. They stay separate from public tenders.</p>'
+        '<p><b>Private leads.</b> Each card shows the job, trade, location, requested work and contact so you can pass it to a suitable tradesperson. They stay separate from public tenders.</p>'
+        '<div class="lead-facts"><p><b>Total captured leads</b><span>' + str(lead_counts["total"]) + '</span></p><p><b>New</b><span>' + str(lead_counts["new"]) + '</span></p><p><b>Passed to trade</b><span>' + str(lead_counts["passed"]) + '</span></p></div>'
         '<p><a href="/leads/export.csv">Download private leads CSV (backup)</a></p>'
+        '<p class="source-warning"><b>Source status:</b> this list currently contains leads captured in TenderScout. The source directory is not a live private-job feed. HomeGuild currently reports no open jobs on its public board; BuildPair’s public page loads requests dynamically. Facebook and Nextdoor are not scraped. I will not invent leads or copy customer contact details from a source without an authorised feed or permission.</p>'
+        '<form class="lead-filters" method="get" action="/leads"><label>Filter by trade<select name="trade"><option value="">All trades</option>' + "".join(f'<option value="{safe(t)}"{" selected" if t == lead_trade else ""}>{safe(t)}</option>' for t in TRADE_CATEGORIES) + '</select></label><label>Filter by status<select name="status"><option value="">All statuses</option>' + "".join(f'<option value="{safe(st)}"{" selected" if st == lead_status else ""}>{safe(st)}</option>' for st in LEAD_STATUSES) + '</select></label><button type="submit">Apply filters</button><a href="/leads">Clear filters</a></form>'
         '<p>Record the most precise location and only save customer contact details when they were provided for this enquiry and can legitimately be reused. A direct source URL is optional.</p>'
         + message +
         '<details class="lead-entry"><summary>+ Add a private job manually</summary><form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Urgent gutter cleaning needed"></label>'
