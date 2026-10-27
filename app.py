@@ -3,6 +3,7 @@ import hmac
 import html
 import io
 import os
+import re
 import sqlite3
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -1078,7 +1079,7 @@ _LAST_BUILDCONNECT_RESULT = {"checked": False, "imported": 0, "error": ""}
 def _plain_feed_text(value):
     """Turn an RSS title/summary into safe plain text before saving or displaying it."""
     value = html.unescape(str(value or ""))
-    value = re.sub(r"(?is)<(script|style)\\b.*?>.*?</\\1>", " ", value)
+    value = re.sub(r"(?is)<(script|style)\b.*?>.*?</\1>", " ", value)
     value = re.sub(r"(?s)<[^>]+>", " ", value)
     return " ".join(value.split())[:12000]
 
