@@ -18,6 +18,39 @@ class DeadlineParsingTests(unittest.TestCase):
         self.assertEqual(deadline.isoformat(), "2026-10-25T12:30:00+00:00")
 
 
+class FindATenderWindowCoverageTests(unittest.TestCase):
+    def test_searches_each_date_window_before_paging_deeply_into_latest_week(self):
+        windows = [
+            (tenderscout.datetime(2026, 10, 1, tzinfo=tenderscout.timezone.utc),
+             tenderscout.datetime(2026, 10, 8, tzinfo=tenderscout.timezone.utc)),
+            (tenderscout.datetime(2026, 10, 8, tzinfo=tenderscout.timezone.utc),
+             tenderscout.datetime(2026, 10, 15, tzinfo=tenderscout.timezone.utc)),
+            (tenderscout.datetime(2026, 10, 15, tzinfo=tenderscout.timezone.utc),
+             tenderscout.datetime(2026, 10, 22, tzinfo=tenderscout.timezone.utc)),
+        ]
+        def page(index):
+            return {
+                "releases": [{
+                    "id": f"release-{index}",
+                    "date": "2026-10-01T12:00:00Z",
+                    "tender": {"title": f"Cleaning contract {index}"},
+                    "buyer": {"name": "Example Council"},
+                }],
+                "nextCursor": f"cursor-{index}",
+            }
+        with patch("tenderscout._windows", return_value=windows), \
+             patch("tenderscout.get_json", side_effect=[page(1), page(2), page(3)]) as fetch, \
+             patch("tenderscout.time.sleep"):
+            stats = {}
+            rows = tenderscout.fetch_fts(days=21, max_pages=25, stats=stats)
+
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(stats["windows"], 3)
+        self.assertEqual(stats["pages"], 3)
+        self.assertTrue(stats["more"])
+
+
 class StandstillDiscoveryFeedTests(unittest.TestCase):
     def test_public_rss_is_parsed_as_discovery_not_confirmed_delivery_location(self):
         payload = b'''<?xml version="1.0"?>
