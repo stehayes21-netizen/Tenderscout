@@ -34,10 +34,12 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      # The steps below only run on the schedule or a manual run, not on every push.
+      # Scheduled audit uses the dashboard's 60-day look-back. Five pages
+      # expands coverage beyond the previous two-page sample while staying
+      # within the existing 10-minute job limit.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/integration/location-and-private-leads'))
-        run: python tenderscout.py --days 14 --pages 2 --region "Target area" --min-score 3
+        run: python tenderscout.py --days 60 --pages 5 --region "Target area" --min-score 3
 
       - name: Save CSV results
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/integration/location-and-private-leads')))
