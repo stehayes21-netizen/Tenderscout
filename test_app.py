@@ -1,4 +1,5 @@
 import importlib
+from io import BytesIO
 import os
 import tempfile
 import unittest
@@ -259,6 +260,36 @@ class AppSmokeTest(AppTestCase):
         self.assertIn(b"Formby Bubble", r.data)
         self.assertNotIn(b"Wirral Council", r.data)
         self.assertIn(b"does not automatically scrape Facebook", r.data)
+
+    def test_buildconnect_rss_imports_only_target_area_public_projects(self):
+        feed = b"""<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel>
+          <item><title>Building refurbishment project in Liverpool</title>
+            <description>Painting, repairs and refurbishment work in Liverpool L15.</description>
+            <link>https://www.buildconnect-uk.co.uk/projects/liverpool-refurbishment</link>
+            <pubDate>Mon, 26 Oct 2026 10:00:00 GMT</pubDate></item>
+          <item><title>Roofing project in the Wirral</title>
+            <description>Roof repairs in Birkenhead, Wirral.</description>
+            <link>https://www.buildconnect-uk.co.uk/projects/wirral-roofing</link>
+          </item>
+          <item><title>Manchester extension</title>
+            <description>Home extension in Manchester.</description>
+            <link>https://www.buildconnect-uk.co.uk/projects/manchester-extension</link>
+          </item>
+        </channel></rss>"""
+        with patch.object(self.app_module, "urlopen", return_value=BytesIO(feed)):
+            response = self.client.post("/leads/import-buildconnect", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        page = response.data.decode()
+        self.assertIn("Building refurbishment project in Liverpool", page)
+        self.assertIn("Send by WhatsApp", page)
+        self.assertIn("Location is only a clue", page)
+        self.assertNotIn("Roofing project in the Wirral", page)
+        self.assertNotIn("Manchester extension", page)
+        db = self.app_module.connect_db()
+        count = db.execute("SELECT COUNT(*) AS n FROM external_projects").fetchone()["n"]
+        db.close()
+        self.assertEqual(count, 1)
 
     def test_private_lead_is_saved_separately_from_public_tenders(self):
         r = self.client.post("/leads", data={
