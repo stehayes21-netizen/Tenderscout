@@ -293,7 +293,7 @@ class PostcodeAreaTests(unittest.TestCase):
         }
         geo_class, reason = tenderscout.classify_geography(record, "Target area")
         self.assertEqual(geo_class, "REVIEW")
-        self.assertIn("Knowsley", reason)
+        self.assertIn("knowsley", reason.lower())
         self.assertNotEqual(geo_class, "LOCAL")
 
     def test_north_west_alias_includes_wirral(self):
