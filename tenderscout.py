@@ -919,14 +919,14 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
         if not title or not feed_link.startswith("https://"):
             continue
         official_match = re.search(
-            r"https?://(?:www\\.)?(?:find-tender\\.service\\.gov\\.uk/Notice/[^\\s\"'<>]+|contractsfinder\\.service\\.gov\\.uk/Notice/[^\\s\"'<>]+)",
+            r"https?://(?:www\.)?(?:find-tender\.service\.gov\.uk/Notice/[^\s\"'<>]+|contractsfinder\.service\.gov\.uk/Notice/[^\s\"'<>]+)",
             html.unescape(raw_description),
             re.IGNORECASE,
         )
         official_url = html.unescape(official_match.group(0)).rstrip(".,);") if official_match else feed_link
         published = child_text(item, "pubdate", "published", "updated")
         guid = child_text(item, "guid", "id")
-        buyer_match = re.search(r"(?:Buyer|Organisation|Organization)\\s*:\\s*([^|;]+)", description, re.IGNORECASE)
+        buyer_match = re.search(r"(?:Buyer|Organisation|Organization)\s*:\s*([^|;]+)", description, re.IGNORECASE)
         buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
         output.append({
             "source": "Standstill UK North West (discovery; verify official notice)",
