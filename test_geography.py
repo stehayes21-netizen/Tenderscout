@@ -297,14 +297,14 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
 
-    def test_wirral_and_wallasey_are_excluded_from_initial_service_area(self):
+    def test_wirral_towns_and_postcodes_are_included_in_service_area(self):
         for text in (
             "Wirral", "Birkenhead CH41 6AB", "Bebington CH62 5AA",
-            "Wallasey CH45 4AA", "Wallasey CH44", "CH43", "UKD74",
+            "Wallasey CH45 4AA", "Wallasey CH44", "CH43",
             "Moreton CH46 6AA", "West Kirby CH48 4AA",
         ):
             with self.subTest(text=text):
-                self.assertEqual(self.classify(text), "OUT_OF_AREA")
+                self.assertEqual(self.classify(text), "LOCAL")
 
     def test_scotland_is_out_of_area(self):
         for text in (
@@ -395,12 +395,12 @@ class PostcodeAreaTests(unittest.TestCase):
         self.assertIn("knowsley", reason.lower())
         self.assertNotEqual(geo_class, "LOCAL")
 
-    def test_wirral_is_excluded_from_initial_target_area(self):
-        for location in ("Birkenhead CH41 6AB", "Wirral", "UKD74"):
+    def test_wirral_is_included_in_target_area(self):
+        for location in ("Birkenhead CH41 6AB", "Wirral", "Wallasey CH45 4AA"):
             with self.subTest(location=location):
                 self.assertEqual(
                     tenderscout.classify_geography({"location_text": location}, "Target area")[0],
-                    "OUT_OF_AREA",
+                    "LOCAL",
                 )
 
     def test_uk_wide_skips_the_area_filter(self):
