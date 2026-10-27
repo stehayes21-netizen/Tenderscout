@@ -149,6 +149,20 @@ class AppSmokeTest(AppTestCase):
         review = self.client.get("/?view=review").data.decode()
         self.assertIn("Cleaning services in Liverpool", review)
 
+    def test_local_buyer_can_surface_a_review_candidate_without_confirming_delivery_site(self):
+        record = feed_record(
+            "review-local-buyer",
+            "North West England",
+            title="Commercial cleaning framework",
+            description="Cleaning services; exact delivery site must be checked.",
+        )
+        record["buyer"] = "Liverpool City Council"
+        self.refresh_with([record])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Commercial cleaning framework", page)
+        self.assertIn("POTENTIAL LOCAL — verify delivery site", page)
+        self.assertIn("North West England", page)
+
     def test_private_lead_filters_by_trade_and_status(self):
         self.client.post("/leads", data={
             "title": "Roof repair", "trade_category": "Roofing and roof repairs",
