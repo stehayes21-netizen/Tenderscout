@@ -642,7 +642,7 @@ def dashboard():
     </style></head><body>
     <header><h1>Tender Scout</h1>
     <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
-    <p>Liverpool, Knowsley, Sefton, St Helens and Halton. Wirral and the wider North West are excluded.</p>
+    <p>Liverpool, Knowsley, Sefton, St Helens, Halton and Wirral. The wider North West is excluded.</p>
     <form method="post" action="/refresh"
       onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
