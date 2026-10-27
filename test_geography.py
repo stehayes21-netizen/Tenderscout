@@ -206,6 +206,8 @@ class GeographyClassifierTests(unittest.TestCase):
             try:
                 with patch.object(tenderscout, "fetch_fts", return_value=[review_record, local_record]), \
                      patch.object(tenderscout, "fetch_contracts_finder", return_value=[]), \
+                     patch.object(tenderscout, "fetch_bearings", return_value=[]), \
+                     patch.object(tenderscout, "fetch_standstill_northwest", return_value=[]), \
                      patch.object(sys, "argv", [
                          "tenderscout.py",
                          "--days", "14",
