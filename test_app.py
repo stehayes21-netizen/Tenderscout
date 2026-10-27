@@ -420,7 +420,7 @@ class RefreshTests(AppTestCase):
         page = self.client.get("/").data
         self.assertNotIn(b"https://example.com/unk", page)
         self.assertIn(b"https://example.com/unk", self.client.get("/?view=review").data)
-        self.assertIn(b"Needs a location check (1)", page)
+        self.assertIn(b"Full location review (1)", page)
         self.assertIn(b"view=review", page)
 
     def test_scottish_tenders_are_never_saved(self):
