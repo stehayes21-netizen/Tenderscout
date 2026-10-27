@@ -70,7 +70,7 @@ TRADE_CATEGORIES = [
 assert len(TRADE_CATEGORIES) == 71
 
 TRADE_KEYWORDS = {
-    "Commercial and office cleaning": ["commercial cleaning", "office cleaning", "contract cleaning"],
+    "Commercial and office cleaning": ["commercial cleaning", "office cleaning", "contract cleaning", "building cleaning"],
     "School and college cleaning": ["school cleaning", "college cleaning", "education cleaning"],
     "Domestic and communal-area cleaning": ["communal cleaning", "domestic cleaning", "housing cleaning"],
     "Deep cleaning": ["deep clean", "deep cleaning", "specialist cleaning"],
