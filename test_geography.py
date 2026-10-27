@@ -132,6 +132,23 @@ class TradeContextExtractionTests(unittest.TestCase):
         self.assertEqual(scored["trade_category"], "Commercial and office cleaning")
 
 
+    def test_building_cleaning_is_classified_as_commercial_cleaning(self):
+        record = {
+            "title": "CA18428 - West Derby School - Provision of Building Cleaning Services",
+            "description": "",
+            "buyer": "West Derby School",
+            "trade_context": "",
+            "location_text": "L13 7HQ",
+            "deadline": "2026-10-16T10:00:00+01:00",
+            "opportunity_stage": "Open for bids",
+        }
+        scored = tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        )
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["trade_category"], "Commercial and office cleaning")
+
+
 class OpportunityStageTests(unittest.TestCase):
     def test_only_open_or_planned_notices_are_shortlist_eligible(self):
         self.assertTrue(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Open for bids"}))
