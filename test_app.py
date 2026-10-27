@@ -610,7 +610,8 @@ class RefreshSummaryTests(AppTestCase):
         # produce a failure response rather than a false "zero tenders" success.
         with patch.object(collector, "fetch_fts", return_value=[]), \
              patch.object(collector, "fetch_contracts_finder", return_value=[]), \
-             patch.object(collector, "fetch_bearings", return_value=[]):
+             patch.object(collector, "fetch_bearings", return_value=[]), \
+             patch.object(collector, "fetch_standstill_northwest", return_value=[]):
             r = self.client.post("/refresh")
         self.assertEqual(r.status_code, 502)
         self.assertIn(b"does not mean there are no tenders", r.data)
@@ -623,7 +624,8 @@ class RefreshSummaryTests(AppTestCase):
         ]
         with patch.object(collector, "fetch_fts", return_value=records), \
              patch.object(collector, "fetch_contracts_finder", return_value=[]), \
-             patch.object(collector, "fetch_bearings", return_value=[]):
+             patch.object(collector, "fetch_bearings", return_value=[]), \
+             patch.object(collector, "fetch_standstill_northwest", return_value=[]):
             r = self.client.post("/refresh")
         self.assertEqual(r.status_code, 302)
         self.assertTrue(r.headers["Location"].startswith("/?done=1"))
