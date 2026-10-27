@@ -18,6 +18,55 @@ class DeadlineParsingTests(unittest.TestCase):
         self.assertEqual(deadline.isoformat(), "2026-10-25T12:30:00+00:00")
 
 
+class StandstillDiscoveryFeedTests(unittest.TestCase):
+    def test_public_rss_is_parsed_as_discovery_not_confirmed_delivery_location(self):
+        payload = b'''<?xml version="1.0"?>
+        <rss version="2.0"><channel><item>
+          <title>Roof repairs in Liverpool</title>
+          <link>https://standstill.uk/tenders/roof-repairs</link>
+          <guid>standstill-roof-1</guid>
+          <pubDate>Tue, 27 Oct 2026 10:00:00 GMT</pubDate>
+          <description><![CDATA[Roof maintenance services. Official notice:
+            <a href="https://www.find-tender.service.gov.uk/Notice/123456-2026">notice</a>]]></description>
+        </item></channel></rss>'''
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self):
+                return payload
+
+        with patch("tenderscout.urllib.request.urlopen", return_value=FakeResponse()):
+            stats = {}
+            rows = tenderscout.fetch_standstill_northwest(stats=stats)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(stats["records"], 1)
+        self.assertEqual(rows[0]["source"], "Standstill UK North West (discovery; verify official notice)")
+        self.assertIn("North West England", rows[0]["location_text"])
+        self.assertEqual(rows[0]["notice_url"], "https://www.find-tender.service.gov.uk/Notice/123456-2026")
+        self.assertEqual(
+            tenderscout.classify_geography(rows[0], "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_dedupe_merges_cross_source_copies_by_official_notice_url(self):
+        official = {
+            "ocid": "ocds-official-1", "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
+            "title": "Roof repairs in Liverpool", "buyer": "Council", "published_date": "2026-10-27",
+            "opportunity_stage": "Open for bids",
+        }
+        discovery = {
+            "ocid": "standstill-roof-1", "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
+            "title": "Roof repairs in Liverpool", "buyer": "Council", "published_date": "2026-10-27",
+            "opportunity_stage": "Open for bids",
+        }
+        rows = tenderscout.dedupe([official, discovery])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["ocid"], "ocds-official-1")
+
+
 class TradeContextExtractionTests(unittest.TestCase):
     def test_item_classification_and_description_are_preserved_for_trade_matching(self):
         payload = {
