@@ -171,6 +171,33 @@ class OpportunityStageTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["opportunity_stage"], "Planning / upcoming")
 
+    def test_missing_stage_is_not_assumed_to_be_open_for_bids(self):
+        self.assertFalse(tenderscout.shortlist_eligible_stage({}))
+        self.assertFalse(tenderscout.shortlist_eligible_stage({"opportunity_stage": ""}))
+
+    def test_discovery_feeds_are_not_labelled_as_confirmed_open_tenders(self):
+        bearings = {
+            "kind": "tender", "title": "Roof repairs",
+            "url": "https://provider.example/jobs/roof",
+            "provider": "Example provider",
+        }
+        with patch("tenderscout.get_json", return_value={"items": [bearings]}):
+            rows = tenderscout.fetch_bearings()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["opportunity_stage"], "Other notice")
+        self.assertFalse(tenderscout.shortlist_eligible_stage(rows[0]))
+
+    def test_standstill_discovery_feed_is_not_labelled_as_open_for_bids(self):
+        feed = b"""<?xml version="1.0"?><rss version="2.0"><channel><item>
+        <title>Commercial cleaning notice</title>
+        <link>https://example.com/notice</link>
+        <description>Cleaning contract</description>
+        </item></channel></rss>"""
+        with patch("tenderscout.get_text", return_value=feed.decode()):
+            rows = tenderscout.fetch_standstill_northwest()
+        self.assertTrue(rows)
+        self.assertEqual(rows[0]["opportunity_stage"], "Other notice")
+        self.assertFalse(tenderscout.shortlist_eligible_stage(rows[0]))
     def test_dedupe_prefers_open_tender_over_planning_for_same_process(self):
         rows = [
             {"ocid": "ocds-test-2", "title": "Cleaning", "buyer": "Council",
