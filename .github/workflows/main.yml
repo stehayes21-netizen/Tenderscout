@@ -34,15 +34,14 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      # Scheduled audit uses the dashboard's 60-day look-back. Five pages
-      # expands coverage beyond the previous two-page sample while staying
-      # within the existing 10-minute job limit.
+      # Collect a real feed sample for scheduled/manual runs and PRs so changes
+      # are checked against actual procurement data, not only synthetic tests.
       - name: Collect tenders (CSV for audit)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/integration/location-and-private-leads'))
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/integration/location-and-private-leads' || github.ref == 'refs/heads/fix/wider-scheduled-audit-coverage'))
         run: python tenderscout.py --days 60 --pages 5 --region "Target area" --min-score 3
 
       - name: Save CSV results
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/integration/location-and-private-leads')))
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/integration/location-and-private-leads' || github.ref == 'refs/heads/fix/wider-scheduled-audit-coverage')))
         uses: actions/upload-artifact@v4
         with:
           name: tenderscout-results
