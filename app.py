@@ -669,17 +669,21 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
-    fts_stats, cf_stats, bearings_stats = {}, {}, {}
-    # Run independent free sources concurrently. Bearings is a discovery source;
-    # its eligibility area is not delivery-site evidence, so its jobs remain REVIEW.
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
+    # Run independent free sources concurrently. Bearings and Standstill are
+    # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
+    with ThreadPoolExecutor(max_workers=4) as pool:
         fts_job = pool.submit(collector.fetch_fts, days, pages, limit, fts_stats)
         cf_job = pool.submit(collector.fetch_contracts_finder, days, pages, limit, cf_stats)
         bearings_job = pool.submit(collector.fetch_bearings, limit, bearings_stats)
-        records = collector.dedupe(fts_job.result() + cf_job.result() + bearings_job.result())
+        standstill_job = pool.submit(collector.fetch_standstill_northwest, limit, standstill_stats)
+        records = collector.dedupe(
+            fts_job.result() + cf_job.result() + bearings_job.result() + standstill_job.result()
+        )
     LAST_FEEDS["Find a Tender"] = fts_stats
     LAST_FEEDS["Contracts Finder"] = cf_stats
     LAST_FEEDS["Bearings (discovery; verify provider notice)"] = bearings_stats
+    LAST_FEEDS["Standstill UK North West (discovery; verify official notice)"] = standstill_stats
     app.logger.warning("REFRESH feeds: %s", LAST_FEEDS)
     samples = {"review": [], "outside": []}
     stats = {"fetched": len(records), "service": 0, "outside": 0, "local": 0, "review": 0}
