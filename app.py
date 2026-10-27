@@ -226,7 +226,8 @@ def has_target_area_clue(row):
     potentially relevant notices while preserving the explicit location-check
     badge. Records with no target-area evidence remain in the full review queue.
     """
-    text = " ".join(str(row[field] or "") for field in ("location_text", "title", "description")).lower()
+    # Buyer names can justify a manual look, but never establish delivery geography.
+    text = " ".join(str(row[field] or "") for field in ("location_text", "title", "description", "buyer")).lower()
     local_hits = collector.place_hits(text, collector.LOCAL_PLACE_TERMS)
     out_hits = collector.place_hits(text, collector.OUT_OF_AREA_TERMS)
     local_hits = collector.drop_contained(local_hits, out_hits)
