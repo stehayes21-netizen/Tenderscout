@@ -208,8 +208,8 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Strict initial service area: Liverpool, Knowsley, Sefton, St Helens and Halton.
-# Wirral and the wider North West are intentionally excluded for the first release.
+# Agreed initial service area: Liverpool, Knowsley, Sefton, St Helens, Halton and Wirral.
+# The wider North West outside these areas is excluded for the first release.
 # Postcode districts are the main evidence. Any uncertain or mixed location goes
 # to REVIEW; never loosen these rules merely to increase the number of matches.
 TARGET_AREA_LABEL = "Target area"
