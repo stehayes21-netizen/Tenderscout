@@ -938,9 +938,15 @@ def add_tender():
     return redirect("/")
 
 
+# Include every tender column in the recovery export, not just the card summary.
+# Keep the column order explicit so CSVs are stable and easy to inspect.
 EXPORT_FIELDS = [
-    "title", "buyer", "location_text", "trade_category", "deadline", "notice_url",
-    "source", "region_match", "opportunity_stage", "pipeline_status",
+    "id", "source", "title", "buyer", "published_date", "location_text",
+    "description", "estimated_value_gbp", "contract_start_date", "contract_end_date",
+    "contact_name", "contact_email", "contact_phone", "eligibility_text",
+    "service_match", "score", "deadline", "notice_url", "geography_reason",
+    "region_match", "trade_category", "saved_at", "pipeline_status",
+    "opportunity_stage",
 ]
 
 
@@ -968,8 +974,9 @@ def export_csv():
 @app.route("/leads/export.csv")
 def export_private_leads_csv():
     """Export the private lead pipeline so records can be backed up or reused."""
+    # Include the database ID as well as all private-lead fields for recovery.
     fields = [
-        "title", "trade_category", "location_text", "source_name", "source_url",
+        "id", "title", "trade_category", "location_text", "source_name", "source_url",
         "contact_details", "details", "urgency", "status", "created_at",
     ]
     db = connect_db()
