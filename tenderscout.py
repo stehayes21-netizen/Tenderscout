@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import re
 import sys
@@ -31,6 +32,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -862,6 +864,100 @@ def fetch_bearings(max_seconds=None, stats=None):
     return results
 
 
+def fetch_standstill_northwest(max_seconds=None, stats=None):
+    """Fetch the publisher's public North West RSS discovery feed.
+
+    The feed aggregates Find a Tender and Contracts Finder notices and is
+    refreshed daily. Its regional label can reflect the buyer's location when
+    a delivery location is missing, so records are discovery-only and must
+    remain REVIEW unless independent structured delivery evidence confirms them.
+    Keep attribution and the original feed link.
+    """
+    stats = _start_stats(stats)
+    url = "https://standstill.uk/region/north-west/feed.xml"
+    started = time.monotonic()
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "TenderScout/1.0 (public procurement research; source attribution retained)",
+                "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=20) as response:
+            payload = response.read()
+        root = ET.fromstring(payload)
+    except Exception as exc:
+        stats["error"] = str(exc)[:320]
+        print(f"[WARN] Standstill North West RSS fetch failed: {exc}", file=sys.stderr)
+        return []
+
+    def local_name(tag):
+        return tag.rsplit("}", 1)[-1].lower()
+
+    def child_text(node, *names):
+        for child in list(node):
+            if local_name(child.tag) in names:
+                if child.text and child.text.strip():
+                    return child.text.strip()
+                href = child.attrib.get("href", "").strip()
+                if href:
+                    return href
+        return ""
+
+    items = [node for node in root.iter() if local_name(node.tag) in {"item", "entry"}]
+    output = []
+    for item in items:
+        if max_seconds and time.monotonic() - started > max_seconds:
+            stats["stopped"] = "time limit"
+            break
+        title = html.unescape(child_text(item, "title"))
+        feed_link = child_text(item, "link")
+        raw_description = child_text(item, "description", "summary", "content")
+        description = html.unescape(re.sub(r"<[^>]+>", " ", raw_description))
+        description = " ".join(description.split())
+        if not title or not feed_link.startswith("https://"):
+            continue
+        official_match = re.search(
+            r"https?://(?:www\\.)?(?:find-tender\\.service\\.gov\\.uk/Notice/[^\\s\"'<>]+|contractsfinder\\.service\\.gov\\.uk/Notice/[^\\s\"'<>]+)",
+            html.unescape(raw_description),
+            re.IGNORECASE,
+        )
+        official_url = html.unescape(official_match.group(0)).rstrip(".,);") if official_match else feed_link
+        published = child_text(item, "pubdate", "published", "updated")
+        guid = child_text(item, "guid", "id")
+        buyer_match = re.search(r"(?:Buyer|Organisation|Organization)\\s*:\\s*([^|;]+)", description, re.IGNORECASE)
+        buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
+        output.append({
+            "source": "Standstill UK North West (discovery; verify official notice)",
+            "opportunity_stage": "Open for bids",
+            "location_text": "North West England (aggregator region only; delivery site not confirmed)",
+            "published_date": published,
+            "title": title,
+            "buyer": buyer,
+            "description": description or "Open the source page for the summary and official notice.",
+            "trade_context": description,
+            "contact_name": "", "contact_email": "", "contact_phone": "",
+            "eligibility_text": "",
+            "estimated_value_gbp": "",
+            "contract_start_date": "", "contract_end_date": "",
+            "deadline": "",
+            "status": "Standstill UK discovery listing — verify official notice",
+            "notice_url": official_url,
+            "ocid": guid or official_url,
+            "_raw": {"feed_url": url, "item_title": title, "feed_link": feed_link},
+        })
+    stats.update({
+        "pages": 1 if items else 0,
+        "records": len(output),
+        "last_batch": len(output),
+        "windows": 1,
+        "more": False,
+        "full_end": len(items) >= 50,
+    })
+    return output
+
+
 def keyword_hits(text, terms):
     lower = text.lower()
     return [term for term in terms if term in lower]
@@ -1128,17 +1224,22 @@ def shortlist_eligible_stage(record):
 
 
 def dedupe(records):
-    """Deduplicate procurement processes, preferring the most actionable stage."""
+    """Deduplicate procurement processes and cross-source copies of the same notice."""
     priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
     by_key = {}
+    notice_key = {}
     for row in records:
-        key = row.get("ocid") or (
-            row.get("title", "").lower(), row.get("buyer", "").lower(),
-            row.get("published_date", ""),
-        )
-        if not key:
-            key = (row.get("title", "").lower(), row.get("buyer", "").lower(),
-                   row.get("published_date", ""))
+        notice_url = str(row.get("notice_url") or "").strip()
+        if notice_url and notice_url in notice_key:
+            key = notice_key[notice_url]
+        else:
+            ocid = row.get("ocid")
+            key = ("ocid", ocid) if ocid else (
+                "title", row.get("title", "").lower(), row.get("buyer", "").lower(),
+                row.get("published_date", ""),
+            )
+        if notice_url:
+            notice_key[notice_url] = key
         current = by_key.get(key)
         if current is None or priority.get(row.get("opportunity_stage"), 0) > priority.get(current.get("opportunity_stage"), 0):
             by_key[key] = row
@@ -1175,6 +1276,7 @@ def main():
         fetch_fts(args.days, args.pages)
         + fetch_contracts_finder(args.days, args.pages)
         + fetch_bearings()
+        + fetch_standstill_northwest()
     )
     all_rows = dedupe(all_rows)
     if not all_rows:
