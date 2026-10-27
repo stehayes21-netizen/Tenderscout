@@ -209,14 +209,14 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
 
-    def test_wirral_and_wallasey_are_included_in_the_service_area(self):
+    def test_wirral_and_wallasey_are_excluded_from_initial_service_area(self):
         for text in (
             "Wirral", "Birkenhead CH41 6AB", "Bebington CH62 5AA",
             "Wallasey CH45 4AA", "Wallasey CH44", "CH43", "UKD74",
             "Moreton CH46 6AA", "West Kirby CH48 4AA",
         ):
             with self.subTest(text=text):
-                self.assertEqual(self.classify(text), "LOCAL")
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_scotland_is_out_of_area(self):
         for text in (
@@ -231,13 +231,19 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
-    def test_wider_area_postcodes_and_places_are_local(self):
-        for text in ("Kirkby L32 8XX", "Huyton L36 1AA", "Prescot L34 1AA", "Warrington WA1 1AA",
-                     "Lymm WA13 0AA", "Wigan WN1 1AA", "Leigh WN7 1AA", "Ormskirk L39 2AA",
-                     "Skelmersdale WN8 6AA", "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
-                     "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA", "Rainhill L35 5AB"):
+    def test_knowsley_st_helens_and_halton_remain_local(self):
+        for text in ("Kirkby L32 8XX", "Huyton L36 1AA", "Prescot L34 1AA",
+                     "Rainhill WA9 3AB", "Runcorn WA7 2PQ", "Widnes WA8 7AA"):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
+
+    def test_wider_north_west_places_are_outside_initial_scope(self):
+        for text in ("Warrington WA1 1AA", "Lymm WA13 0AA", "Wigan WN1 1AA",
+                     "Leigh WN7 1AA", "Ormskirk L39 2AA", "Skelmersdale WN8 6AA",
+                     "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
+                     "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_places_beyond_the_wider_area_are_out_of_area(self):
         for text in ("Manchester M1 1AA", "Preston PR1 2AA", "Bolton BL1 1AA", "Crewe CW1 2AA",
@@ -247,7 +253,7 @@ class PostcodeAreaTests(unittest.TestCase):
                 self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_borderline_postcodes_go_to_review(self):
-        for text in ("CH4 8AA", "Merseyside", "Cheshire", "Greater Manchester", "North West"):
+        for text in ("Merseyside", "Cheshire", "Greater Manchester", "North West"):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "REVIEW")
 
