@@ -517,6 +517,26 @@ class RefreshTests(AppTestCase):
         self.assertIn("From 1 April 2027 to 31 March 2029", page)
         self.assertIn("How do you apply?", page)
 
+    def test_refresh_updates_source_publication_and_match_metadata_without_resetting_pipeline(self):
+        first = feed_record("metadata-refresh", "Liverpool L2 2DH", title="Commercial cleaning contract")
+        first["published_date"] = "2026-10-01"
+        self.refresh_with([first])
+        db = self.app_module.connect_db()
+        db.execute("UPDATE tenders SET pipeline_status = 'Bidding' WHERE notice_url = ?", ("https://example.com/metadata-refresh",))
+        db.commit()
+        db.close()
+
+        updated = feed_record("metadata-refresh", "Liverpool L2 2DH", title="Roof repair contract", description="Roof repairs and maintenance.")
+        updated["source"] = "Contracts Finder updated"
+        updated["published_date"] = "2026-10-25"
+        self.refresh_with([updated])
+        db = self.app_module.connect_db()
+        row = db.execute("SELECT source, published_date, service_match, pipeline_status FROM tenders WHERE notice_url = ?", ("https://example.com/metadata-refresh",)).fetchone()
+        db.close()
+        self.assertEqual(row["source"], "Contracts Finder updated")
+        self.assertEqual(row["published_date"], "2026-10-25")
+        self.assertIn("Property maintenance", row["service_match"])
+        self.assertEqual(row["pipeline_status"], "Bidding")
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
         self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
         db = self.app_module.connect_db()
