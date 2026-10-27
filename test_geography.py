@@ -70,10 +70,14 @@ class StandstillDiscoveryFeedTests(unittest.TestCase):
             def read(self):
                 return payload
 
-        with patch("tenderscout.urllib.request.urlopen", return_value=FakeResponse()):
+        with patch("tenderscout.urllib.request.urlopen", return_value=FakeResponse()) as mock_urlopen:
             stats = {}
             rows = tenderscout.fetch_standstill_northwest(stats=stats)
 
+        self.assertEqual(mock_urlopen.call_count, 7)
+        self.assertEqual(stats["windows"], 7)
+        self.assertIn("Cleaning CPV 90910000", stats["feed_counts"])
+        self.assertIn("Construction CPV 45000000", stats["feed_counts"])
         self.assertEqual(len(rows), 1)
         self.assertEqual(stats["records"], 1)
         self.assertEqual(rows[0]["source"], "Standstill UK (RSS discovery; verify official notice)")
