@@ -1114,7 +1114,7 @@ def refresh_buildconnect_projects(force=False):
     now = time.time()
     if not force and now - _LAST_BUILDCONNECT_CHECK < BUILDCONNECT_CACHE_SECONDS:
         return dict(_LAST_BUILDCONNECT_RESULT)
-    result = {"checked": False, "imported": 0, "error": ""}
+    result = {"checked": False, "imported": 0, "feed_items": 0, "target_matches": 0, "error": ""}
     try:
         request_obj = Request(
             BUILDCONNECT_FEED_URL,
@@ -1125,14 +1125,18 @@ def refresh_buildconnect_projects(force=False):
             raw = response.read(2_000_000)
         root = ET.fromstring(raw)
         items = [node for node in root.iter() if node.tag.rsplit("}", 1)[-1].lower() in ("item", "entry")]
+        result["feed_items"] = len(items)
         db = connect_db()
         imported = 0
+        target_matches = 0
         try:
             for item in items[:100]:
                 fields = {}
                 for child in list(item):
                     key = child.tag.rsplit("}", 1)[-1].lower()
-                    fields.setdefault(key, child.text or "")
+                    # Atom feeds store the URL on <link href="...">, not as text.
+                    child_value = child.text or (child.attrib.get("href", "") if key == "link" else "")
+                    fields.setdefault(key, child_value)
                 title = _plain_feed_text(fields.get("title"))
                 link = _plain_feed_text(fields.get("link"))
                 if not link and fields.get("guid", "").startswith("http"):
@@ -1145,6 +1149,7 @@ def refresh_buildconnect_projects(force=False):
                 is_target, location_status = _project_location_check(combined)
                 if not is_target:
                     continue
+                target_matches += 1
                 trade = collector.classify_trade_category(combined)
                 cursor = db.execute(
                     "INSERT INTO external_projects (title,trade_category,location_text,details,source_name,source_url,published_date,location_status,imported_at) "
@@ -1160,10 +1165,10 @@ def refresh_buildconnect_projects(force=False):
             db.commit()
         finally:
             db.close()
-        result = {"checked": True, "imported": imported, "error": ""}
+        result = {"checked": True, "imported": imported, "feed_items": len(items), "target_matches": target_matches, "error": ""}
     except Exception as exc:
         # Keep the page usable if the public feed is temporarily unavailable.
-        result = {"checked": False, "imported": 0, "error": str(exc)[:220]}
+        result = {"checked": False, "imported": 0, "feed_items": result.get("feed_items", 0), "target_matches": result.get("target_matches", 0), "error": str(exc)[:220]}
     _LAST_BUILDCONNECT_CHECK = now
     _LAST_BUILDCONNECT_RESULT = dict(result)
     return result
@@ -1173,7 +1178,9 @@ def refresh_buildconnect_projects(force=False):
 def import_buildconnect_projects():
     result = refresh_buildconnect_projects(force=True)
     return redirect("/leads?projects_checked=1&projects_imported=" + str(result.get("imported", 0))
-                    + ("&projects_error=1" if result.get("error") else ""))
+                    + "&projects_items=" + str(result.get("feed_items", 0))
+                    + "&projects_matches=" + str(result.get("target_matches", 0))
+                    + ("&projects_error=" + urlencode({"detail": result.get("error", "Feed unavailable")})[7:] if result.get("error") else ""))
 
 
 @app.route("/leads", methods=["GET", "POST"])
@@ -1289,10 +1296,10 @@ def private_leads():
         )
     project_status = ""
     if request.args.get("projects_checked") == "1":
-        if request.args.get("projects_error") == "1":
-            project_status = '<p class="source-warning">BuildConnect could not be checked just now. Try again later; your saved jobs are still here.</p>'
+        if request.args.get("projects_error"):
+            project_status = '<p class="source-warning">BuildConnect check failed: ' + safe(request.args.get("projects_error")) + '. Feed entries read: ' + safe(request.args.get("projects_items", "0")) + '. Check the source/feed response before treating this as zero available jobs.</p>'
         else:
-            project_status = '<p class="source-warning">BuildConnect checked. New local-looking projects added: ' + safe(request.args.get("projects_imported", "0")) + '. Every location still needs checking on the original page.</p>'
+            project_status = '<p class="source-warning">BuildConnect check completed. Feed entries read: ' + safe(request.args.get("projects_items", "0")) + '; entries matching target-area clues: ' + safe(request.args.get("projects_matches", "0")) + '; newly saved: ' + safe(request.args.get("projects_imported", "0")) + '. Zero new saves can mean no matches or that matching projects were already saved. Verify every location on the original page.</p>'
     page = (
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>Tender Scout — private trade leads</title><style>'
