@@ -981,7 +981,8 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
         "more": False,
         "full_end": any(value >= 50 for value in feed_counts.values()),
         "feed_counts": feed_counts,
-        "error": "; ".join(errors)[:320],
+        "partial_errors": "; ".join(errors)[:320] if feed_counts else "",
+        "error": ("; ".join(errors)[:320] if errors and not feed_counts else ""),
     })
     return output
 
