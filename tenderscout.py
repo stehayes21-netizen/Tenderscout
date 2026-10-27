@@ -990,6 +990,20 @@ def classify_geography(record, region):
     # "worldwide". A long list of two-letter country codes is a strong signal.
     country_code_count = len(re.findall(r"(?<![A-Z])(?:AI|BM|FK|GI|KY|PN|MS|SH|TC|VG|AF|AL|DZ|AG|AR|AM|AU|AT|AZ|BH|BD|BB|BY|BE|BZ|BO|BA|BR|BN|BG|KH|CA|CL|CN|CO|CD|CR|HR|CU|CY|CZ|DK|DJ|DO|EC|EG|SV|ER|EE|SZ|ET|FJ|FI|FR|GE|DE|GH|GR|GD|GT|GN|GY|HT|HU|IS|IN|ID|IR|IQ|IE|IL|IT|JM|JP|JO|KZ|KE|KI|KW|KG|LA|LV|LB|LS|LR|LY|LT|MG|MW|MY|MX|MA|NP|NL|NZ|NG|NO|PK|PA|PE|PH|PL|PT|QA|RO|RU|SA|SN|RS|SG|SK|SI|ZA|KR|ES|LK|SE|CH|TW|TH|TR|UA|AE|GB|US|UY|UZ|VE|VN|YE|ZM|ZW)(?![A-Z])", raw_location_text.upper()))
     enumerated_global_scope = country_code_count >= 12
+    # A multi-country or out-of-area structured field can coexist with a real
+    # target-area delivery site listed in the notice description (for example,
+    # a multi-school cleaning contract spanning Trafford, Knowsley and Wigan).
+    # Description text must never promote a notice to LOCAL, but it must stop us
+    # incorrectly discarding a mixed-area opportunity as OUT_OF_AREA.
+    prose_local_sites = place_hits(prose, LOCAL_PLACE_TERMS)
+    if strong_out and prose_local_sites:
+        return "REVIEW", (
+            "Structured delivery location includes non-target areas, while the "
+            "title/description also names possible target-area sites: "
+            + ", ".join(dict.fromkeys(prose_local_sites[:5]))
+            + "; verify the official site list"
+        )
+
     if not strong_local and (global_scope or enumerated_global_scope):
         return "OUT_OF_AREA", "Explicit worldwide / multi-country delivery scope; no specific target-area site identified"
 
@@ -1121,6 +1135,12 @@ def score_record(record, services, region, min_value, max_value):
     return record
 
 
+def shortlist_eligible_stage(record):
+    """Only open tenders and explicitly planned opportunities belong in the shortlist."""
+    stage = record.get("opportunity_stage") or "Open for bids"
+    return stage in {"Open for bids", "Planning / upcoming"}
+
+
 def dedupe(records):
     """Deduplicate procurement processes, preferring the most actionable stage."""
     priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
@@ -1179,6 +1199,7 @@ def main():
     filtered = []
     review_rows = []
     rejected_by_scoring = 0
+    excluded_by_stage = 0
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
@@ -1194,7 +1215,10 @@ def main():
             review_rows.append(scored)
             continue
         if geo == "LOCAL" and scored["score"] >= args.min_score:
-            filtered.append(scored)
+            if shortlist_eligible_stage(scored):
+                filtered.append(scored)
+            else:
+                excluded_by_stage += 1
     filtered.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
     review_rows.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
 
@@ -1250,6 +1274,7 @@ def main():
     print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
+    print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")

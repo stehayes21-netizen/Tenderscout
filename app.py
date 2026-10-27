@@ -306,8 +306,17 @@ def dashboard():
     counts = count_by_region(db)
     db.close()
 
-    # Open tenders first; closed ones sink to the bottom (order is otherwise kept).
     decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
+    if not review_view and not pipeline_view:
+        # The main jobs board is for actionable bids, not expired tenders or
+        # award/contract-update notices. Keep the underlying records for review
+        # and CSV export; planning notices have their own pipeline view.
+        decorated = [
+            item for item in decorated
+            if (item[0]["opportunity_stage"] or "Open for bids") == "Open for bids"
+            and not item[3]
+        ]
+    # Open tenders first; soon-to-close opportunities remain visible at the top.
     decorated.sort(key=lambda item: item[3])
 
     cards = ""

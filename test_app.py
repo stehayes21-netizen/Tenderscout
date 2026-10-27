@@ -79,6 +79,33 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Tender Scout", r.data)
 
+    def test_main_board_hides_expired_and_non_bidding_notices(self):
+        for title in ("Expired cleaning tender", "Award notice for cleaning"):
+            self.client.post("/add", data={
+                "title": title,
+                "buyer": "Test Council",
+                "notice_url": "https://example.com/" + title.lower().replace(" ", "-"),
+            })
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET region_match = 'LOCAL', deadline = ?, opportunity_stage = ? WHERE title = ?",
+            ("2026-10-01T12:00:00Z", "Open for bids", "Expired cleaning tender"),
+        )
+        db.execute(
+            "UPDATE tenders SET region_match = 'LOCAL', deadline = ?, opportunity_stage = ? WHERE title = ?",
+            ("2099-12-31T00:00:00Z", "Other notice", "Award notice for cleaning"),
+        )
+        db.commit()
+        db.close()
+
+        page = self.client.get("/").data.decode()
+        self.assertNotIn("Expired cleaning tender", page)
+        self.assertNotIn("Award notice for cleaning", page)
+        # Filtering the active board must not delete the records from storage.
+        exported = self.client.get("/export.csv").data.decode()
+        self.assertIn("Expired cleaning tender", exported)
+        self.assertIn("Award notice for cleaning", exported)
+
     def test_review_queue_keeps_relevant_notice_when_deadline_is_missing(self):
         record = feed_record(
             "review-no-deadline",
@@ -493,7 +520,7 @@ class DashboardFeatureTests(AppTestCase):
         self.assertTrue(info("2000-01-01T00:00:00+00:00")[0].startswith("Closed"))
         self.assertIn("days", info("2099-12-31T00:00:00+00:00")[0])
 
-    def test_closed_tenders_sink_below_open_ones(self):
+    def test_closed_tenders_are_hidden_from_active_jobs_board(self):
         old = feed_record("old", "Liverpool L2 2DH")
         open_ = feed_record("open", "Liverpool L2 2DH")
         self.refresh_with([old, open_])
@@ -503,8 +530,11 @@ class DashboardFeatureTests(AppTestCase):
         db.commit()
         db.close()
         page = self.client.get("/").data.decode()
-        self.assertLess(page.index("example.com/open"), page.index("example.com/old"))
-        self.assertIn("Closed 1 Jan 2000", page)
+        self.assertIn("example.com/open", page)
+        self.assertNotIn("example.com/old", page)
+        # Expired records remain stored for audit/export; only the active board hides them.
+        exported = self.client.get("/export.csv").data.decode()
+        self.assertIn("example.com/old", exported)
 
     def test_service_filter_only_shows_that_service(self):
         self.refresh_with([

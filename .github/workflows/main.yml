@@ -8,6 +8,12 @@ on:
     # Every 6 hours. Tender notices do not change minute to minute.
     - cron: "17 */6 * * *"
 
+# Push and PR events can both fire for the same change. Keep only the latest
+# run per ref/PR so duplicated collectors do not hammer official feeds.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -34,13 +40,15 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      # The steps below only run on the schedule or a manual run, not on every push.
+      # Audit a 60-day period across all weekly windows. One page per window
+      # keeps the official Find a Tender feed below its rate limit and lets the
+      # audit finish inside the free GitHub Actions time budget.
       - name: Collect tenders (CSV for audit)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/integration/location-and-private-leads'))
-        run: python tenderscout.py --days 14 --pages 2 --region "Target area" --min-score 3
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+        run: python tenderscout.py --days 60 --pages 1 --region "Target area" --min-score 3
 
       - name: Save CSV results
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/fix/refresh-test-and-all-trades' || github.ref == 'refs/heads/integration/location-and-private-leads')))
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
         uses: actions/upload-artifact@v4
         with:
           name: tenderscout-results

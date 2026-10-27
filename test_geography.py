@@ -47,6 +47,11 @@ class TradeContextExtractionTests(unittest.TestCase):
 
 
 class OpportunityStageTests(unittest.TestCase):
+    def test_only_open_or_planned_notices_are_shortlist_eligible(self):
+        self.assertTrue(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Open for bids"}))
+        self.assertTrue(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Planning / upcoming"}))
+        self.assertFalse(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Other notice"}))
+
     def test_extract_records_identifies_planning_stage(self):
         payload = {
             "releases": [{
@@ -278,6 +283,23 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(description=description):
                 record = {"location_text": "", "title": "Cleaning", "description": description}
                 self.assertEqual(tenderscout.classify_geography(record, "Target area")[0], "REVIEW")
+
+    def test_mixed_area_contract_is_review_not_discarded_as_out_of_area(self):
+        record = {
+            "title": "Cleaning services across schools",
+            "description": (
+                "Schools located across Manchester, Trafford, Knowsley and Wigan; "
+                "routine and periodic cleaning across 11 schools."
+            ),
+            "location_text": (
+                "M33 5BP, British Oversea Territories, Channel Islands, Europe, "
+                "Isle of Man, Rest of the World, United Kingdom"
+            ),
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("knowsley", reason.lower())
+        self.assertNotEqual(geo_class, "LOCAL")
 
     def test_north_west_alias_includes_wirral(self):
         record = {"location_text": "Birkenhead CH41 6AB"}
