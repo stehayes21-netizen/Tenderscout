@@ -34,6 +34,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 FTS_URL = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages"
@@ -70,7 +71,7 @@ TRADE_CATEGORIES = [
 assert len(TRADE_CATEGORIES) == 71
 
 TRADE_KEYWORDS = {
-    "Commercial and office cleaning": ["commercial cleaning", "office cleaning", "contract cleaning"],
+    "Commercial and office cleaning": ["commercial cleaning", "office cleaning", "contract cleaning", "building cleaning"],
     "School and college cleaning": ["school cleaning", "college cleaning", "education cleaning"],
     "Domestic and communal-area cleaning": ["communal cleaning", "domestic cleaning", "housing cleaning"],
     "Deep cleaning": ["deep clean", "deep cleaning", "specialist cleaning"],
@@ -208,8 +209,8 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Strict initial service area: Liverpool, Knowsley, Sefton, St Helens and Halton.
-# Wirral and the wider North West are intentionally excluded for the first release.
+# Agreed initial service area: Liverpool, Knowsley, Sefton, St Helens, Halton and Wirral.
+# The wider North West outside these areas is excluded for the first release.
 # Postcode districts are the main evidence. Any uncertain or mixed location goes
 # to REVIEW; never loosen these rules merely to increase the number of matches.
 TARGET_AREA_LABEL = "Target area"
@@ -225,11 +226,13 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA7", "WA8",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
+    # Wirral
+    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
-REVIEW_POSTCODE_DISTRICTS = set()
+# CH4 is a boundary district and needs a site-level check.
+REVIEW_POSTCODE_DISTRICTS = {"CH4"}
 EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(1, 50)), "CH60", "CH61", "CH62", "CH63",
-    "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
+    *(f"CH{n}" for n in range(1, 4)), *(f"CH{n}" for n in range(5, 41)), "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
     "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
@@ -255,6 +258,10 @@ LOCAL_PLACE_TERMS = [
     # Knowsley
     "knowsley", "huyton", "prescot", "halewood", "stockbridge village",
     "tarbock", "roby", "cronton",
+    # Wirral
+    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
+    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
+    "tranmere", "moreton", "upton",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -274,9 +281,6 @@ OUT_OF_AREA_TERMS = [
     "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton", "up holland",
     "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
     "northwich", "winsford", "frodsham", "helsby", "tarporley",
-    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
-    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
-    "tranmere",
     "macclesfield", "knutsford", "altrincham",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
@@ -302,11 +306,11 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 # Find a Tender and Contracts Finder often give the region as a NUTS code instead
 # of a postcode. These codes are confirmed against the published code lists:
 # UKD71 covers East Merseyside (Knowsley, St Helens, Halton), UKD72 Liverpool,
-# and UKD73 Sefton. Wirral, Warrington and Cheshire West codes are outside the
-# initial service area. Broad codes that overlap target and non-target places
+# and UKD73 Sefton and UKD74 Wirral. Broad codes that overlap target and non-target
+# places
 # require a postcode or place name; every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD71", "UKD72", "UKD73"}
+LOCAL_NUTS = {"UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
@@ -904,6 +908,43 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
                     return href
         return ""
 
+    def labelled_deadline(*texts):
+        # RSS discovery feeds often put the closing date in prose instead of a
+        # structured field. Parse only explicitly labelled closing/deadline text.
+        combined = " ".join(text for text in texts if text)
+        match = re.search(
+            r"\b(?:closing(?: date)?|deadline|closes)\s*[:\-]?\s*"
+            r"(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})"
+            r"(?:[, ]+\s*(\d{1,2}:\d{2}))?"
+            r"(?:\s*(UK time|GMT|UTC|BST))?",
+            combined,
+            re.IGNORECASE,
+        )
+        if not match:
+            return ""
+        date_text, time_text, zone_text = match.groups()
+        parsed = None
+        for date_format in ("%d %b %Y", "%d %B %Y"):
+            try:
+                parsed = datetime.strptime(date_text, date_format)
+                break
+            except ValueError:
+                continue
+        if parsed is None:
+            return ""
+        if time_text:
+            hour, minute = (int(part) for part in time_text.split(":"))
+            parsed = parsed.replace(hour=hour, minute=minute)
+            zone = (zone_text or "").upper()
+            if zone == "BST":
+                parsed = parsed.replace(tzinfo=timezone(timedelta(hours=1)))
+            elif zone in {"GMT", "UTC"}:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = parsed.replace(tzinfo=ZoneInfo("Europe/London"))
+            return parsed.astimezone(timezone.utc).isoformat()
+        return parsed.date().isoformat()
+
     for feed_label, url in feeds:
         elapsed = time.monotonic() - started
         if max_seconds and elapsed >= max_seconds:
@@ -946,6 +987,7 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
             )
             official_url = html.unescape(official_match.group(0)).rstrip(".,);") if official_match else feed_link
             published = child_text(item, "pubdate", "published", "updated")
+            deadline = labelled_deadline(title, description)
             guid = child_text(item, "guid", "id")
             buyer_match = re.search(r"(?:Buyer|Organisation|Organization)\s*:\s*([^|;]+)", description, re.IGNORECASE)
             buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
@@ -962,7 +1004,7 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
                 "eligibility_text": "",
                 "estimated_value_gbp": "",
                 "contract_start_date": "", "contract_end_date": "",
-                "deadline": "",
+                "deadline": deadline,
                 "status": "Standstill UK discovery listing — verify official notice",
                 "notice_url": official_url,
                 "ocid": guid or official_url,
