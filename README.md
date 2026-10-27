@@ -49,7 +49,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 | `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Required for dashboard access. If either is missing, the dashboard returns HTTP 503 and stays locked; if credentials are wrong, it returns HTTP 401. `/health` stays open for the host. |
 | `DATABASE_URL` | PostgreSQL connection string. Without it the app uses SQLite, which is wiped on every redeploy on Render's free tier. |
 | `TENDERSCOUT_DB` | SQLite file path (local use only) |
-| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE` | Look-back window (default 60 days), pages per source (default 25) and the time limit per source (default 40 seconds) |
+| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE`, `TENDERSCOUT_FTS_SECONDS` | Look-back window (default 60 days), pagination cap, general per-source time limit (default 60 seconds), and Find a Tender time limit (default 150 seconds) |
 
 ## Hosting on Render
 - Start command: `gunicorn app:app` (`gunicorn.conf.py` raises the timeout to 120 seconds so a refresh isn't cut off).
