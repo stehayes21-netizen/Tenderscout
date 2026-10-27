@@ -985,6 +985,14 @@ def classify_geography(record, region):
     if not strong_local and (global_scope or enumerated_global_scope):
         return "OUT_OF_AREA", "Explicit worldwide / multi-country delivery scope; no specific target-area site identified"
 
+    # A postcode district that is outside the configured service area is
+    # stronger evidence than an ambiguous place name such as Moreton or Leigh.
+    # Keep mixed explicit target/non-target sites in REVIEW.
+    if pc_other and not strong_local:
+        return "OUT_OF_AREA", (
+            "Delivery/site postcode outside preferred area: " + ", ".join(pc_other[:3])
+        )
+
     if strong_local and strong_out:
         return "REVIEW", (
             "Multiple delivery/site locations across target and non-target areas: "
