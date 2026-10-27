@@ -135,6 +135,43 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Contract period:", page)
         self.assertLess(page.index('<section class="board-summary">'), page.index('<details class="full-details">'))
 
+    def test_location_review_notice_with_target_area_clue_is_visible_on_main_board_as_unverified(self):
+        record = feed_record(
+            "review-local-clue",
+            "",
+            title="Cleaning services in Liverpool",
+            description="Commercial cleaning framework; exact delivery site is not supplied.",
+        )
+        self.refresh_with([record])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Cleaning services in Liverpool", page)
+        self.assertIn("POTENTIAL LOCAL — verify delivery site", page)
+        review = self.client.get("/?view=review").data.decode()
+        self.assertIn("Cleaning services in Liverpool", review)
+
+    def test_private_lead_filters_by_trade_and_status(self):
+        self.client.post("/leads", data={
+            "title": "Roof repair", "trade_category": "Roofing and roof repairs",
+            "location_text": "Liverpool L15", "source_name": "Direct customer enquiry",
+            "details": "Repair a leaking roof",
+        })
+        self.client.post("/leads", data={
+            "title": "Gutter clearance", "trade_category": "Gutter cleaning",
+            "location_text": "Sefton L23", "source_name": "Direct customer enquiry",
+            "details": "Clear blocked gutters",
+        })
+        db = self.app_module.connect_db()
+        db.execute("UPDATE private_leads SET status = 'Passed to trade' WHERE title = 'Roof repair'")
+        db.commit()
+        db.close()
+        filtered = self.client.get("/leads?trade=Roofing%20and%20roof%20repairs&status=Passed%20to%20trade").data.decode()
+        self.assertIn("Roof repair", filtered)
+        self.assertNotIn("Gutter clearance", filtered)
+        self.assertIn("WHERE:", filtered)
+        self.assertIn("WHAT THE CUSTOMER NEEDS", filtered)
+        self.assertIn("Customer / business contact", filtered)
+        self.assertIn("Source status:", filtered)
+
     def test_manual_opportunity_persists_and_exports(self):
         r = self.client.post("/add", data={
             "title": "Test cleaning contract", "buyer": "Test buyer",
