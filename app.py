@@ -2,6 +2,7 @@ import csv
 import hmac
 import html
 import io
+import json
 import os
 import re
 import sqlite3
@@ -948,6 +949,32 @@ EXPORT_FIELDS = [
     "region_match", "trade_category", "saved_at", "pipeline_status",
     "opportunity_stage",
 ]
+
+
+@app.route("/backup.json")
+def export_database_backup():
+    """Download a portable snapshot of every TenderScout data table."""
+    tables = ("tenders", "private_leads", "external_projects")
+    db = connect_db()
+    try:
+        payload = {
+            "format": "tenderscout-database-backup",
+            "format_version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "tables": {},
+        }
+        for table in tables:
+            rows = db.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+            payload["tables"][table] = [dict(row) for row in rows]
+    finally:
+        db.close()
+
+    return Response(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        mimetype="application/json",
+        headers={"Content-Disposition": 'attachment; filename="tenderscout_database_backup.json"',
+                 "Cache-Control": "no-store"},
+    )
 
 
 @app.route("/export.csv")
