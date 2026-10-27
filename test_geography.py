@@ -42,7 +42,7 @@ class FindATenderWindowCoverageTests(unittest.TestCase):
              patch("tenderscout.get_json", side_effect=[page(1), page(2), page(3)]) as fetch, \
              patch("tenderscout.time.sleep"):
             stats = {}
-            rows = tenderscout.fetch_fts(days=21, max_pages=25, stats=stats)
+            rows = tenderscout.fetch_fts(days=21, max_pages=25, max_seconds=150, stats=stats)
 
         self.assertEqual(fetch.call_count, 3)
         self.assertEqual(len(rows), 3)
