@@ -18,6 +18,92 @@ class DeadlineParsingTests(unittest.TestCase):
         self.assertEqual(deadline.isoformat(), "2026-10-25T12:30:00+00:00")
 
 
+class FindATenderWindowCoverageTests(unittest.TestCase):
+    def test_searches_each_date_window_before_paging_deeply_into_latest_week(self):
+        windows = [
+            (tenderscout.datetime(2026, 10, 1, tzinfo=tenderscout.timezone.utc),
+             tenderscout.datetime(2026, 10, 8, tzinfo=tenderscout.timezone.utc)),
+            (tenderscout.datetime(2026, 10, 8, tzinfo=tenderscout.timezone.utc),
+             tenderscout.datetime(2026, 10, 15, tzinfo=tenderscout.timezone.utc)),
+            (tenderscout.datetime(2026, 10, 15, tzinfo=tenderscout.timezone.utc),
+             tenderscout.datetime(2026, 10, 22, tzinfo=tenderscout.timezone.utc)),
+        ]
+        def page(index):
+            return {
+                "releases": [{
+                    "id": f"release-{index}",
+                    "date": "2026-10-01T12:00:00Z",
+                    "tender": {"title": f"Cleaning contract {index}"},
+                    "buyer": {"name": "Example Council"},
+                }],
+                "nextCursor": f"cursor-{index}",
+            }
+        with patch("tenderscout._windows", return_value=windows), \
+             patch("tenderscout.get_json", side_effect=[page(1), page(2), page(3)]) as fetch, \
+             patch("tenderscout.time.sleep"):
+            stats = {}
+            rows = tenderscout.fetch_fts(days=21, max_pages=25, max_seconds=150, stats=stats)
+
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(stats["windows"], 3)
+        self.assertEqual(stats["pages"], 3)
+        self.assertTrue(stats["more"])
+
+
+class StandstillDiscoveryFeedTests(unittest.TestCase):
+    def test_public_rss_is_parsed_as_discovery_not_confirmed_delivery_location(self):
+        payload = b'''<?xml version="1.0"?>
+        <rss version="2.0"><channel><item>
+          <title>Roof repairs in Liverpool</title>
+          <link>https://standstill.uk/tenders/roof-repairs</link>
+          <guid>standstill-roof-1</guid>
+          <pubDate>Tue, 27 Oct 2026 10:00:00 GMT</pubDate>
+          <description><![CDATA[Roof maintenance services. Official notice:
+            <a href="https://www.find-tender.service.gov.uk/Notice/123456-2026">notice</a>]]></description>
+        </item></channel></rss>'''
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self):
+                return payload
+
+        with patch("tenderscout.urllib.request.urlopen", return_value=FakeResponse()) as mock_urlopen:
+            stats = {}
+            rows = tenderscout.fetch_standstill_northwest(stats=stats)
+
+        self.assertEqual(mock_urlopen.call_count, 7)
+        self.assertEqual(stats["windows"], 7)
+        self.assertIn("Cleaning CPV 90910000", stats["feed_counts"])
+        self.assertIn("Construction CPV 45000000", stats["feed_counts"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(stats["records"], 1)
+        self.assertEqual(rows[0]["source"], "Standstill UK (RSS discovery; verify official notice)")
+        self.assertIn("North West England", rows[0]["location_text"])
+        self.assertEqual(rows[0]["notice_url"], "https://www.find-tender.service.gov.uk/Notice/123456-2026")
+        self.assertEqual(
+            tenderscout.classify_geography(rows[0], "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_dedupe_merges_cross_source_copies_by_official_notice_url(self):
+        official = {
+            "ocid": "ocds-official-1", "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
+            "title": "Roof repairs in Liverpool", "buyer": "Council", "published_date": "2026-10-27",
+            "opportunity_stage": "Open for bids",
+        }
+        discovery = {
+            "ocid": "standstill-roof-1", "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
+            "title": "Roof repairs in Liverpool", "buyer": "Council", "published_date": "2026-10-27",
+            "opportunity_stage": "Open for bids",
+        }
+        rows = tenderscout.dedupe([official, discovery])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["ocid"], "ocds-official-1")
+
+
 class TradeContextExtractionTests(unittest.TestCase):
     def test_item_classification_and_description_are_preserved_for_trade_matching(self):
         payload = {
@@ -47,6 +133,11 @@ class TradeContextExtractionTests(unittest.TestCase):
 
 
 class OpportunityStageTests(unittest.TestCase):
+    def test_only_open_or_planned_notices_are_shortlist_eligible(self):
+        self.assertTrue(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Open for bids"}))
+        self.assertTrue(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Planning / upcoming"}))
+        self.assertFalse(tenderscout.shortlist_eligible_stage({"opportunity_stage": "Other notice"}))
+
     def test_extract_records_identifies_planning_stage(self):
         payload = {
             "releases": [{
@@ -152,6 +243,8 @@ class GeographyClassifierTests(unittest.TestCase):
             try:
                 with patch.object(tenderscout, "fetch_fts", return_value=[review_record, local_record]), \
                      patch.object(tenderscout, "fetch_contracts_finder", return_value=[]), \
+                     patch.object(tenderscout, "fetch_bearings", return_value=[]), \
+                     patch.object(tenderscout, "fetch_standstill_northwest", return_value=[]), \
                      patch.object(sys, "argv", [
                          "tenderscout.py",
                          "--days", "14",
@@ -204,14 +297,14 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
 
-    def test_wirral_and_wallasey_are_included_in_the_service_area(self):
+    def test_wirral_and_wallasey_are_excluded_from_initial_service_area(self):
         for text in (
             "Wirral", "Birkenhead CH41 6AB", "Bebington CH62 5AA",
             "Wallasey CH45 4AA", "Wallasey CH44", "CH43", "UKD74",
             "Moreton CH46 6AA", "West Kirby CH48 4AA",
         ):
             with self.subTest(text=text):
-                self.assertEqual(self.classify(text), "LOCAL")
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_scotland_is_out_of_area(self):
         for text in (
@@ -226,13 +319,19 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
-    def test_wider_area_postcodes_and_places_are_local(self):
-        for text in ("Kirkby L32 8XX", "Huyton L36 1AA", "Prescot L34 1AA", "Warrington WA1 1AA",
-                     "Lymm WA13 0AA", "Wigan WN1 1AA", "Leigh WN7 1AA", "Ormskirk L39 2AA",
-                     "Skelmersdale WN8 6AA", "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
-                     "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA", "Rainhill L35 5AB"):
+    def test_knowsley_st_helens_and_halton_remain_local(self):
+        for text in ("Kirkby L32 8XX", "Huyton L36 1AA", "Prescot L34 1AA",
+                     "Rainhill WA9 3AB", "Runcorn WA7 2PQ", "Widnes WA8 7AA"):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
+
+    def test_wider_north_west_places_are_outside_initial_scope(self):
+        for text in ("Warrington WA1 1AA", "Lymm WA13 0AA", "Wigan WN1 1AA",
+                     "Leigh WN7 1AA", "Ormskirk L39 2AA", "Skelmersdale WN8 6AA",
+                     "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
+                     "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_places_beyond_the_wider_area_are_out_of_area(self):
         for text in ("Manchester M1 1AA", "Preston PR1 2AA", "Bolton BL1 1AA", "Crewe CW1 2AA",
@@ -242,7 +341,7 @@ class PostcodeAreaTests(unittest.TestCase):
                 self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_borderline_postcodes_go_to_review(self):
-        for text in ("CH4 8AA", "Merseyside", "Cheshire", "Greater Manchester", "North West"):
+        for text in ("Merseyside", "Cheshire", "Greater Manchester", "North West"):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "REVIEW")
 
@@ -279,9 +378,30 @@ class PostcodeAreaTests(unittest.TestCase):
                 record = {"location_text": "", "title": "Cleaning", "description": description}
                 self.assertEqual(tenderscout.classify_geography(record, "Target area")[0], "REVIEW")
 
-    def test_north_west_alias_includes_wirral(self):
-        record = {"location_text": "Birkenhead CH41 6AB"}
-        self.assertEqual(tenderscout.classify_geography(record, "North West")[0], "LOCAL")
+    def test_mixed_area_contract_is_review_not_discarded_as_out_of_area(self):
+        record = {
+            "title": "Cleaning services across schools",
+            "description": (
+                "Schools located across Manchester, Trafford, Knowsley and Wigan; "
+                "routine and periodic cleaning across 11 schools."
+            ),
+            "location_text": (
+                "M33 5BP, British Oversea Territories, Channel Islands, Europe, "
+                "Isle of Man, Rest of the World, United Kingdom"
+            ),
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("knowsley", reason.lower())
+        self.assertNotEqual(geo_class, "LOCAL")
+
+    def test_wirral_is_excluded_from_initial_target_area(self):
+        for location in ("Birkenhead CH41 6AB", "Wirral", "UKD74"):
+            with self.subTest(location=location):
+                self.assertEqual(
+                    tenderscout.classify_geography({"location_text": location}, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
 
     def test_uk_wide_skips_the_area_filter(self):
         record = {"location_text": "Edinburgh EH1 1AA"}
@@ -293,19 +413,15 @@ class PostcodeCoverageTests(unittest.TestCase):
         return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
 
     def test_relevant_postcode_areas_are_confirmed_local(self):
-        # Representative postcode districts across the full agreed service area:
-        # Liverpool, Sefton, St Helens, Halton, Knowsley, Warrington,
-        # Wigan, West Lancashire and Cheshire West/Chester.
+        # Only the agreed five initial service areas are confirmed local.
         for postcode in (
-            "L1 1AA", "L20 1AA", "PR8 1AA",
-            "WA9 1AA", "WA7 1AA", "L32 1AA", "WA1 1AA", "WN1 1AA",
-            "L39 1AA", "WN8 1AA", "CH1 1AA", "CH64 1AA", "CW9 1AA",
+            "L1 1AA", "L20 1AA", "PR8 1AA", "WA9 1AA", "WA7 1AA", "L32 1AA",
         ):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "LOCAL")
 
     def test_postcodes_outside_the_service_area_are_not_local(self):
-        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA"):
+        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA", "WA1 1AA", "WN1 1AA", "L39 1AA", "CH1 1AA", "CH41 1AA", "CW9 1AA"):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "OUT_OF_AREA")
 
@@ -323,7 +439,7 @@ class PostcodeCoverageTests(unittest.TestCase):
                 self.assertEqual(self.classify(region), "OUT_OF_AREA")
 
     def test_borderline_postcode_is_sent_for_review(self):
-        self.assertEqual(self.classify("CH4 1AA"), "REVIEW")
+        self.assertEqual(self.classify("CH4 1AA"), "OUT_OF_AREA")
 
 
 class RegionCodeAndCommunityTests(unittest.TestCase):
@@ -331,14 +447,15 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
         return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
 
     def test_liverpool_and_sefton_region_codes_are_local(self):
-        for code in ("UKD72", "UKD73", "ukd72"):
+        for code in ("UKD71", "UKD72", "UKD73", "ukd72"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "LOCAL")
 
-    def test_wider_area_region_codes_are_local(self):
-        for code in ("UKD61", "UKD63", "UKD71"):
+    def test_only_agreed_merseyside_region_codes_are_local(self):
+        for code in ("UKD61", "UKD63", "UKD74"):
             with self.subTest(code=code):
-                self.assertEqual(self.classify(code), "LOCAL")
+                self.assertEqual(self.classify(code), "OUT_OF_AREA")
+        self.assertEqual(self.classify("UKD71"), "LOCAL")
 
     def test_codes_covering_the_area_and_more_need_checking(self):
         for code in ("UKD", "UKD3", "UKD36", "UKD47", "UKD6", "UKD7"):
@@ -346,8 +463,8 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
                 self.assertEqual(self.classify(code), "REVIEW")
 
     def test_a_broad_code_is_confirmed_by_a_place_or_postcode(self):
-        self.assertEqual(self.classify("UKD36 Wigan"), "LOCAL")
-        self.assertEqual(self.classify("UKD47 Ormskirk"), "LOCAL")
+        self.assertEqual(self.classify("UKD36 Wigan"), "OUT_OF_AREA")
+        self.assertEqual(self.classify("UKD47 Ormskirk"), "OUT_OF_AREA")
         self.assertEqual(self.classify("UKD36 Bolton"), "OUT_OF_AREA")
         self.assertEqual(self.classify("UKD36 Leigh"), "REVIEW")
         self.assertEqual(self.classify("Merseyside, Edinburgh"), "OUT_OF_AREA")
@@ -388,7 +505,7 @@ class OverlapAndTradeTests(unittest.TestCase):
 
     def test_longer_names_win_over_the_shorter_name_inside_them(self):
         self.assertEqual(self.classify("Preston Brook, Runcorn"), "LOCAL")
-        self.assertEqual(self.classify("Cheshire West and Chester"), "LOCAL")
+        self.assertEqual(self.classify("Cheshire West and Chester"), "OUT_OF_AREA")
         self.assertEqual(self.classify("Cheshire East"), "OUT_OF_AREA")
         self.assertEqual(self.classify("Preston"), "OUT_OF_AREA")
 

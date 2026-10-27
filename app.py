@@ -3,11 +3,14 @@ import hmac
 import html
 import io
 import os
+import re
 import sqlite3
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse
+from urllib.request import Request, urlopen
+import xml.etree.ElementTree as ET
 
 from flask import Flask, Response, redirect, request
 
@@ -124,6 +127,18 @@ def ensure_schema(db):
         status TEXT DEFAULT 'New',
         created_at TEXT NOT NULL
     )""")
+    db.execute(f"""CREATE TABLE IF NOT EXISTS external_projects (
+        id {id_column},
+        title TEXT NOT NULL,
+        trade_category TEXT NOT NULL,
+        location_text TEXT NOT NULL,
+        details TEXT,
+        source_name TEXT NOT NULL,
+        source_url TEXT NOT NULL UNIQUE,
+        published_date TEXT,
+        location_status TEXT NOT NULL DEFAULT 'Potential local — verify',
+        imported_at TEXT NOT NULL
+    )""")
     if USE_POSTGRES:
         db.execute("ALTER TABLE private_leads ADD COLUMN IF NOT EXISTS urgency TEXT DEFAULT 'Normal'")
     else:
@@ -202,13 +217,37 @@ def health():
 
 
 def count_by_region(db):
-    counts = {"main": 0, "review": 0}
+    """Count stored opportunities without treating unverified locations as confirmed."""
+    counts = {"main": 0, "review": 0, "confirmed_local": 0, "manual": 0}
     for row in db.execute(
         "SELECT region_match, COUNT(*) AS n FROM tenders GROUP BY region_match"
     ).fetchall():
-        key = "review" if row["region_match"] == "REVIEW" else "main"
-        counts[key] += row["n"]
+        region = row["region_match"]
+        if region == "REVIEW":
+            counts["review"] += row["n"]
+        else:
+            counts["main"] += row["n"]
+        if region == "LOCAL":
+            counts["confirmed_local"] += row["n"]
+        elif region == "MANUAL":
+            counts["manual"] += row["n"]
     return counts
+
+
+def has_target_area_clue(row):
+    """True only when a review record names a target-area clue worth surfacing.
+
+    This does not promote a record to LOCAL. It lets the main board surface
+    potentially relevant notices while preserving the explicit location-check
+    badge. Records with no target-area evidence remain in the full review queue.
+    """
+    # Buyer names can justify a manual look, but never establish delivery geography.
+    text = " ".join(str(row[field] or "") for field in ("location_text", "title", "description", "buyer")).lower()
+    local_hits = collector.place_hits(text, collector.LOCAL_PLACE_TERMS)
+    out_hits = collector.place_hits(text, collector.OUT_OF_AREA_TERMS)
+    local_hits = collector.drop_contained(local_hits, out_hits)
+    full, bare = collector.postcode_districts(text, include_bare=True)
+    return bool(local_hits or ((full | bare) & collector.LOCAL_POSTCODE_DISTRICTS))
 
 
 def deadline_info(deadline):
@@ -283,9 +322,12 @@ def dashboard():
             except Exception:
                 app.logger.exception("Automatic first-load tender refresh failed")
         db = connect_db()
+    # The default board includes confirmed local jobs plus *potentially relevant*
+    # location-review notices that mention one of the target areas. They are
+    # labelled as unverified below; the full review view remains available.
     condition = (
         "region_match = 'REVIEW'" if review_view
-        else "region_match IN ('LOCAL', 'MANUAL')"
+        else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
     )
     params = []
     if pipeline_view:
@@ -304,10 +346,24 @@ def dashboard():
         params,
     ).fetchall()
     counts = count_by_region(db)
+    if not review_view:
+        rows = [
+            row for row in rows
+            if row["region_match"] != "REVIEW" or has_target_area_clue(row)
+        ]
     db.close()
 
-    # Open tenders first; closed ones sink to the bottom (order is otherwise kept).
     decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
+    if not review_view and not pipeline_view:
+        # The main jobs board is for actionable bids, not expired tenders or
+        # award/contract-update notices. Keep the underlying records for review
+        # and CSV export; planning notices have their own pipeline view.
+        decorated = [
+            item for item in decorated
+            if (item[0]["opportunity_stage"] or "Open for bids") == "Open for bids"
+            and not item[3]
+        ]
+    # Open tenders first; soon-to-close opportunities remain visible at the top.
     decorated.sort(key=lambda item: item[3])
 
     cards = ""
@@ -323,7 +379,11 @@ def dashboard():
         if location_text.strip().upper() in {"UK, UNITED KINGDOM", "UNITED KINGDOM", "UKD63"}:
             location_display = ("Cheshire West and Chester region (UKD63); full site postcode not supplied" if location_text.strip().upper() == "UKD63" else "UK-wide location only; exact site postcode not supplied")
         stage_text = row["opportunity_stage"] or "Open for bids"
-        region_badge = ("Location needs checking" if row["region_match"] == "REVIEW" else "Confirmed local" if row["region_match"] == "LOCAL" else "Manual entry")
+        region_badge = (
+            "POTENTIAL LOCAL — verify delivery site" if row["region_match"] == "REVIEW"
+            else "Confirmed local" if row["region_match"] == "LOCAL"
+            else "Manual entry"
+        )
         if stage_text == "Planning / upcoming":
             simple_explanation = (
                 f"This is an early warning that {buyer_text} may need {trade_text.lower()} work. "
@@ -355,8 +415,13 @@ def dashboard():
         )
         value_label = format_money(row["estimated_value_gbp"])
         duration_label = contract_length(row["contract_start_date"], row["contract_end_date"])
+        notice_label = (
+            "Open source listing — verify official notice"
+            if "Standstill UK" in str(row["source"] or "")
+            else "View official notice"
+        )
         notice = (
-            f'<a href="{link}" target="_blank" rel="noopener">View official notice</a>'
+            f'<a href="{link}" target="_blank" rel="noopener">{notice_label}</a>'
             if link.startswith("https://") else ""
         )
         share_actions = ""
@@ -457,8 +522,8 @@ def dashboard():
             )
         elif counts["review"] and not pipeline_view:
             cards = (
-                f'<p>No confirmed local opportunities are currently saved. '
-                f'{counts["review"]} tenders need a location check. '
+                f'<p>No confirmed local opportunities or target-area candidates are currently visible. '
+                f'{counts["review"]} notices are in the full location-review queue. '
                 f'<a href="{safe(dashboard_url("review", service))}">Review location-uncertain tenders</a>, '
                 "or refresh to check for new notices.</p>"
             )
@@ -472,8 +537,17 @@ def dashboard():
         heading = f"{len(rows)} pipeline / upcoming opportunities"
         switch = f'<a href="{dashboard_url("", service)}">Back to jobs board ({counts["main"] + counts["review"]})</a>'
     else:
-        heading = f"{len(rows)} saved opportunities"
-        switch = f'<a href="{dashboard_url("pipeline", service)}">Pipeline / upcoming</a> · <a href="{dashboard_url("review", service)}">Needs a location check ({counts["review"]})</a>'
+        if review_view:
+            heading = f"{len(rows)} notices in the full location-review queue"
+        elif pipeline_view:
+            heading = f"{len(rows)} pipeline / upcoming opportunities"
+        else:
+            potential_count = sum(1 for row in rows if row["region_match"] == "REVIEW")
+            heading = (
+                f"{len(rows)} open opportunities · {counts['confirmed_local']} confirmed local overall · "
+                f"{potential_count} possible local match(es) shown with location unverified"
+            )
+        switch = f'<a href="{dashboard_url("pipeline", service)}">Pipeline / upcoming</a> · <a href="{dashboard_url("review", service)}">Full location review ({counts["review"]})</a>'
 
     selected_trade = trade
     filters = "".join(
@@ -568,7 +642,7 @@ def dashboard():
     </style></head><body>
     <header><h1>Tender Scout</h1>
     <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
-    <p>Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral (including Wallasey), Warrington, Wigan, West Lancashire and Cheshire West.</p>
+    <p>Liverpool, Knowsley, Sefton, St Helens and Halton. Wirral and the wider North West are excluded.</p>
     <form method="post" action="/refresh"
       onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
@@ -616,17 +690,24 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
-    fts_stats, cf_stats, bearings_stats = {}, {}, {}
-    # Run independent free sources concurrently. Bearings is a discovery source;
-    # its eligibility area is not delivery-site evidence, so its jobs remain REVIEW.
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        fts_job = pool.submit(collector.fetch_fts, days, pages, limit, fts_stats)
+    # Find a Tender needs a longer window because it rate-limits pagination;
+    # its collector now samples each week before paging deeply into one week.
+    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 150)
+    fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
+    # Run independent free sources concurrently. Bearings and Standstill are
+    # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        fts_job = pool.submit(collector.fetch_fts, days, pages, fts_limit, fts_stats)
         cf_job = pool.submit(collector.fetch_contracts_finder, days, pages, limit, cf_stats)
         bearings_job = pool.submit(collector.fetch_bearings, limit, bearings_stats)
-        records = collector.dedupe(fts_job.result() + cf_job.result() + bearings_job.result())
+        standstill_job = pool.submit(collector.fetch_standstill_northwest, limit, standstill_stats)
+        records = collector.dedupe(
+            fts_job.result() + cf_job.result() + bearings_job.result() + standstill_job.result()
+        )
     LAST_FEEDS["Find a Tender"] = fts_stats
     LAST_FEEDS["Contracts Finder"] = cf_stats
     LAST_FEEDS["Bearings (discovery; verify provider notice)"] = bearings_stats
+    LAST_FEEDS["Standstill UK RSS discovery"] = standstill_stats
     app.logger.warning("REFRESH feeds: %s", LAST_FEEDS)
     samples = {"review": [], "outside": []}
     stats = {"fetched": len(records), "service": 0, "outside": 0, "local": 0, "review": 0}
@@ -766,8 +847,13 @@ def feed_notes():
             text += f" over {st['windows']} week(s) searched"
         if st.get("first_date"):
             text += f", published {st['first_date']} to {st['last_date']}"
+        if st.get("feed_counts"):
+            feed_detail = ", ".join(f"{label}: {count}" for label, count in st["feed_counts"].items())
+            text += f". Feed breakdown — {feed_detail}"
         if st.get("error"):
             text += f". Problem: {st['error']}"
+        elif st.get("partial_errors"):
+            text += f". Some feeds failed: {st['partial_errors']}"
         elif st.get("stopped"):
             text += ". Stopped early (time limit), so there may be more"
         elif st.get("more"):
@@ -940,7 +1026,7 @@ def sources():
             ("Liverpool City Council — ProContract", "https://procontract.due-north.com/", "Liverpool Council says most of its opportunities are advertised through ProContract; some routes use other approved portals"),
             ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
             ("Bearings — Liverpool City Region tenders", "https://getbearings.co.uk/rss", "Free North West opportunity aggregator with RSS feeds and an open API; use as a discovery source and verify every tender on the buyer's official notice"),
-            ("Standstill UK — North West tenders", "https://standstill.uk/alerts/", "Free daily RSS lists for UK public tenders, including a North West feed; aggregator summaries must be checked against the official notice"),
+            ("Standstill UK — North West tenders", "https://standstill.uk/region/north-west/", "Free daily RSS discovery feed now included in TenderScout; regional label is not proof of the delivery site, and every item must be verified on the official notice"),
             ("Merseyside Fire & Rescue procurement", "https://www.merseyfire.gov.uk/about/supplying-goods-and-services-to-mfra/", "Confirms openly advertised opportunities are on The Chest and national notices on Find a Tender / Contracts Finder"),
             ("Sefton Council tenders and contracts", "https://www.sefton.gov.uk/business/tenders-contracts", "Confirms Sefton opportunities use The Chest and points suppliers to national notice sources"),
         ]),
@@ -983,6 +1069,113 @@ def sources():
     )
 
 
+# BuildConnect publishes public project summaries via RSS. Contact details remain private.
+BUILDCONNECT_FEED_URL = "https://www.buildconnect-uk.co.uk/feed.xml"
+BUILDCONNECT_CACHE_SECONDS = 1800
+_LAST_BUILDCONNECT_CHECK = 0.0
+_LAST_BUILDCONNECT_RESULT = {"checked": False, "imported": 0, "error": ""}
+
+
+def _plain_feed_text(value):
+    """Turn an RSS title/summary into safe plain text before saving or displaying it."""
+    value = html.unescape(str(value or ""))
+    value = re.sub(r"(?is)<(script|style)\b.*?>.*?</\1>", " ", value)
+    value = re.sub(r"(?s)<[^>]+>", " ", value)
+    return " ".join(value.split())[:12000]
+
+
+def _project_location_check(text):
+    """Only accept clear target-area mentions; never treat a broad region as proof."""
+    lower = " " + re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip() + " "
+    local_hits = [term for term in collector.LOCAL_PLACE_TERMS if (" " + term + " ") in lower]
+    # Exact postcode district checks can identify target locations even if no town is named.
+    try:
+        full, bare = collector.postcode_districts(text or "", include_bare=True)
+        postcode_hits = sorted((full | bare) & collector.LOCAL_POSTCODE_DISTRICTS)
+    except Exception:
+        postcode_hits = []
+    if not local_hits and not postcode_hits:
+        return False, "Location not confirmed in the five target areas"
+    excluded_terms = [
+        "wirral", "birkenhead", "wallasey", "warrington", "wigan", "west lancashire",
+        "ormskirk", "skelmersdale", "chester", "ellesmere port", "manchester",
+        "salford", "bolton", "preston", "blackpool", "north west", "cheshire west",
+    ]
+    out_hits = [term for term in excluded_terms if (" " + term + " ") in lower]
+    if out_hits:
+        return False, "Mixed or outside-area location needs checking: " + ", ".join(out_hits[:3])
+    return True, "Potential local — verify exact project location"
+
+
+def refresh_buildconnect_projects(force=False):
+    """Import public BuildConnect project summaries only; never infer private contacts."""
+    global _LAST_BUILDCONNECT_CHECK, _LAST_BUILDCONNECT_RESULT
+    import time
+    now = time.time()
+    if not force and now - _LAST_BUILDCONNECT_CHECK < BUILDCONNECT_CACHE_SECONDS:
+        return dict(_LAST_BUILDCONNECT_RESULT)
+    result = {"checked": False, "imported": 0, "error": ""}
+    try:
+        request_obj = Request(
+            BUILDCONNECT_FEED_URL,
+            headers={"User-Agent": "TenderScout/1.0 (public RSS reader; contact: site administrator)",
+                     "Accept": "application/rss+xml, application/xml, text/xml"},
+        )
+        with urlopen(request_obj, timeout=8) as response:
+            raw = response.read(2_000_000)
+        root = ET.fromstring(raw)
+        items = [node for node in root.iter() if node.tag.rsplit("}", 1)[-1].lower() in ("item", "entry")]
+        db = connect_db()
+        imported = 0
+        try:
+            for item in items[:100]:
+                fields = {}
+                for child in list(item):
+                    key = child.tag.rsplit("}", 1)[-1].lower()
+                    fields.setdefault(key, child.text or "")
+                title = _plain_feed_text(fields.get("title"))
+                link = _plain_feed_text(fields.get("link"))
+                if not link and fields.get("guid", "").startswith("http"):
+                    link = fields.get("guid", "")
+                parsed = urlparse(link)
+                if not title or parsed.scheme != "https" or parsed.hostname not in ("buildconnect-uk.co.uk", "www.buildconnect-uk.co.uk"):
+                    continue
+                description = _plain_feed_text(fields.get("description") or fields.get("summary") or fields.get("content"))
+                combined = title + " " + description
+                is_target, location_status = _project_location_check(combined)
+                if not is_target:
+                    continue
+                trade = collector.classify_trade_category(combined)
+                cursor = db.execute(
+                    "INSERT INTO external_projects (title,trade_category,location_text,details,source_name,source_url,published_date,location_status,imported_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(source_url) DO NOTHING",
+                    (title[:250], trade, "Target-area clue found in public feed — verify exact site",
+                     description[:4000], "BuildConnect UK (public RSS)", link,
+                     _plain_feed_text(fields.get("pubdate") or fields.get("published") or "")[:100],
+                     location_status, datetime.now(timezone.utc).isoformat()),
+                )
+                # SQLite/PostgreSQL both expose rowcount for INSERT ... DO NOTHING.
+                if getattr(cursor, "rowcount", 0) == 1:
+                    imported += 1
+            db.commit()
+        finally:
+            db.close()
+        result = {"checked": True, "imported": imported, "error": ""}
+    except Exception as exc:
+        # Keep the page usable if the public feed is temporarily unavailable.
+        result = {"checked": False, "imported": 0, "error": str(exc)[:220]}
+    _LAST_BUILDCONNECT_CHECK = now
+    _LAST_BUILDCONNECT_RESULT = dict(result)
+    return result
+
+
+@app.route("/leads/import-buildconnect", methods=["POST"])
+def import_buildconnect_projects():
+    result = refresh_buildconnect_projects(force=True)
+    return redirect("/leads?projects_checked=1&projects_imported=" + str(result.get("imported", 0))
+                    + ("&projects_error=1" if result.get("error") else ""))
+
+
 @app.route("/leads", methods=["GET", "POST"])
 def private_leads():
     """Separate, manually captured private customer enquiries; never mixed with tenders."""
@@ -1015,7 +1208,29 @@ def private_leads():
             )
             db.commit()
             message = '<p style="color:#08783c"><b>Private lead saved.</b></p>'
-    rows = db.execute("SELECT * FROM private_leads ORDER BY created_at DESC LIMIT 100").fetchall()
+    lead_trade = request.args.get("trade", "")
+    lead_trade = lead_trade if lead_trade in TRADE_CATEGORIES else ""
+    lead_status = request.args.get("status", "")
+    lead_status = lead_status if lead_status in LEAD_STATUSES else ""
+    where = []
+    query_params = []
+    if lead_trade:
+        where.append("trade_category = ?")
+        query_params.append(lead_trade)
+    if lead_status:
+        where.append("status = ?")
+        query_params.append(lead_status)
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    rows = db.execute(
+        "SELECT * FROM private_leads" + where_sql + " ORDER BY created_at DESC LIMIT 100",
+        tuple(query_params),
+    ).fetchall()
+    lead_counts = {
+        "total": db.execute("SELECT COUNT(*) AS n FROM private_leads").fetchone()["n"],
+        "new": db.execute("SELECT COUNT(*) AS n FROM private_leads WHERE status = 'New'").fetchone()["n"],
+        "passed": db.execute("SELECT COUNT(*) AS n FROM private_leads WHERE status = 'Passed to trade'").fetchone()["n"],
+    }
+    project_rows = db.execute("SELECT * FROM external_projects ORDER BY imported_at DESC LIMIT 100").fetchall()
     db.close()
     options = "".join(f'<option value="{safe(t)}">{safe(t)}</option>' for t in TRADE_CATEGORIES)
     source_options = "".join(f'<option value="{safe(s)}">{safe(s)}</option>' for s in LEAD_SOURCES)
@@ -1051,6 +1266,33 @@ def private_leads():
         )
     if not cards:
         cards = "<p>No private leads have been entered yet. This list is separate from public-sector tenders.</p>"
+    project_cards = ""
+    for project in project_rows:
+        share_text = "\\n".join([
+            "PROJECT OPPORTUNITY (location must be verified)",
+            "JOB: " + str(project["title"] or ""),
+            "TRADE: " + str(project["trade_category"] or ""),
+            "LOCATION: " + str(project["location_text"] or ""),
+            "DETAILS: " + str(project["details"] or "Open the source link for details"),
+            "CONTACT: Not provided by source; request an approved introduction",
+            "SOURCE: " + str(project["source_url"] or ""),
+        ])
+        wa = "https://wa.me/?" + urlencode({"text": share_text})
+        em = "mailto:?" + urlencode({"subject": "Construction opportunity: " + str(project["title"] or ""), "body": share_text})
+        project_cards += (
+            f'<article class="lead-card project-card"><p class="lead-kicker">PUBLIC PROJECT · {safe(project["trade_category"])} · LOCATION TO VERIFY</p>'
+            f'<h3>{safe(project["title"])}</h3><p class="lead-location"><b>WHERE:</b> {safe(project["location_text"])}</p>'
+            f'<section class="lead-request"><h4>PROJECT DETAILS</h4><p>{safe(project["details"] or "Open the original source for project details.")}</p></section>'
+            f'<p><b>Source:</b> BuildConnect UK · <a href="{safe(project["source_url"])}" target="_blank" rel="noopener">Open original project</a></p>'
+            '<p><b>Contact:</b> Not supplied by the source. The project owner controls introductions.</p>'
+            f'<p class="share-actions"><a href="{safe(wa)}" target="_blank" rel="noopener">Send by WhatsApp</a> <a href="{safe(em)}">Send by email</a></p></article>'
+        )
+    project_status = ""
+    if request.args.get("projects_checked") == "1":
+        if request.args.get("projects_error") == "1":
+            project_status = '<p class="source-warning">BuildConnect could not be checked just now. Try again later; your saved jobs are still here.</p>'
+        else:
+            project_status = '<p class="source-warning">BuildConnect checked. New local-looking projects added: ' + safe(request.args.get("projects_imported", "0")) + '. Every location still needs checking on the original page.</p>'
     page = (
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>Tender Scout — private trade leads</title><style>'
@@ -1062,12 +1304,20 @@ def private_leads():
         'article{background:#f3f6f4;border:1px solid #e0e8e2;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
         '.lead-kicker{font-weight:bold;color:#08783c}.lead-location{font-size:18px;background:#e8f2eb;padding:10px;border-radius:8px}.lead-request{background:#fff;border:1px solid #cbd9cf;border-radius:8px;padding:12px;margin:12px 0}.lead-request h4{margin:0 0 6px;color:#145c35;font-size:14px;letter-spacing:.03em}.urgent{border:2px solid #b45309;background:#fffaf0}.status-form label{display:block;font-weight:600}.status-form select{margin-bottom:8px}.share-actions{display:flex;gap:8px;flex-wrap:wrap}.share-actions a{display:inline-block;padding:10px;background:#e8f2eb;border-radius:8px;text-decoration:none;font-weight:bold}'
         'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
-        '.helper{font-size:13px;color:#53645a;font-weight:normal}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.lead-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.lead-facts p{margin:0;padding:10px;background:#f3f6f4;border-radius:8px}.lead-facts b,.lead-facts span{display:block}.lead-facts b{font-size:12px;color:#53645a;text-transform:uppercase}.status-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.status-form label{flex:1;min-width:180px;margin:0}.status-form button{width:auto;margin:0;white-space:nowrap}.share-actions a{min-height:40px}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
+        '.helper{font-size:13px;color:#53645a;font-weight:normal}.project-board{background:#eef6f0;border:1px solid #c8dccd;border-radius:12px;padding:14px;margin:18px 0}.project-board h2{margin-top:0}.project-card{border-left-color:#2563eb}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.lead-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}.lead-facts p{margin:0;padding:10px;background:#f3f6f4;border-radius:8px}.lead-facts b,.lead-facts span{display:block}.lead-facts b{font-size:12px;color:#53645a;text-transform:uppercase}.status-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.status-form label{flex:1;min-width:180px;margin:0}.status-form button{width:auto;margin:0;white-space:nowrap}.share-actions a{min-height:40px}.source-warning{padding:12px;border:1px solid #d8c28b;background:#fff9e8;border-radius:9px}.lead-filters{display:grid;grid-template-columns:2fr 1fr auto auto;gap:10px;align-items:end;background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-filters label{margin:0}.lead-filters button{width:auto;margin:0}.lead-filters a{align-self:center}@media(max-width:620px){.lead-filters{grid-template-columns:1fr}.lead-facts{grid-template-columns:1fr 1fr}}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
         '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
-        '<p><b>Private leads.</b> Each card shows the job, trade, location and contact so you can pass it to a suitable tradesperson. They stay separate from public tenders.</p>'
+        '<p><b>Private leads.</b> Each card shows the job, trade, location, requested work and contact so you can pass it to a suitable tradesperson. They stay separate from public tenders.</p>'
+        '<div class="lead-facts"><p><b>Total captured leads</b><span>' + str(lead_counts["total"]) + '</span></p><p><b>New</b><span>' + str(lead_counts["new"]) + '</span></p><p><b>Passed to trade</b><span>' + str(lead_counts["passed"]) + '</span></p></div>'
         '<p><a href="/leads/export.csv">Download private leads CSV (backup)</a></p>'
+        '<section class="project-board"><h2>Public construction project opportunities</h2>'
+        '<p>These are public project summaries from BuildConnect, not private customer enquiries. Contact details are not included. Location is only a clue from the feed and must be checked before sharing.</p>'
+        '<form method="post" action="/leads/import-buildconnect"><button type="submit">Check BuildConnect for new projects</button></form>'
+        + project_status + (project_cards or '<p>No matching target-area projects have been imported yet. Use “Check BuildConnect for new projects” to search the public feed.</p>')
+        + '</section>'
+        '<p class="source-warning"><b>Source status:</b> private leads here are enquiries captured in TenderScout. This list is not yet connected to an authorised live feed of domestic customer requests. Facebook and Nextdoor are not scraped, and customer contact details are never invented.</p>'
+        '<form class="lead-filters" method="get" action="/leads"><label>Filter by trade<select name="trade"><option value="">All trades</option>' + "".join(f'<option value="{safe(t)}"{" selected" if t == lead_trade else ""}>{safe(t)}</option>' for t in TRADE_CATEGORIES) + '</select></label><label>Filter by status<select name="status"><option value="">All statuses</option>' + "".join(f'<option value="{safe(st)}"{" selected" if st == lead_status else ""}>{safe(st)}</option>' for st in LEAD_STATUSES) + '</select></label><button type="submit">Apply filters</button><a href="/leads">Clear filters</a></form>'
         '<p>Record the most precise location and only save customer contact details when they were provided for this enquiry and can legitimately be reused. A direct source URL is optional.</p>'
         + message +
         '<details class="lead-entry"><summary>+ Add a private job manually</summary><form method="post"><label>Job / enquiry title<input name="title" required maxlength="250" placeholder="e.g. Urgent gutter cleaning needed"></label>'

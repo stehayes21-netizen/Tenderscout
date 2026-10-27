@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import re
 import sys
@@ -31,6 +32,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -206,14 +208,10 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Core areas: Liverpool, Sefton, St Helens, Halton and the full Wirral peninsula
-# including Wallasey and Birkenhead.
-# Wider areas: Knowsley, Warrington, Wigan, West Lancashire and Cheshire West and
-# Chester (Chester, Ellesmere Port, Neston, Northwich, Winsford, Frodsham).
-# Postcodes are the main evidence because place names are ambiguous. Royal Mail
-# postcode districts do not line up exactly with council boundaries, so borderline
-# districts go to the review queue instead of the shortlist.
-# Edit these sets to change the area.
+# Strict initial service area: Liverpool, Knowsley, Sefton, St Helens and Halton.
+# Wirral and the wider North West are intentionally excluded for the first release.
+# Postcode districts are the main evidence. Any uncertain or mixed location goes
+# to REVIEW; never loosen these rules merely to increase the number of matches.
 TARGET_AREA_LABEL = "Target area"
 
 LOCAL_POSTCODE_DISTRICTS = {
@@ -227,22 +225,15 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA7", "WA8",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
-    # Warrington
-    "WA1", "WA2", "WA3", "WA4", "WA5", "WA13",
-    # Wigan
-    "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7",
-    # West Lancashire
-    "L39", "L40", "WN8",
-    # Cheshire West and Chester
-    "CH1", "CH2", "CH3", "CH64", "CH65", "CH66", "WA6", "CW6", "CW7", "CW8", "CW9",
-    # Wirral peninsula, including Wallasey and Birkenhead
-    *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
-# Districts that straddle the target area and a neighbour (CH4 includes parts of
-# Wales).
-REVIEW_POSTCODE_DISTRICTS = {"CH4"}
-# Retained as an empty compatibility set: Wirral is now included in the service area.
-EXCLUDED_POSTCODE_DISTRICTS = set()
+REVIEW_POSTCODE_DISTRICTS = set()
+EXCLUDED_POSTCODE_DISTRICTS = {
+    *(f"CH{n}" for n in range(1, 50)), "CH60", "CH61", "CH62", "CH63",
+    "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
+    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
+    "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
+    "L39", "L40",
+}
 
 LOCAL_PLACE_TERMS = [
     # Liverpool
@@ -264,28 +255,7 @@ LOCAL_PLACE_TERMS = [
     # Knowsley
     "knowsley", "huyton", "prescot", "halewood", "stockbridge village",
     "tarbock", "roby", "cronton",
-    # Warrington
-    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
-    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
-    # Wigan
-    "wigan", "hindley", "standish", "golborne", "tyldesley", "atherton",
-    "ashton-in-makerfield", "ince-in-makerfield", "shevington", "aspull",
-    "pemberton",
-    # West Lancashire
-    "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton",
-    "up holland",
-    # Cheshire West and Chester
-    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
-    "northwich", "winsford", "frodsham", "helsby", "tarporley",
-    # Wirral peninsula, including Wallasey
-    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
-    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
-    "tranmere", "seacombe", "egremont", "leasowe", "meols", "bidston",
-    "port sunlight", "eastham", "clatterbridge", "pensby", "greasby", "irby",
-    "thingwall", "noctorum", "claughton", "moreton", "upton",
 ]
-# Names that also exist in other parts of the UK. On their own they only send a
-# tender to the review list; a postcode or a clear place name must confirm them.
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
     "eccleston", "halton", "orrell", "thornton", "sutton", "kirkby", "whiston",
@@ -297,6 +267,16 @@ WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire",
 # Places that clearly are not in the target area, including everything in Scotland.
 OUT_OF_AREA_TERMS = [
     "liverpool street", "chester-le-street", "crewe", "cheshire east",
+    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
+    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
+    "wigan", "hindley", "standish", "golborne", "tyldesley", "atherton",
+    "ashton-in-makerfield", "ince-in-makerfield", "shevington", "aspull", "pemberton",
+    "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton", "up holland",
+    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
+    "northwich", "winsford", "frodsham", "helsby", "tarporley",
+    "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
+    "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
+    "tranmere",
     "macclesfield", "knutsford", "altrincham",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
@@ -321,13 +301,12 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 
 # Find a Tender and Contracts Finder often give the region as a NUTS code instead
 # of a postcode. These codes are confirmed against the published code lists:
-# UKD61 Warrington, UKD63 Cheshire West and Chester, UKD71 East Merseyside
-# (Knowsley, St Helens, Halton), UKD72 Liverpool, UKD73 Sefton, UKD74 Wirral.
-# Codes that cover the target area plus places outside it (Greater Manchester,
-# Lancashire, the broad Cheshire and North West codes) need a postcode or place
-# name to confirm. Every other UK code is outside.
+# UKD71 covers East Merseyside (Knowsley, St Helens, Halton), UKD72 Liverpool,
+# and UKD73 Sefton. Wirral, Warrington and Cheshire West codes are outside the
+# initial service area. Broad codes that overlap target and non-target places
+# require a postcode or place name; every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
+LOCAL_NUTS = {"UKD71", "UKD72", "UKD73"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
@@ -794,7 +773,12 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        results.extend(_page_through(FTS_URL, params, "Find a Tender", max_pages,
+        # In the hosted app (a time budget is supplied), sample every date
+        # window before paging deeply into the newest week. FTS rate-limits
+        # pagination, so a 25-page first window can consume the entire refresh.
+        # CLI/audit runs without a time budget retain the requested page limit.
+        window_page_limit = min(max_pages, 1) if max_seconds else max_pages
+        results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
                                      started, max_seconds, stats))
         if stats["error"]:
             break
@@ -885,6 +869,124 @@ def fetch_bearings(max_seconds=None, stats=None):
     return results
 
 
+def fetch_standstill_northwest(max_seconds=None, stats=None):
+    """Fetch free Standstill RSS discovery feeds, retaining source attribution.
+
+    The regional feed and CPV-specific feeds widen discovery beyond the two
+    official feeds. Aggregator geography is not delivery-site evidence, so all
+    records still pass through normal geography classification and REVIEW.
+    """
+    stats = _start_stats(stats)
+    feeds = [
+        ("North West region", "https://standstill.uk/region/north-west/feed.xml"),
+        ("Cleaning CPV 90910000", "https://standstill.uk/cpv/90910000/feed.xml"),
+        ("Construction CPV 45000000", "https://standstill.uk/cpv/45000000/feed.xml"),
+        ("Building installation maintenance CPV 50710000", "https://standstill.uk/cpv/50710000/feed.xml"),
+        ("Refurbishment CPV 45453100", "https://standstill.uk/cpv/45453100/feed.xml"),
+        ("Grounds maintenance CPV 77314000", "https://standstill.uk/cpv/77314000/feed.xml"),
+        ("Waste services CPV 90500000", "https://standstill.uk/cpv/90500000/feed.xml"),
+    ]
+    started = time.monotonic()
+    output = []
+    errors = []
+    feed_counts = {}
+
+    def local_name(tag):
+        return tag.rsplit("}", 1)[-1].lower()
+
+    def child_text(node, *names):
+        for child in list(node):
+            if local_name(child.tag) in names:
+                if child.text and child.text.strip():
+                    return child.text.strip()
+                href = child.attrib.get("href", "").strip()
+                if href:
+                    return href
+        return ""
+
+    for feed_label, url in feeds:
+        elapsed = time.monotonic() - started
+        if max_seconds and elapsed >= max_seconds:
+            stats["stopped"] = "time limit"
+            break
+        timeout = min(20, max(1, int(max_seconds - elapsed))) if max_seconds else 20
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "TenderScout/1.0 (public procurement research; source attribution retained)",
+                    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                payload = response.read()
+            root = ET.fromstring(payload)
+        except Exception as exc:
+            errors.append(f"{feed_label}: {str(exc)[:180]}")
+            print(f"[WARN] Standstill {feed_label} RSS fetch failed: {exc}", file=sys.stderr)
+            continue
+
+        items = [node for node in root.iter() if local_name(node.tag) in {"item", "entry"}]
+        before = len(output)
+        for item in items:
+            if max_seconds and time.monotonic() - started >= max_seconds:
+                stats["stopped"] = "time limit"
+                break
+            title = html.unescape(child_text(item, "title"))
+            feed_link = child_text(item, "link")
+            raw_description = child_text(item, "description", "summary", "content")
+            description = html.unescape(re.sub(r"<[^>]+>", " ", raw_description))
+            description = " ".join(description.split())
+            if not title or not feed_link.startswith("https://"):
+                continue
+            official_match = re.search(
+                r"https?://(?:www\.)?(?:find-tender\.service\.gov\.uk/Notice/[^\s\"'<>]+|contractsfinder\.service\.gov\.uk/Notice/[^\s\"'<>]+)",
+                html.unescape(raw_description),
+                re.IGNORECASE,
+            )
+            official_url = html.unescape(official_match.group(0)).rstrip(".,);") if official_match else feed_link
+            published = child_text(item, "pubdate", "published", "updated")
+            guid = child_text(item, "guid", "id")
+            buyer_match = re.search(r"(?:Buyer|Organisation|Organization)\s*:\s*([^|;]+)", description, re.IGNORECASE)
+            buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
+            output.append({
+                "source": "Standstill UK (RSS discovery; verify official notice)",
+                "opportunity_stage": "Open for bids",
+                "location_text": "North West England (aggregator region only; delivery site not confirmed)",
+                "published_date": published,
+                "title": title,
+                "buyer": buyer,
+                "description": description or "Open the source page for the summary and official notice.",
+                "trade_context": description,
+                "contact_name": "", "contact_email": "", "contact_phone": "",
+                "eligibility_text": "",
+                "estimated_value_gbp": "",
+                "contract_start_date": "", "contract_end_date": "",
+                "deadline": "",
+                "status": "Standstill UK discovery listing — verify official notice",
+                "notice_url": official_url,
+                "ocid": guid or official_url,
+                "_raw": {"feed_url": url, "feed_label": feed_label, "item_title": title, "feed_link": feed_link},
+            })
+        feed_counts[feed_label] = len(output) - before
+
+    raw_count = len(output)
+    output = dedupe(output)
+    stats.update({
+        "pages": sum(1 for value in feed_counts.values() if value >= 0),
+        "records": len(output),
+        "raw_records": raw_count,
+        "last_batch": len(output),
+        "windows": len(feed_counts),
+        "more": False,
+        "full_end": any(value >= 50 for value in feed_counts.values()),
+        "feed_counts": feed_counts,
+        "partial_errors": "; ".join(errors)[:320] if feed_counts else "",
+        "error": ("; ".join(errors)[:320] if errors and not feed_counts else ""),
+    })
+    return output
+
+
 def keyword_hits(text, terms):
     lower = text.lower()
     return [term for term in terms if term in lower]
@@ -951,6 +1053,7 @@ def classify_geography(record, region):
     pc_review = sorted(d for d in districts if d in REVIEW_POSTCODE_DISTRICTS)
     pc_other = sorted(d for d in (full | bare) if d not in LOCAL_POSTCODE_DISTRICTS
                       and d not in REVIEW_POSTCODE_DISTRICTS)
+    pc_other = sorted(set(pc_other) | (districts & EXCLUDED_POSTCODE_DISTRICTS))
 
     nuts = nuts_codes(location_text)
     nuts_local = sorted(c for c in nuts if c in LOCAL_NUTS)
@@ -990,8 +1093,30 @@ def classify_geography(record, region):
     # "worldwide". A long list of two-letter country codes is a strong signal.
     country_code_count = len(re.findall(r"(?<![A-Z])(?:AI|BM|FK|GI|KY|PN|MS|SH|TC|VG|AF|AL|DZ|AG|AR|AM|AU|AT|AZ|BH|BD|BB|BY|BE|BZ|BO|BA|BR|BN|BG|KH|CA|CL|CN|CO|CD|CR|HR|CU|CY|CZ|DK|DJ|DO|EC|EG|SV|ER|EE|SZ|ET|FJ|FI|FR|GE|DE|GH|GR|GD|GT|GN|GY|HT|HU|IS|IN|ID|IR|IQ|IE|IL|IT|JM|JP|JO|KZ|KE|KI|KW|KG|LA|LV|LB|LS|LR|LY|LT|MG|MW|MY|MX|MA|NP|NL|NZ|NG|NO|PK|PA|PE|PH|PL|PT|QA|RO|RU|SA|SN|RS|SG|SK|SI|ZA|KR|ES|LK|SE|CH|TW|TH|TR|UA|AE|GB|US|UY|UZ|VE|VN|YE|ZM|ZW)(?![A-Z])", raw_location_text.upper()))
     enumerated_global_scope = country_code_count >= 12
+    # A multi-country or out-of-area structured field can coexist with a real
+    # target-area delivery site listed in the notice description (for example,
+    # a multi-school cleaning contract spanning Trafford, Knowsley and Wigan).
+    # Description text must never promote a notice to LOCAL, but it must stop us
+    # incorrectly discarding a mixed-area opportunity as OUT_OF_AREA.
+    prose_local_sites = place_hits(prose, LOCAL_PLACE_TERMS)
+    if strong_out and prose_local_sites:
+        return "REVIEW", (
+            "Structured delivery location includes non-target areas, while the "
+            "title/description also names possible target-area sites: "
+            + ", ".join(dict.fromkeys(prose_local_sites[:5]))
+            + "; verify the official site list"
+        )
+
     if not strong_local and (global_scope or enumerated_global_scope):
         return "OUT_OF_AREA", "Explicit worldwide / multi-country delivery scope; no specific target-area site identified"
+
+    # A postcode district that is outside the configured service area is
+    # stronger evidence than an ambiguous place name such as Moreton or Leigh.
+    # Keep mixed explicit target/non-target sites in REVIEW.
+    if pc_other and not strong_local:
+        return "OUT_OF_AREA", (
+            "Delivery/site postcode outside preferred area: " + ", ".join(pc_other[:3])
+        )
 
     if strong_local and strong_out:
         return "REVIEW", (
@@ -1121,18 +1246,29 @@ def score_record(record, services, region, min_value, max_value):
     return record
 
 
+def shortlist_eligible_stage(record):
+    """Only open tenders and explicitly planned opportunities belong in the shortlist."""
+    stage = record.get("opportunity_stage") or "Open for bids"
+    return stage in {"Open for bids", "Planning / upcoming"}
+
+
 def dedupe(records):
-    """Deduplicate procurement processes, preferring the most actionable stage."""
+    """Deduplicate procurement processes and cross-source copies of the same notice."""
     priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
     by_key = {}
+    notice_key = {}
     for row in records:
-        key = row.get("ocid") or (
-            row.get("title", "").lower(), row.get("buyer", "").lower(),
-            row.get("published_date", ""),
-        )
-        if not key:
-            key = (row.get("title", "").lower(), row.get("buyer", "").lower(),
-                   row.get("published_date", ""))
+        notice_url = str(row.get("notice_url") or "").strip()
+        if notice_url and notice_url in notice_key:
+            key = notice_key[notice_url]
+        else:
+            ocid = row.get("ocid")
+            key = ("ocid", ocid) if ocid else (
+                "title", row.get("title", "").lower(), row.get("buyer", "").lower(),
+                row.get("published_date", ""),
+            )
+        if notice_url:
+            notice_key[notice_url] = key
         current = by_key.get(key)
         if current is None or priority.get(row.get("opportunity_stage"), 0) > priority.get(current.get("opportunity_stage"), 0):
             by_key[key] = row
@@ -1169,6 +1305,7 @@ def main():
         fetch_fts(args.days, args.pages)
         + fetch_contracts_finder(args.days, args.pages)
         + fetch_bearings()
+        + fetch_standstill_northwest()
     )
     all_rows = dedupe(all_rows)
     if not all_rows:
@@ -1179,6 +1316,7 @@ def main():
     filtered = []
     review_rows = []
     rejected_by_scoring = 0
+    excluded_by_stage = 0
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
@@ -1194,7 +1332,10 @@ def main():
             review_rows.append(scored)
             continue
         if geo == "LOCAL" and scored["score"] >= args.min_score:
-            filtered.append(scored)
+            if shortlist_eligible_stage(scored):
+                filtered.append(scored)
+            else:
+                excluded_by_stage += 1
     filtered.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
     review_rows.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
 
@@ -1250,6 +1391,7 @@ def main():
     print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
+    print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")

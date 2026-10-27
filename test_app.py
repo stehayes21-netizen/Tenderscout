@@ -1,4 +1,5 @@
 import importlib
+from io import BytesIO
 import os
 import tempfile
 import unittest
@@ -69,7 +70,8 @@ class AppTestCase(unittest.TestCase):
         with patch.object(self.app_module, "ThreadPoolExecutor", InlineExecutor), \
              patch.object(collector, "fetch_fts", side_effect=lambda *args, **kwargs: records), \
              patch.object(collector, "fetch_contracts_finder", side_effect=lambda *args, **kwargs: []), \
-             patch.object(collector, "fetch_bearings", side_effect=lambda *args, **kwargs: []):
+             patch.object(collector, "fetch_bearings", side_effect=lambda *args, **kwargs: []), \
+             patch.object(collector, "fetch_standstill_northwest", side_effect=lambda *args, **kwargs: []):
             return self.client.post("/refresh", follow_redirects=True)
 
 
@@ -78,6 +80,33 @@ class AppSmokeTest(AppTestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Tender Scout", r.data)
+
+    def test_main_board_hides_expired_and_non_bidding_notices(self):
+        for title in ("Expired cleaning tender", "Award notice for cleaning"):
+            self.client.post("/add", data={
+                "title": title,
+                "buyer": "Test Council",
+                "notice_url": "https://example.com/" + title.lower().replace(" ", "-"),
+            })
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET region_match = 'LOCAL', deadline = ?, opportunity_stage = ? WHERE title = ?",
+            ("2026-10-01T12:00:00Z", "Open for bids", "Expired cleaning tender"),
+        )
+        db.execute(
+            "UPDATE tenders SET region_match = 'LOCAL', deadline = ?, opportunity_stage = ? WHERE title = ?",
+            ("2099-12-31T00:00:00Z", "Other notice", "Award notice for cleaning"),
+        )
+        db.commit()
+        db.close()
+
+        page = self.client.get("/").data.decode()
+        self.assertNotIn("Expired cleaning tender", page)
+        self.assertNotIn("Award notice for cleaning", page)
+        # Filtering the active board must not delete the records from storage.
+        exported = self.client.get("/export.csv").data.decode()
+        self.assertIn("Expired cleaning tender", exported)
+        self.assertIn("Award notice for cleaning", exported)
 
     def test_review_queue_keeps_relevant_notice_when_deadline_is_missing(self):
         record = feed_record(
@@ -107,6 +136,57 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Daily office cleaning, washroom servicing and periodic deep cleaning.", page)
         self.assertIn("Contract period:", page)
         self.assertLess(page.index('<section class="board-summary">'), page.index('<details class="full-details">'))
+
+    def test_location_review_notice_with_target_area_clue_is_visible_on_main_board_as_unverified(self):
+        record = feed_record(
+            "review-local-clue",
+            "",
+            title="Cleaning services in Liverpool",
+            description="Commercial cleaning framework; exact delivery site is not supplied.",
+        )
+        self.refresh_with([record])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Cleaning services in Liverpool", page)
+        self.assertIn("POTENTIAL LOCAL — verify delivery site", page)
+        review = self.client.get("/?view=review").data.decode()
+        self.assertIn("Cleaning services in Liverpool", review)
+
+    def test_local_buyer_can_surface_a_review_candidate_without_confirming_delivery_site(self):
+        record = feed_record(
+            "review-local-buyer",
+            "North West England",
+            title="Commercial cleaning framework",
+            description="Cleaning services; exact delivery site must be checked.",
+        )
+        record["buyer"] = "Liverpool City Council"
+        self.refresh_with([record])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Commercial cleaning framework", page)
+        self.assertIn("POTENTIAL LOCAL — verify delivery site", page)
+        self.assertIn("North West England", page)
+
+    def test_private_lead_filters_by_trade_and_status(self):
+        self.client.post("/leads", data={
+            "title": "Roof repair", "trade_category": "Roofing and roof repairs",
+            "location_text": "Liverpool L15", "source_name": "Direct customer enquiry",
+            "details": "Repair a leaking roof",
+        })
+        self.client.post("/leads", data={
+            "title": "Gutter clearance", "trade_category": "Gutter cleaning",
+            "location_text": "Sefton L23", "source_name": "Direct customer enquiry",
+            "details": "Clear blocked gutters",
+        })
+        db = self.app_module.connect_db()
+        db.execute("UPDATE private_leads SET status = 'Passed to trade' WHERE title = 'Roof repair'")
+        db.commit()
+        db.close()
+        filtered = self.client.get("/leads?trade=Roofing%20and%20roof%20repairs&status=Passed%20to%20trade").data.decode()
+        self.assertIn("Roof repair", filtered)
+        self.assertNotIn("Gutter clearance", filtered)
+        self.assertIn("WHERE:", filtered)
+        self.assertIn("WHAT THE CUSTOMER NEEDS", filtered)
+        self.assertIn("Customer / business contact", filtered)
+        self.assertIn("Source status:", filtered)
 
     def test_manual_opportunity_persists_and_exports(self):
         r = self.client.post("/add", data={
@@ -180,6 +260,36 @@ class AppSmokeTest(AppTestCase):
         self.assertIn(b"Formby Bubble", r.data)
         self.assertNotIn(b"Wirral Council", r.data)
         self.assertIn(b"does not automatically scrape Facebook", r.data)
+
+    def test_buildconnect_rss_imports_only_target_area_public_projects(self):
+        feed = b"""<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel>
+          <item><title>Building refurbishment project in Liverpool</title>
+            <description>Painting, repairs and refurbishment work in Liverpool L15.</description>
+            <link>https://www.buildconnect-uk.co.uk/projects/liverpool-refurbishment</link>
+            <pubDate>Mon, 26 Oct 2026 10:00:00 GMT</pubDate></item>
+          <item><title>Roofing project in the Wirral</title>
+            <description>Roof repairs in Birkenhead, Wirral.</description>
+            <link>https://www.buildconnect-uk.co.uk/projects/wirral-roofing</link>
+          </item>
+          <item><title>Manchester extension</title>
+            <description>Home extension in Manchester.</description>
+            <link>https://www.buildconnect-uk.co.uk/projects/manchester-extension</link>
+          </item>
+        </channel></rss>"""
+        with patch.object(self.app_module, "urlopen", return_value=BytesIO(feed)):
+            response = self.client.post("/leads/import-buildconnect", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        page = response.data.decode()
+        self.assertIn("Building refurbishment project in Liverpool", page)
+        self.assertIn("Send by WhatsApp", page)
+        self.assertIn("Location is only a clue", page)
+        self.assertNotIn("Roofing project in the Wirral", page)
+        self.assertNotIn("Manchester extension", page)
+        db = self.app_module.connect_db()
+        count = db.execute("SELECT COUNT(*) AS n FROM external_projects").fetchone()["n"]
+        db.close()
+        self.assertEqual(count, 1)
 
     def test_private_lead_is_saved_separately_from_public_tenders(self):
         r = self.client.post("/leads", data={
@@ -356,7 +466,7 @@ class RefreshTests(AppTestCase):
         page = self.client.get("/").data
         self.assertNotIn(b"https://example.com/unk", page)
         self.assertIn(b"https://example.com/unk", self.client.get("/?view=review").data)
-        self.assertIn(b"Needs a location check (1)", page)
+        self.assertIn(b"Full location review (1)", page)
         self.assertIn(b"view=review", page)
 
     def test_scottish_tenders_are_never_saved(self):
@@ -493,7 +603,7 @@ class DashboardFeatureTests(AppTestCase):
         self.assertTrue(info("2000-01-01T00:00:00+00:00")[0].startswith("Closed"))
         self.assertIn("days", info("2099-12-31T00:00:00+00:00")[0])
 
-    def test_closed_tenders_sink_below_open_ones(self):
+    def test_closed_tenders_are_hidden_from_active_jobs_board(self):
         old = feed_record("old", "Liverpool L2 2DH")
         open_ = feed_record("open", "Liverpool L2 2DH")
         self.refresh_with([old, open_])
@@ -503,8 +613,11 @@ class DashboardFeatureTests(AppTestCase):
         db.commit()
         db.close()
         page = self.client.get("/").data.decode()
-        self.assertLess(page.index("example.com/open"), page.index("example.com/old"))
-        self.assertIn("Closed 1 Jan 2000", page)
+        self.assertIn("example.com/open", page)
+        self.assertNotIn("example.com/old", page)
+        # Expired records remain stored for audit/export; only the active board hides them.
+        exported = self.client.get("/export.csv").data.decode()
+        self.assertIn("example.com/old", exported)
 
     def test_service_filter_only_shows_that_service(self):
         self.refresh_with([
@@ -528,7 +641,8 @@ class RefreshSummaryTests(AppTestCase):
         # produce a failure response rather than a false "zero tenders" success.
         with patch.object(collector, "fetch_fts", return_value=[]), \
              patch.object(collector, "fetch_contracts_finder", return_value=[]), \
-             patch.object(collector, "fetch_bearings", return_value=[]):
+             patch.object(collector, "fetch_bearings", return_value=[]), \
+             patch.object(collector, "fetch_standstill_northwest", return_value=[]):
             r = self.client.post("/refresh")
         self.assertEqual(r.status_code, 502)
         self.assertIn(b"does not mean there are no tenders", r.data)
@@ -541,7 +655,8 @@ class RefreshSummaryTests(AppTestCase):
         ]
         with patch.object(collector, "fetch_fts", return_value=records), \
              patch.object(collector, "fetch_contracts_finder", return_value=[]), \
-             patch.object(collector, "fetch_bearings", return_value=[]):
+             patch.object(collector, "fetch_bearings", return_value=[]), \
+             patch.object(collector, "fetch_standstill_northwest", return_value=[]):
             r = self.client.post("/refresh")
         self.assertEqual(r.status_code, 302)
         self.assertTrue(r.headers["Location"].startswith("/?done=1"))

@@ -1,20 +1,20 @@
 # TenderScout
 
-A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral (including Wallasey), Warrington, Wigan, West Lancashire and Cheshire West and Chester**.
+A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Knowsley, Sefton, St Helens and Halton**. Wirral and the wider North West are excluded from the initial service area.
 
 ## How it works
-- `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds, scores them, and decides whether each one is in the target area.
+- `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds plus free discovery sources: Bearings and seven Standstill RSS feeds (North West region, cleaning, construction, building-installation maintenance, refurbishment, grounds maintenance and waste services). Discovery feeds are attributed and never treated as proof of a delivery location.
 - `app.py` is the Flask dashboard. **Refresh tenders** runs the collector and saves matches to the database.
-- Tenders confirmed in the target area appear on the main list. Anything whose location can't be confirmed goes to **Needs a location check** instead, so unclear tenders never mix into the main list.
+- Confirmed local tenders appear on the main list. Notices that mention a target-area place in their title/description or buyer name can also appear, clearly labelled **POTENTIAL LOCAL — verify delivery site**. This surfaces candidates without treating buyer HQ or text mentions as proof of delivery. The full location-review queue remains available separately.
 - Each tender card includes a plain-English explanation of what the buyer wants, where the work is, the published estimated value, contract dates/duration when available, who may qualify, the deadline and how to apply. Missing facts are labelled as not stated rather than guessed.
 - **Pipeline / upcoming** notices are early warnings: they are not necessarily open for bids yet. Open the official notice to confirm its status and next steps.
 
 ## Opportunity types and source directory
 
 - `/sources` lists official public procurement portals and community/business discovery channels, including Liverpool City Council's ProContract route and The Chest.
-- `/leads` is a separate manual capture area for private customer enquiries. Private leads are stored in their own table and are not mixed into public-sector tenders.
-- Community sites such as Facebook and Nextdoor are **not scraped automatically**. Add only genuine enquiries from sources where access and reuse are permitted; supplier portals may require registration and may not offer a public feed.
-- Council portals are listed as sources, not falsely described as connected live feeds. Automated ingestion should be added only where an official feed/API or written permission is available.
+- `/leads` is a separate private-lead board with trade/status filters, counts, exact location, requested work, contact, original source and one-tap WhatsApp/email sharing. Private leads are stored in their own table and are not mixed into public-sector tenders. This page currently stores captured enquiries; it is not yet connected to a live authorised private-job feed.
+- Community sites such as Facebook and Nextdoor are **not scraped automatically**. HomeGuild reported no open jobs on its public jobs board when checked on 27 October 2026; BuildPair loads requests dynamically and the reviewed pages do not document a public feed/API. Add only genuine enquiries from sources where access and reuse are permitted; supplier portals may require registration and may not offer a public feed.
+- Council portals are listed as sources, not falsely described as connected live feeds. The Standstill UK North West RSS feed is connected as a discovery source; it is broad regional data, may use buyer location when delivery location is missing, and must be verified on the official notice. Automated ingestion from other portals should be added only where an official feed/API or written permission is available.
 
 ## Trades
 Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.
@@ -49,7 +49,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 | `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Required for dashboard access. If either is missing, the dashboard returns HTTP 503 and stays locked; if credentials are wrong, it returns HTTP 401. `/health` stays open for the host. |
 | `DATABASE_URL` | PostgreSQL connection string. Without it the app uses SQLite, which is wiped on every redeploy on Render's free tier. |
 | `TENDERSCOUT_DB` | SQLite file path (local use only) |
-| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE` | Look-back window (default 60 days), pages per source (default 25) and the time limit per source (default 40 seconds) |
+| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE`, `TENDERSCOUT_FTS_SECONDS` | Look-back window (default 60 days), pagination cap, general per-source time limit (default 60 seconds), and Find a Tender time limit (default 150 seconds) |
 
 ## Hosting on Render
 - Start command: `gunicorn app:app` (`gunicorn.conf.py` raises the timeout to 120 seconds so a refresh isn't cut off).
@@ -61,7 +61,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 `.github/workflows/main.yml` runs the tests on every push. On a schedule (every 6 hours) and on manual runs it also saves a CSV of matches and can refresh the live site. To enable the refresh, set the repository variable `TENDERSCOUT_APP_URL` and the secrets `TENDERSCOUT_APP_USER` and `TENDERSCOUT_APP_PASSWORD`.
 
 ## Pages
-- `/` confirmed tenders · `/?view=review` tenders needing a location check · add `service=cleaning`, `fm`, `maintenance` or `construction` to filter
+- `/` confirmed tenders plus clearly labelled target-area candidates · `/?view=review` all tenders needing a location check · `/?view=pipeline` planning/upcoming notices · add `trade=...` or `service=...` to filter
 - Each tender shows how long is left to bid (closed tenders sink to the bottom) and has a **Stage** dropdown: Reviewing, Interested, Bidding, Submitted, Won, Lost, Not for us
 - `POST /refresh` fetch new tenders and return to the dashboard with a summary; `POST /api/refresh` does the same but replies in plain text for scheduled jobs
 - `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)
@@ -74,6 +74,6 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 ```bash
 python -m unittest discover -v
 ```
-The tests are offline and use mocked feeds. A refresh that gets nothing back from both feeds is reported as a failure, never as "no tenders".
+The tests are offline and use mocked feeds. A refresh that gets no records back from its sources is reported as a failure, never as "no tenders".
 
 Always open the official notice and check location, deadline, value, eligibility and documents before acting.
