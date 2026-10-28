@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -33,6 +34,8 @@ TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 _EMPTY_BOARD_REFRESH_ATTEMPTED = False
+# A single Gunicorn worker runs the refresh thread; the DB row keeps status visible across requests.
+_refresh_lock = threading.Lock()
 
 
 def env_int(name, default):
@@ -140,6 +143,15 @@ def ensure_schema(db):
         location_status TEXT NOT NULL DEFAULT 'Potential local — verify',
         imported_at TEXT NOT NULL
     )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS refresh_state (
+        id INTEGER PRIMARY KEY,
+        status TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        summary TEXT,
+        error TEXT
+    )""")
+    db.execute("INSERT INTO refresh_state (id, status) VALUES (1, 'idle') ON CONFLICT(id) DO NOTHING")
     if USE_POSTGRES:
         db.execute("ALTER TABLE private_leads ADD COLUMN IF NOT EXISTS urgency TEXT DEFAULT 'Normal'")
     else:
@@ -889,13 +901,82 @@ def refresh():
     return redirect("/?" + query)
 
 
+def _set_refresh_state(status, summary="", error=""):
+    db = connect_db()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        db.execute(
+            "UPDATE refresh_state SET status = ?, finished_at = ?, summary = ?, error = ? WHERE id = 1",
+            (status, now if status in ("completed", "failed") else None, summary, error),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _run_background_refresh():
+    try:
+        stats, error = refresh_or_error()
+        if error:
+            _set_refresh_state("failed", error=error.get_data(as_text=True)[:1000])
+        else:
+            _set_refresh_state("completed", summary=summary_text(stats))
+    except Exception:
+        app.logger.exception("Background tender refresh failed")
+        try:
+            _set_refresh_state("failed", error="Refresh failed. Check the service logs.")
+        except Exception:
+            app.logger.exception("Could not save failed refresh status")
+    finally:
+        _refresh_lock.release()
+
+
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    """Plain-text version for scheduled jobs."""
-    stats, error = refresh_or_error()
-    if error:
-        return error
-    return Response("Refresh complete. " + summary_text(stats), mimetype="text/plain")
+    """Start a tracked refresh without holding the HTTP request open."""
+    if not _refresh_lock.acquire(blocking=False):
+        db = connect_db()
+        try:
+            state = db.execute("SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1").fetchone()
+        finally:
+            db.close()
+        return {"status": "running", "message": "A refresh is already running."}, 202
+
+    started = datetime.now(timezone.utc).isoformat()
+    db = connect_db()
+    try:
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
+            (started,),
+        )
+        db.commit()
+    except Exception:
+        _refresh_lock.release()
+        raise
+    finally:
+        db.close()
+
+    try:
+        threading.Thread(target=_run_background_refresh, daemon=True, name="tenderscout-refresh").start()
+    except Exception:
+        _refresh_lock.release()
+        _set_refresh_state("failed", error="Could not start the refresh thread.")
+        app.logger.exception("Could not start background tender refresh")
+        return {"status": "failed", "error": "Could not start the refresh thread."}, 500
+    return {"status": "running", "started_at": started}, 202
+
+
+@app.route("/api/refresh/status", methods=["GET"])
+def api_refresh_status():
+    """Read the last refresh state; authentication is enforced by require_login."""
+    db = connect_db()
+    try:
+        row = db.execute(
+            "SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1"
+        ).fetchone()
+        return dict(row)
+    finally:
+        db.close()
 
 
 @app.route("/add", methods=["POST"])
