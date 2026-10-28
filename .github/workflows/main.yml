@@ -46,7 +46,7 @@ jobs:
       # audit finish inside the free GitHub Actions time budget.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
-        run: python tenderscout.py --days 60 --pages 1 --region "Target area" --min-score 3
+        run: python tenderscout.py --days 60 --pages 2 --region "Target area" --min-score 3
 
       - name: Save CSV results
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
