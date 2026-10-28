@@ -67,8 +67,24 @@ jobs:
           APP_USER: ${{ secrets.TENDERSCOUT_APP_USER }}
           APP_PASSWORD: ${{ secrets.TENDERSCOUT_APP_PASSWORD }}
         run: |
-          # The hosted refresh can take just over three minutes while processing all feeds.
-          # Leave headroom for database writes and response delivery; do not retry POSTs,
-          # which could start overlapping refreshes.
-          curl --fail --show-error --silent --max-time 300 \
+          # Starting a refresh returns quickly; the collector runs in a tracked background job.
+          # Never retry the POST automatically: the status endpoint is used for polling instead.
+          curl --fail --show-error --silent --max-time 20 \
             -X POST -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh"
+          for attempt in $(seq 1 36); do
+            state_json=$(curl --fail --show-error --silent --max-time 20 \
+              -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh/status")
+            status=$(printf '%s' "$state_json" | python -c "import json,sys; print(json.load(sys.stdin).get('status', 'unknown'))")
+            if [ "$status" = "completed" ]; then
+              printf '%s\n' "$state_json"
+              exit 0
+            fi
+            if [ "$status" = "failed" ]; then
+              printf '%s\n' "$state_json"
+              echo "TenderScout refresh failed."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "TenderScout refresh was still running after six minutes."
+          exit 1
