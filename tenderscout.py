@@ -782,13 +782,13 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        # In the hosted app, sample every weekly window, but fetch a second
-        # page for the two newest windows. A single 100-record page can miss
-        # recent notices during busy publication periods. Older windows retain
-        # one page so the refresh stays within the free-host time budget.
-        # CLI/audit runs without a time budget retain the requested page limit.
+        # Recent windows have the highest value and can contain more than 200
+        # releases. In the hosted app, allow up to four pages for the two newest
+        # windows, then sample one page from older windows. The source time budget
+        # remains the hard stop, so extra pages cannot run indefinitely.
+        # CLI/audit runs without a time budget use the requested page limit.
         if max_seconds:
-            window_page_limit = min(max_pages, 2) if stats["windows"] <= 2 else min(max_pages, 1)
+            window_page_limit = min(max_pages, 4) if stats["windows"] <= 2 else min(max_pages, 1)
         else:
             window_page_limit = max_pages
         results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
