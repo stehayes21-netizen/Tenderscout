@@ -931,6 +931,10 @@ def _run_background_refresh():
         _refresh_lock.release()
 
 
+def _start_refresh_thread():
+    threading.Thread(target=_run_background_refresh, daemon=True, name="tenderscout-refresh").start()
+
+
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
     """Start a tracked refresh without holding the HTTP request open."""
@@ -959,7 +963,7 @@ def api_refresh():
             db.close()
 
     try:
-        threading.Thread(target=_run_background_refresh, daemon=True, name="tenderscout-refresh").start()
+        _start_refresh_thread()
     except Exception:
         _refresh_lock.release()
         _set_refresh_state("failed", error="Could not start the refresh thread.")
