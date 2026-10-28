@@ -236,7 +236,7 @@ LOCAL_POSTCODE_DISTRICTS = {
 # CH4 is a boundary district and needs a site-level check.
 REVIEW_POSTCODE_DISTRICTS = {"CH4"}
 EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(1, 4)), *(f"CH{n}" for n in range(5, 41)),
+    *(f"CH{n}" for n in range(5, 41)),
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
 }
