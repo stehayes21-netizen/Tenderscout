@@ -1377,12 +1377,25 @@ def main():
         + fetch_standstill_northwest()
     )
     if direct_notice_rows:
-        found_in_window = any(
-            args.notice_id in str(row.get("notice_url", "")) for row in all_rows
+        target_id = str(args.notice_id)
+        target_title = str(direct_notice_rows[0].get("title", "")).strip().casefold()
+        fts_found = any(
+            row.get("source") == "Find a Tender"
+            and (target_id in str(row.get("notice_url", "")) or
+                 (target_title and str(row.get("title", "")).strip().casefold() == target_title))
+            for row in all_rows
         )
+        alternate_sources = sorted({
+            str(row.get("source", "unknown"))
+            for row in all_rows
+            if row.get("source") != "Find a Tender"
+            and (target_id in str(row.get("notice_url", "")) or
+                 (target_title and str(row.get("title", "")).strip().casefold() == target_title))
+        })
         print(
-            f"Direct notice lookup {args.notice_id}: confirmed; "
-            f"rolling feed window: {'FOUND' if found_in_window else 'NOT FOUND'}"
+            f"Direct notice lookup {target_id}: confirmed; "
+            f"Find a Tender rolling feed: {'FOUND' if fts_found else 'NOT FOUND'}; "
+            f"alternate discovery sources: {', '.join(alternate_sources) if alternate_sources else 'NONE'}"
         )
         all_rows.extend(direct_notice_rows)
     all_rows = dedupe(all_rows)
