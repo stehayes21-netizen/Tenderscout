@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import timedelta
 from unittest.mock import patch
 
 FUTURE = "2099-12-31T00:00:00+00:00"
@@ -551,12 +552,20 @@ class RefreshTests(AppTestCase):
         self.assertEqual(r.status_code, 502)
         self.assertIn(b"does not mean", r.data)
 
-    def test_api_refresh_alias_works(self):
+    def test_api_refresh_alias_starts_background_job(self):
         collector = self.app_module.collector
-        with patch.object(collector, "fetch_fts", return_value=[feed_record("liv", "WA8 7AA")]), \
-             patch.object(collector, "fetch_contracts_finder", return_value=[]):
+
+        with patch.object(self.app_module, "_start_refresh_thread", side_effect=self.app_module._run_background_refresh), \
+             patch.object(collector, "fetch_fts", return_value=[feed_record("liv", "WA8 7AA")]), \
+             patch.object(collector, "fetch_contracts_finder", return_value=[]), \
+             patch.object(collector, "fetch_bearings", return_value=[]), \
+             patch.object(collector, "fetch_standstill_northwest", return_value=[]):
             r = self.client.post("/api/refresh")
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 202)
+        self.assertEqual(r.json["status"], "running")
+        status = self.client.get("/api/refresh/status")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json["status"], "completed")
 
     def test_csv_export_neutralises_spreadsheet_formulas(self):
         self.client.post("/add", data={"title": "=HYPERLINK(\"http://x\")"})
@@ -697,14 +706,37 @@ class RefreshSummaryTests(AppTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertNotIn(b"Refresh complete.", r.data)
 
-    def test_api_refresh_returns_plain_text_for_scheduled_jobs(self):
+    def test_api_refresh_status_recovers_stale_running_state(self):
+        db = self.app_module.connect_db()
+        started = (self.app_module.datetime.now(self.app_module.timezone.utc)
+                   - timedelta(minutes=20)).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
+            (started,),
+        )
+        db.commit()
+        db.close()
+
+        response = self.client.get("/api/refresh/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "failed")
+        self.assertIn("interrupted", response.json["error"])
+        self.assertIsNotNone(response.json["finished_at"])
+
+    def test_api_refresh_status_reports_success_and_summary(self):
         collector = self.app_module.collector
-        with patch.object(collector, "fetch_fts", return_value=[feed_record("liv", "WA8 7AA")]), \
-             patch.object(collector, "fetch_contracts_finder", return_value=[]):
-            r = self.client.post("/api/refresh")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.mimetype, "text/plain")
-        self.assertIn(b"1 confirmed in your area", r.data)
+
+        with patch.object(self.app_module, "_start_refresh_thread", side_effect=self.app_module._run_background_refresh), \
+             patch.object(collector, "fetch_fts", return_value=[feed_record("liv", "WA8 7AA")]), \
+             patch.object(collector, "fetch_contracts_finder", return_value=[]), \
+             patch.object(collector, "fetch_bearings", return_value=[]), \
+             patch.object(collector, "fetch_standstill_northwest", return_value=[]):
+            started = self.client.post("/api/refresh")
+            status = self.client.get("/api/refresh/status")
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json["status"], "completed")
+        self.assertIn("1 confirmed in your area", status.json["summary"])
 
 
 class FeedDiagnosticsTests(AppTestCase):

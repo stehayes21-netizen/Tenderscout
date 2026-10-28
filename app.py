@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -33,6 +34,11 @@ TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 _EMPTY_BOARD_REFRESH_ATTEMPTED = False
+# A single Gunicorn worker runs the refresh thread; the DB row keeps status visible across requests.
+_refresh_lock = threading.Lock()
+# A refresh that has been marked running for 15 minutes is considered interrupted.
+# This is deliberately longer than the normal feed timeout to avoid false alarms.
+REFRESH_STALE_AFTER_SECONDS = 15 * 60
 
 
 def env_int(name, default):
@@ -140,6 +146,15 @@ def ensure_schema(db):
         location_status TEXT NOT NULL DEFAULT 'Potential local — verify',
         imported_at TEXT NOT NULL
     )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS refresh_state (
+        id INTEGER PRIMARY KEY,
+        status TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        summary TEXT,
+        error TEXT
+    )""")
+    db.execute("INSERT INTO refresh_state (id, status) VALUES (1, 'idle') ON CONFLICT(id) DO NOTHING")
     if USE_POSTGRES:
         db.execute("ALTER TABLE private_leads ADD COLUMN IF NOT EXISTS urgency TEXT DEFAULT 'Normal'")
     else:
@@ -889,13 +904,120 @@ def refresh():
     return redirect("/?" + query)
 
 
+def _set_refresh_state(status, summary="", error=""):
+    db = connect_db()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        db.execute(
+            "UPDATE refresh_state SET status = ?, finished_at = ?, summary = ?, error = ? WHERE id = 1",
+            (status, now if status in ("completed", "failed") else None, summary, error),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _run_background_refresh():
+    try:
+        stats, error = refresh_or_error()
+        if error:
+            _set_refresh_state("failed", error=error.get_data(as_text=True)[:1000])
+        else:
+            _set_refresh_state("completed", summary=summary_text(stats))
+    except Exception:
+        app.logger.exception("Background tender refresh failed")
+        try:
+            _set_refresh_state("failed", error="Refresh failed. Check the service logs.")
+        except Exception:
+            app.logger.exception("Could not save failed refresh status")
+    finally:
+        _refresh_lock.release()
+
+
+def _start_refresh_thread():
+    threading.Thread(target=_run_background_refresh, daemon=True, name="tenderscout-refresh").start()
+
+
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    """Plain-text version for scheduled jobs."""
-    stats, error = refresh_or_error()
-    if error:
-        return error
-    return Response("Refresh complete. " + summary_text(stats), mimetype="text/plain")
+    """Start a tracked refresh without holding the HTTP request open."""
+    if not _refresh_lock.acquire(blocking=False):
+        db = connect_db()
+        try:
+            state = db.execute("SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1").fetchone()
+        finally:
+            db.close()
+        return {"status": "running", "message": "A refresh is already running."}, 202
+
+    started = datetime.now(timezone.utc).isoformat()
+    db = None
+    try:
+        db = connect_db()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
+            (started,),
+        )
+        db.commit()
+    except Exception:
+        _refresh_lock.release()
+        raise
+    finally:
+        if db is not None:
+            db.close()
+
+    try:
+        _start_refresh_thread()
+    except Exception:
+        _refresh_lock.release()
+        _set_refresh_state("failed", error="Could not start the refresh thread.")
+        app.logger.exception("Could not start background tender refresh")
+        return {"status": "failed", "error": "Could not start the refresh thread."}, 500
+    return {"status": "running", "started_at": started}, 202
+
+
+def _refresh_state_is_stale(row, now=None):
+    """Return True when a persisted running refresh is old enough to be presumed interrupted."""
+    if not row or row["status"] != "running":
+        return False
+    started_at = row["started_at"]
+    if not started_at:
+        return True
+    try:
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    now = now or datetime.now(timezone.utc)
+    return (now - started).total_seconds() >= REFRESH_STALE_AFTER_SECONDS
+
+
+@app.route("/api/refresh/status", methods=["GET"])
+def api_refresh_status():
+    """Read refresh state and recover stale 'running' status after a process restart."""
+    db = connect_db()
+    try:
+        row = db.execute(
+            "SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1"
+        ).fetchone()
+        state = dict(row) if row else {}
+    finally:
+        db.close()
+
+    if _refresh_state_is_stale(state):
+        _set_refresh_state(
+            "failed",
+            error="Refresh appears to have been interrupted or exceeded the 15-minute safety limit. Start a new refresh.",
+        )
+        db = connect_db()
+        try:
+            row = db.execute(
+                "SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1"
+            ).fetchone()
+            state = dict(row) if row else {}
+        finally:
+            db.close()
+    return state
 
 
 @app.route("/add", methods=["POST"])
