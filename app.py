@@ -685,7 +685,7 @@ def dashboard():
       var state = await response.json();
       if (state.status === 'completed') {
         show(state.summary || 'Refresh complete. Reloading opportunities…');
-        window.location.replace('/?done=1');
+        window.location.replace('/?done=0');
         return true;
       }
       if (state.status === 'failed') {
