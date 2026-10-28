@@ -1369,12 +1369,21 @@ def main():
     # Bearings records have no trusted delivery location and therefore remain in REVIEW
     # until a structured site location is verified; they are never auto-labelled LOCAL.
     direct_notice_rows = fetch_fts_notice(args.notice_id) if args.notice_id else []
-    all_rows = direct_notice_rows + (fetch_fts(args.days, args.pages) if args.fts_only else (
+    all_rows = fetch_fts(args.days, args.pages) if args.fts_only else (
         fetch_fts(args.days, args.pages)
         + fetch_contracts_finder(args.days, args.pages)
         + fetch_bearings()
         + fetch_standstill_northwest()
-    ))
+    )
+    if direct_notice_rows:
+        found_in_window = any(
+            args.notice_id in str(row.get("notice_url", "")) for row in all_rows
+        )
+        print(
+            f"Direct notice lookup {args.notice_id}: confirmed; "
+            f"rolling feed window: {'FOUND' if found_in_window else 'NOT FOUND'}"
+        )
+        all_rows.extend(direct_notice_rows)
     all_rows = dedupe(all_rows)
     if not all_rows:
         print("No feed records retrieved. Check your internet connection/API availability and try again.")
