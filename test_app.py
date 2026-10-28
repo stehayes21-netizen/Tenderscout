@@ -797,9 +797,9 @@ class FeedPagingTests(unittest.TestCase):
             return self.PAGE1 if len(urls) == 1 else self.PAGE2
 
         stats = {}
-        with patch.object(tenderscout, "get_json", side_effect=fake_get), \
-             patch.object(tenderscout.time, "sleep"):
-            records = tenderscout.fetch_fts(7, 5, None, stats)
+        with patch.object(tenderscout, "_fts_windows", return_value=[(tenderscout.datetime(2026, 10, 10, tzinfo=tenderscout.timezone.utc), tenderscout.datetime(2026, 10, 11, tzinfo=tenderscout.timezone.utc))]), \\
+             patch.object(tenderscout, "get_json", side_effect=fake_get), \\
+             patch.object(tenderscout.time, "sleep"):            records = tenderscout.fetch_fts(7, 5, None, stats)
         self.assertEqual(len(records), 2)
         self.assertEqual(urls[1],
                          "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=ABC%3D%3D&limit=100")
