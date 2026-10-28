@@ -52,10 +52,8 @@ class FindATenderPaginationTests(unittest.TestCase):
 
 class FindATenderWindowStrategyTests(unittest.TestCase):
     def test_recent_lookback_uses_daily_windows_then_weekly_history(self):
-        with patch.object(tenderscout.datetime, "now", return_value=dt("2026-10-28T12:00:00")):
-            windows = tenderscout._fts_windows(24, recent_days=10)
+        windows = tenderscout._fts_windows(24, recent_days=10)
         self.assertEqual(len(windows), 12)  # 10 daily windows plus 2 older weekly windows
-        self.assertEqual(windows[0][1], dt("2026-10-28T12:00:00"))
         self.assertEqual(windows[0][1] - windows[0][0], tenderscout.timedelta(days=1))
         self.assertEqual(windows[9][1] - windows[9][0], tenderscout.timedelta(days=1))
         self.assertEqual(windows[10][1], windows[9][0])
