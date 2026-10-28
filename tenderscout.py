@@ -783,6 +783,11 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
         # conservative 10/minute cadence rather than hammering each page/window.
         time.sleep(10.5 if source == "Find a Tender" else 0.2)
     stats["more"] = True  # used every allowed page and the feed still had more
+    print(
+        f"[WARN] {source} pagination incomplete: reached the {max_pages}-page limit "
+        "while the feed still supplied a next-page cursor; results for this window are partial",
+        file=sys.stderr,
+    )
     return results
 
 
