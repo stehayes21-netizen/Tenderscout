@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import timedelta
 from unittest.mock import patch
 
 FUTURE = "2099-12-31T00:00:00+00:00"
@@ -708,7 +709,7 @@ class RefreshSummaryTests(AppTestCase):
     def test_api_refresh_status_recovers_stale_running_state(self):
         db = self.app_module.connect_db()
         started = (self.app_module.datetime.now(self.app_module.timezone.utc)
-                   - self.app_module.timedelta(minutes=20)).isoformat()
+                   - timedelta(minutes=20)).isoformat()
         db.execute(
             "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
             (started,),
