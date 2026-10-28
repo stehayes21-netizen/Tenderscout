@@ -633,7 +633,7 @@ def dashboard():
       if (!response.ok) throw new Error('Status check returned HTTP ' + response.status);
       var state = await response.json();
       if (state.status === 'completed') {
-        show(state.summary || 'Refresh complete. Reloading opportunities…');
+        show(state.summary || 'Search finished. Reloading opportunities…');
         window.location.replace('/?done=0');
         return true;
       }
