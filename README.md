@@ -1,6 +1,6 @@
 # TenderScout
 
-A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Knowsley, Sefton, St Helens, Halton and Wirral**. The wider North West outside these areas is excluded from the initial service area.
+A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral, Warrington and Cheshire West and Chester**. Other North West areas remain outside the service area.
 
 ## How it works
 - `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds plus free discovery sources: Bearings and seven Standstill RSS feeds (North West region, cleaning, construction, building-installation maintenance, refurbishment, grounds maintenance and waste services). Discovery feeds are attributed and never treated as proof of a delivery location.
@@ -28,7 +28,7 @@ The filter confirms geography from structured delivery/site evidence: postcodes,
 | Needs a location check | No location, a vague one (e.g. "Merseyside", "Greater Manchester"), a borderline postcode (CH4), a name shared with other places (Halton, Leigh, Kirkby, Garston), or locations both inside and outside the area |
 | Dropped | Every location is outside the area, e.g. Scotland, Manchester, Preston, Cheshire East |
 
-**Region codes.** The government feeds often give the area as a code. `UKD61` (Warrington), `UKD63` (Cheshire West and Chester), `UKD71` (East Merseyside: Knowsley, St Helens, Halton), `UKD72` (Liverpool), `UKD73` (Sefton) and `UKD74` (Wirral, including Wallasey) count as confirmed. Codes that cover the area plus places outside it (Greater Manchester, Lancashire, the broad North West code) need a postcode or place name to confirm. Any other UK code is outside the area.
+**Region codes.** The government feeds often give the area as a code. `UKD61` (Warrington), `UKD63` (Cheshire West and Chester), `UKD71` (East Merseyside: Knowsley, St Helens, Halton), `UKD72` (Liverpool), `UKD73` (Sefton) and `UKD74` (Wirral, including Wallasey) count as confirmed. Codes that cover the area plus places outside it (Greater Manchester, Lancashire, the broad North West code) need a postcode or place name to confirm. Any other UK code is outside the area. Warrington and Cheshire West and Chester postcodes are included in the approved scope; CH4 remains a borderline district and stays in review pending site-level confirmation.
 
 **Longer names win.** "Preston Brook" is Halton, not Preston; "Chester-le-Street" is Durham, not Chester; "Cheshire East" is outside the area.
 

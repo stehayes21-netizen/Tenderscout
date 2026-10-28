@@ -209,8 +209,8 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Agreed initial service area: Liverpool, Knowsley, Sefton, St Helens, Halton and Wirral.
-# The wider North West outside these areas is excluded for the first release.
+# Approved service area: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral,
+# Warrington and Cheshire West and Chester. Other North West areas remain excluded.
 # Postcode districts are the main evidence. Any uncertain or mixed location goes
 # to REVIEW; never loosen these rules merely to increase the number of matches.
 TARGET_AREA_LABEL = "Target area"
@@ -224,6 +224,10 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA9", "WA10", "WA11", "WA12",
     # Halton
     "WA7", "WA8",
+    # Warrington (postcode districts can cross borough edges; verify exact site where needed)
+    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
+    # Cheshire West and Chester (CH4 remains borderline and requires review)
+    "CH1", "CH2", "CH3", "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
     # Wirral
@@ -232,8 +236,7 @@ LOCAL_POSTCODE_DISTRICTS = {
 # CH4 is a boundary district and needs a site-level check.
 REVIEW_POSTCODE_DISTRICTS = {"CH4"}
 EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(1, 4)), *(f"CH{n}" for n in range(5, 41)), "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
-    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
+    *(f"CH{n}" for n in range(5, 41)),
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
 }
@@ -262,6 +265,12 @@ LOCAL_PLACE_TERMS = [
     "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
     "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
     "tranmere", "moreton", "upton",
+    # Warrington
+    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
+    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
+    # Cheshire West and Chester
+    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
+    "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -274,13 +283,9 @@ WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire",
 # Places that clearly are not in the target area, including everything in Scotland.
 OUT_OF_AREA_TERMS = [
     "liverpool street", "chester-le-street", "crewe", "cheshire east",
-    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
-    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
     "wigan", "hindley", "standish", "golborne", "tyldesley", "atherton",
     "ashton-in-makerfield", "ince-in-makerfield", "shevington", "aspull", "pemberton",
     "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton", "up holland",
-    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
-    "northwich", "winsford", "frodsham", "helsby", "tarporley",
     "macclesfield", "knutsford", "altrincham",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
@@ -310,7 +315,7 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 # places
 # require a postcode or place name; every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD71", "UKD72", "UKD73", "UKD74"}
+LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
