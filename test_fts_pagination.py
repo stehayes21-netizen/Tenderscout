@@ -1,15 +1,20 @@
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import tenderscout
 
 
+def dt(value):
+    return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+
+
 class FindATenderPaginationTests(unittest.TestCase):
     def test_hosted_collector_pages_deeper_into_two_newest_windows(self):
         windows = [
-            ("2026-10-21T00:00:00", "2026-10-28T00:00:00"),
-            ("2026-10-14T00:00:00", "2026-10-21T00:00:00"),
-            ("2026-10-07T00:00:00", "2026-10-14T00:00:00"),
+            (dt("2026-10-21T00:00:00"), dt("2026-10-28T00:00:00")),
+            (dt("2026-10-14T00:00:00"), dt("2026-10-21T00:00:00")),
+            (dt("2026-10-07T00:00:00"), dt("2026-10-14T00:00:00")),
         ]
         calls = []
 
@@ -27,8 +32,8 @@ class FindATenderPaginationTests(unittest.TestCase):
 
     def test_cli_audit_page_limit_is_respected_without_hosted_time_budget(self):
         windows = [
-            ("2026-10-21T00:00:00", "2026-10-28T00:00:00"),
-            ("2026-10-14T00:00:00", "2026-10-21T00:00:00"),
+            (dt("2026-10-21T00:00:00"), dt("2026-10-28T00:00:00")),
+            (dt("2026-10-14T00:00:00"), dt("2026-10-21T00:00:00")),
         ]
         calls = []
 
