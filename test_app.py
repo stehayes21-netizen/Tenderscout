@@ -776,7 +776,7 @@ class FeedDiagnosticsTests(AppTestCase):
         payload = {"releases": [{"ocid": "a", "id": "1", "date": "2026-10-10T00:00:00Z",
                                  "tender": {"title": "Cleaning"}}]}
         stats = {}
-        with patch.object(tenderscout, "get_json", return_value=payload):
+        with patch.object(tenderscout, "_fts_windows", return_value=[(tenderscout.datetime(2026, 10, 10, tzinfo=tenderscout.timezone.utc), tenderscout.datetime(2026, 10, 11, tzinfo=tenderscout.timezone.utc))]), \\\n             patch.object(tenderscout, "get_json", return_value=payload):
             records = tenderscout.fetch_fts(7, 5, None, stats)
         self.assertEqual(len(records), 1)
         self.assertEqual((stats["pages"], stats["records"], stats["more"]), (1, 1, False))
