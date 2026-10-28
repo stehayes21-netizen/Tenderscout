@@ -31,7 +31,7 @@ class FindATenderPaginationTests(unittest.TestCase):
         self.assertEqual(calls, [2, 2, 2])
 
     def test_page_limit_marks_window_as_truncated(self):
-        stats = {}
+        stats = tenderscout._start_stats({})
         first = {"releases": [{"id": "a"}], "links": {"next": "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=next"}}
         with patch.object(tenderscout, "get_json", return_value=first), \
              patch.object(tenderscout, "extract_records", return_value=[{"title": "Example"}]), \
