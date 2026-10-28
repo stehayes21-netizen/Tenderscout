@@ -41,12 +41,13 @@ class FindATenderPaginationTests(unittest.TestCase):
             calls.append(max_pages)
             return []
 
-        with patch.object(tenderscout, "_windows", return_value=windows), \
+        with patch.object(tenderscout, "_windows", return_value=windows) as window_mock, \
              patch.object(tenderscout, "_page_through", side_effect=fake_page_through), \
              patch.object(tenderscout.time, "sleep"):
             tenderscout.fetch_fts(days=14, max_pages=10)
 
         self.assertEqual(calls, [10, 10])
+        window_mock.assert_called_once_with(14, size=0.25)
 
 
 if __name__ == "__main__":
