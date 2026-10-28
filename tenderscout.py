@@ -762,6 +762,18 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
     return results
 
 
+def fetch_fts_notice(notice_id):
+    """Fetch one known Find a Tender notice directly by its official notice ID."""
+    notice_id = str(notice_id or "").strip()
+    if not re.fullmatch(r"[0-9]{6}-[0-9]{4}", notice_id):
+        raise ValueError("Find a Tender notice ID must look like 098300-2026")
+    payload = get_json(f"{FTS_URL}/{urllib.parse.quote(notice_id, safe='')}")
+    records = extract_records(payload, "Find a Tender")
+    if not records:
+        raise RuntimeError(f"Find a Tender returned no extractable record for {notice_id}")
+    return records
+
+
 def fetch_fts(days, max_pages, max_seconds=None, stats=None):
     stats = _start_stats(stats)
     results = []
@@ -1348,6 +1360,7 @@ def main():
     parser.add_argument("--min-score", type=int, default=3, help="Minimum relevance score (default 3)")
     parser.add_argument("--pages", type=int, default=10, help="Maximum pages to fetch from each source")
     parser.add_argument("--fts-only", action="store_true", help="Audit Find a Tender only; skip other feeds")
+    parser.add_argument("--notice-id", help="Fetch one known Find a Tender notice directly by ID for audit/backfill")
     parser.add_argument("--out", default="tenderscout_results.csv", help="Filtered output CSV path")
     args = parser.parse_args()
 
@@ -1355,12 +1368,13 @@ def main():
     # Keep the scheduled/CLI collector aligned with the hosted dashboard's three free feeds.
     # Bearings records have no trusted delivery location and therefore remain in REVIEW
     # until a structured site location is verified; they are never auto-labelled LOCAL.
-    all_rows = fetch_fts(args.days, args.pages) if args.fts_only else (
+    direct_notice_rows = fetch_fts_notice(args.notice_id) if args.notice_id else []
+    all_rows = direct_notice_rows + (fetch_fts(args.days, args.pages) if args.fts_only else (
         fetch_fts(args.days, args.pages)
         + fetch_contracts_finder(args.days, args.pages)
         + fetch_bearings()
         + fetch_standstill_northwest()
-    )
+    ))
     all_rows = dedupe(all_rows)
     if not all_rows:
         print("No feed records retrieved. Check your internet connection/API availability and try again.")
