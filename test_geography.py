@@ -372,11 +372,16 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
 
-    def test_wider_north_west_places_are_outside_initial_scope(self):
-        for text in ("Warrington WA1 1AA", "Lymm WA13 0AA", "Wigan WN1 1AA",
-                     "Leigh WN7 1AA", "Ormskirk L39 2AA", "Skelmersdale WN8 6AA",
+    def test_newly_approved_warrington_and_west_cheshire_places_are_local(self):
+        for text in ("Warrington WA1 1AA", "Lymm WA13 0AA",
                      "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
                      "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "LOCAL")
+
+    def test_wider_north_west_places_outside_approved_scope_stay_out(self):
+        for text in ("Wigan WN1 1AA", "Leigh WN7 1AA",
+                     "Ormskirk L39 2AA", "Skelmersdale WN8 6AA"):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
@@ -469,7 +474,7 @@ class PostcodeCoverageTests(unittest.TestCase):
                 self.assertEqual(self.classify(postcode), "LOCAL")
 
     def test_postcodes_outside_the_service_area_are_not_local(self):
-        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA", "WA1 1AA", "WN1 1AA", "L39 1AA", "CH1 1AA", "CW9 1AA"):
+        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA", "WN1 1AA", "L39 1AA", "CH5 1AA"):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "OUT_OF_AREA")
 
@@ -559,7 +564,7 @@ class OverlapAndTradeTests(unittest.TestCase):
 
     def test_longer_names_win_over_the_shorter_name_inside_them(self):
         self.assertEqual(self.classify("Preston Brook, Runcorn"), "LOCAL")
-        self.assertEqual(self.classify("Cheshire West and Chester"), "OUT_OF_AREA")
+        self.assertEqual(self.classify("Cheshire West and Chester"), "LOCAL")
         self.assertEqual(self.classify("Cheshire East"), "OUT_OF_AREA")
         self.assertEqual(self.classify("Preston"), "OUT_OF_AREA")
 
