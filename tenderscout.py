@@ -697,7 +697,8 @@ def _page_url(base_url, params, cursor):
 def _start_stats(stats):
     stats = stats if stats is not None else {}
     stats.update({"pages": 0, "records": 0, "last_batch": 0, "more": False,
-                  "error": "", "stopped": "", "windows": 0, "full_end": False})
+                  "error": "", "stopped": "", "windows": 0, "full_end": False,
+                  "truncated_windows": 0})
     return stats
 
 
@@ -783,6 +784,7 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
         # conservative 10/minute cadence rather than hammering each page/window.
         time.sleep(10.5 if source == "Find a Tender" else 0.2)
     stats["more"] = True  # used every allowed page and the feed still had more
+    stats["truncated_windows"] = stats.get("truncated_windows", 0) + 1
     print(
         f"[WARN] {source} pagination incomplete: reached the {max_pages}-page limit "
         "while the feed still supplied a next-page cursor; results for this window are partial",
@@ -838,6 +840,13 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
                                      started, max_seconds, stats))
         if stats["error"]:
             break
+    coverage = "INCOMPLETE" if stats["more"] or stats["stopped"] or stats["error"] else "page-walk complete"
+    print(
+        "Find a Tender coverage: "
+        f"{coverage}; windows={stats['windows']}; pages={stats['pages']}; "
+        f"records={stats['records']}; truncated_windows={stats['truncated_windows']}; "
+        f"stopped={stats['stopped'] or 'no'}; error={stats['error'] or 'none'}"
+    )
     return results
 
 
