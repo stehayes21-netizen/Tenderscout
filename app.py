@@ -36,6 +36,9 @@ LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 _EMPTY_BOARD_REFRESH_ATTEMPTED = False
 # A single Gunicorn worker runs the refresh thread; the DB row keeps status visible across requests.
 _refresh_lock = threading.Lock()
+# A refresh that has been marked running for 15 minutes is considered interrupted.
+# This is deliberately longer than the normal feed timeout to avoid false alarms.
+REFRESH_STALE_AFTER_SECONDS = 15 * 60
 
 
 def env_int(name, default):
@@ -972,17 +975,49 @@ def api_refresh():
     return {"status": "running", "started_at": started}, 202
 
 
+def _refresh_state_is_stale(row, now=None):
+    """Return True when a persisted running refresh is old enough to be presumed interrupted."""
+    if not row or row["status"] != "running":
+        return False
+    started_at = row["started_at"]
+    if not started_at:
+        return True
+    try:
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    now = now or datetime.now(timezone.utc)
+    return (now - started).total_seconds() >= REFRESH_STALE_AFTER_SECONDS
+
+
 @app.route("/api/refresh/status", methods=["GET"])
 def api_refresh_status():
-    """Read the last refresh state; authentication is enforced by require_login."""
+    """Read refresh state and recover stale 'running' status after a process restart."""
     db = connect_db()
     try:
         row = db.execute(
             "SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1"
         ).fetchone()
-        return dict(row)
+        state = dict(row) if row else {}
     finally:
         db.close()
+
+    if _refresh_state_is_stale(state):
+        _set_refresh_state(
+            "failed",
+            error="Refresh appears to have been interrupted or exceeded the 15-minute safety limit. Start a new refresh.",
+        )
+        db = connect_db()
+        try:
+            row = db.execute(
+                "SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1"
+            ).fetchone()
+            state = dict(row) if row else {}
+        finally:
+            db.close()
+    return state
 
 
 @app.route("/add", methods=["POST"])
