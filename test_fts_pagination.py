@@ -28,7 +28,7 @@ class FindATenderPaginationTests(unittest.TestCase):
             result = tenderscout.fetch_fts(days=21, max_pages=10, max_seconds=150)
 
         self.assertEqual(result, [])
-        self.assertEqual(calls, [4, 4, 1])
+        self.assertEqual(calls, [2, 2, 2])
 
     def test_cli_audit_page_limit_is_respected_without_hosted_time_budget(self):
         windows = [
@@ -41,7 +41,7 @@ class FindATenderPaginationTests(unittest.TestCase):
             calls.append(max_pages)
             return []
 
-        with patch.object(tenderscout, "_windows", return_value=windows) as window_mock, \
+        with patch.object(tenderscout, "_fts_windows", return_value=windows) as window_mock, \
              patch.object(tenderscout, "_page_through", side_effect=fake_page_through), \
              patch.object(tenderscout.time, "sleep"):
             tenderscout.fetch_fts(days=14, max_pages=10)
