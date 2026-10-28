@@ -766,7 +766,9 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
     stats = _start_stats(stats)
     results = []
     started = time.monotonic()
-    for start, end in _windows(days):
+    # Find a Tender can silently omit releases when update windows span multiple days.
+    # Use six-hour windows (0.25 day), separate from Contracts Finder's date filters.
+    for start, end in _windows(days, size=0.25):
         if stats["stopped"]:
             break
         if stats["windows"]:
