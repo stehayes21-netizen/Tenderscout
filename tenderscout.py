@@ -1347,6 +1347,7 @@ def main():
     parser.add_argument("--max-value", type=float, default=None, help="Maximum estimated GBP value")
     parser.add_argument("--min-score", type=int, default=3, help="Minimum relevance score (default 3)")
     parser.add_argument("--pages", type=int, default=10, help="Maximum pages to fetch from each source")
+    parser.add_argument("--fts-only", action="store_true", help="Audit Find a Tender only; skip other feeds")
     parser.add_argument("--out", default="tenderscout_results.csv", help="Filtered output CSV path")
     args = parser.parse_args()
 
@@ -1354,7 +1355,7 @@ def main():
     # Keep the scheduled/CLI collector aligned with the hosted dashboard's three free feeds.
     # Bearings records have no trusted delivery location and therefore remain in REVIEW
     # until a structured site location is verified; they are never auto-labelled LOCAL.
-    all_rows = (
+    all_rows = fetch_fts(args.days, args.pages) if args.fts_only else (
         fetch_fts(args.days, args.pages)
         + fetch_contracts_finder(args.days, args.pages)
         + fetch_bearings()
