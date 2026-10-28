@@ -50,5 +50,19 @@ class FindATenderPaginationTests(unittest.TestCase):
         window_mock.assert_called_once_with(14, size=0.25)
 
 
+class FindATenderDirectLookupTests(unittest.TestCase):
+    def test_known_notice_uses_official_id_endpoint(self):
+        record = {"title": "Window Cleaning Services - Wirral", "notice_url": "https://www.find-tender.service.gov.uk/Notice/098300-2026"}
+        with patch.object(tenderscout, "get_json", return_value={"releases": [{"id": "098300-2026", "tender": {"title": "Window Cleaning Services - Wirral"}}]}) as get_json:
+            with patch.object(tenderscout, "extract_records", return_value=[record]):
+                result = tenderscout.fetch_fts_notice("098300-2026")
+        self.assertEqual(result, [record])
+        get_json.assert_called_once_with("https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages/098300-2026")
+
+    def test_rejects_invalid_notice_id(self):
+        with self.assertRaises(ValueError):
+            tenderscout.fetch_fts_notice("../098300-2026")
+
+
 if __name__ == "__main__":
     unittest.main()
