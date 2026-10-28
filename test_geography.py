@@ -20,37 +20,47 @@ class DeadlineParsingTests(unittest.TestCase):
 
 
 class FindATenderWindowCoverageTests(unittest.TestCase):
-    def test_searches_each_date_window_before_paging_deeply_into_latest_week(self):
+    def test_hosted_refresh_fetches_extra_pages_for_the_two_newest_windows(self):
+        # Windows are searched newest first. Recent high-volume weeks get a
+        # second page; older windows still get sampled to preserve time budget.
         windows = [
-            (tenderscout.datetime(2026, 10, 1, tzinfo=tenderscout.timezone.utc),
-             tenderscout.datetime(2026, 10, 8, tzinfo=tenderscout.timezone.utc)),
-            (tenderscout.datetime(2026, 10, 8, tzinfo=tenderscout.timezone.utc),
-             tenderscout.datetime(2026, 10, 15, tzinfo=tenderscout.timezone.utc)),
             (tenderscout.datetime(2026, 10, 15, tzinfo=tenderscout.timezone.utc),
              tenderscout.datetime(2026, 10, 22, tzinfo=tenderscout.timezone.utc)),
+            (tenderscout.datetime(2026, 10, 8, tzinfo=tenderscout.timezone.utc),
+             tenderscout.datetime(2026, 10, 15, tzinfo=tenderscout.timezone.utc)),
+            (tenderscout.datetime(2026, 10, 1, tzinfo=tenderscout.timezone.utc),
+             tenderscout.datetime(2026, 10, 8, tzinfo=tenderscout.timezone.utc)),
         ]
-        def page(index):
-            return {
+
+        def page(index, next_cursor=None):
+            result = {
                 "releases": [{
                     "id": f"release-{index}",
-                    "date": "2026-10-01T12:00:00Z",
+                    "date": "2026-10-20T12:00:00Z",
                     "tender": {"title": f"Cleaning contract {index}"},
                     "buyer": {"name": "Example Council"},
                 }],
-                "nextCursor": f"cursor-{index}",
             }
+            if next_cursor:
+                result["nextCursor"] = next_cursor
+            return result
+
         with patch("tenderscout._windows", return_value=windows), \
-             patch("tenderscout.get_json", side_effect=[page(1), page(2), page(3)]) as fetch, \
+             patch("tenderscout.get_json", side_effect=[
+                 page(1, "cursor-1"), page(2), page(3, "cursor-3"), page(4), page(5)
+             ]) as fetch, \
              patch("tenderscout.time.sleep"):
             stats = {}
             rows = tenderscout.fetch_fts(days=21, max_pages=25, max_seconds=150, stats=stats)
 
-        self.assertEqual(fetch.call_count, 3)
-        self.assertEqual(len(rows), 3)
+        self.assertEqual(fetch.call_count, 5)
+        self.assertEqual(len(rows), 5)
         self.assertEqual(stats["windows"], 3)
-        self.assertEqual(stats["pages"], 3)
-        self.assertTrue(stats["more"])
-
+        self.assertEqual(stats["pages"], 5)
+        self.assertEqual([row["title"] for row in rows], [
+            "Cleaning contract 1", "Cleaning contract 2", "Cleaning contract 3",
+            "Cleaning contract 4", "Cleaning contract 5",
+        ])
 
 class StandstillDiscoveryFeedTests(unittest.TestCase):
     def test_public_rss_is_parsed_as_discovery_not_confirmed_delivery_location(self):
