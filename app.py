@@ -943,8 +943,9 @@ def api_refresh():
         return {"status": "running", "message": "A refresh is already running."}, 202
 
     started = datetime.now(timezone.utc).isoformat()
-    db = connect_db()
+    db = None
     try:
+        db = connect_db()
         db.execute(
             "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
             (started,),
@@ -954,7 +955,8 @@ def api_refresh():
         _refresh_lock.release()
         raise
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
     try:
         threading.Thread(target=_run_background_refresh, daemon=True, name="tenderscout-refresh").start()
