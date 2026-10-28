@@ -705,6 +705,23 @@ class RefreshSummaryTests(AppTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertNotIn(b"Refresh complete.", r.data)
 
+    def test_api_refresh_status_recovers_stale_running_state(self):
+        db = self.app_module.connect_db()
+        started = (self.app_module.datetime.now(self.app_module.timezone.utc)
+                   - self.app_module.timedelta(minutes=20)).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
+            (started,),
+        )
+        db.commit()
+        db.close()
+
+        response = self.client.get("/api/refresh/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "failed")
+        self.assertIn("interrupted", response.json["error"])
+        self.assertIsNotNone(response.json["finished_at"])
+
     def test_api_refresh_status_reports_success_and_summary(self):
         collector = self.app_module.collector
 
