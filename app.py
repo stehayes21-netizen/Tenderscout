@@ -659,15 +659,85 @@ def dashboard():
     <header><h1>Tender Scout</h1>
     <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
     <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral, Warrington and Cheshire West and Chester. Other North West areas are excluded.</p>
-    <form method="post" action="/refresh"
-      onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Searching... this can take a minute';">
-    <button type="submit" class="btn">&#8635; Refresh tenders</button></form></header>
+    <form id="refresh-form" method="post" action="/refresh">
+    <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
+    <p id="refresh-status" class="note" role="status" aria-live="polite" hidden></p></header>
     {banner}
     <p>{heading} · {switch} · <a href="/export.csv">Export CSV</a></p>
     {filter_form}
     <p class="note">Always verify eligibility, location, deadline and contract details
     on the official notice.</p>
-    {cards}</body></html>"""
+    {cards}<script>
+(function () {
+  var form = document.getElementById('refresh-form');
+  var status = document.getElementById('refresh-status');
+  if (!form || !status) return;
+  var button = form.querySelector('button');
+  var running = false;
+  function show(message) {
+    status.hidden = false;
+    status.textContent = message;
+  }
+  async function poll() {
+    try {
+      var response = await fetch('/api/refresh/status', {credentials: 'same-origin', cache: 'no-store'});
+      if (!response.ok) throw new Error('Status check returned HTTP ' + response.status);
+      var state = await response.json();
+      if (state.status === 'completed') {
+        show(state.summary || 'Refresh complete. Reloading opportunities…');
+        window.location.replace('/?done=0');
+        return true;
+      }
+      if (state.status === 'failed') {
+        show(state.error || 'Refresh failed. Try again; if it repeats, check the service logs.');
+        button.disabled = false;
+        button.textContent = '↻ Refresh tenders';
+        running = false;
+        return true;
+      }
+      show('Searching for tenders… this can take several minutes. Keep this page open.');
+      return false;
+    } catch (error) {
+      show('Could not check refresh status (' + error.message + '). Refresh may still be running; reload this page to check.');
+      button.disabled = false;
+      button.textContent = '↻ Refresh tenders';
+      running = false;
+      return true;
+    }
+  }
+  form.addEventListener('submit', async function (event) {
+    event.preventDefault();
+    if (running) return;
+    running = true;
+    button.disabled = true;
+    button.textContent = 'Searching…';
+    show('Starting refresh…');
+    try {
+      var response = await fetch('/api/refresh', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'Accept': 'application/json'}
+      });
+      if (!response.ok && response.status !== 202) {
+        throw new Error('Refresh request returned HTTP ' + response.status);
+      }
+      var result = await response.json();
+      if (result.status === 'failed') throw new Error(result.error || 'Could not start refresh');
+      show('Searching for tenders… this can take several minutes.');
+      var finished = false;
+      while (!finished && running) {
+        await new Promise(function (resolve) { window.setTimeout(resolve, 3000); });
+        finished = await poll();
+      }
+    } catch (error) {
+      show('Could not start refresh (' + error.message + '). Reload the page and try again.');
+      button.disabled = false;
+      button.textContent = '↻ Refresh tenders';
+      running = false;
+    }
+  });
+})();
+</script></body></html>"""
     return Response(page, mimetype="text/html")
 
 
