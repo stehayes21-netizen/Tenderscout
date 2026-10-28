@@ -460,9 +460,10 @@ class PostcodeCoverageTests(unittest.TestCase):
         return tenderscout.classify_geography({"location_text": location_text}, "Target area")[0]
 
     def test_relevant_postcode_areas_are_confirmed_local(self):
-        # Only the agreed five initial service areas are confirmed local.
+        # Representative postcode districts from all approved areas.
         for postcode in (
             "L1 1AA", "L20 1AA", "PR8 1AA", "WA9 1AA", "WA7 1AA", "L32 1AA",
+            "WA1 1AA", "WA5 1AA", "CH1 1AA", "CH2 1AA", "CW8 1AA",
         ):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "LOCAL")
@@ -498,11 +499,10 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "LOCAL")
 
-    def test_only_agreed_merseyside_region_codes_are_local(self):
-        for code in ("UKD61", "UKD63"):
+    def test_all_approved_region_codes_are_local(self):
+        for code in ("UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"):
             with self.subTest(code=code):
-                self.assertEqual(self.classify(code), "OUT_OF_AREA")
-        self.assertEqual(self.classify("UKD71"), "LOCAL")
+                self.assertEqual(self.classify(code), "LOCAL")
 
     def test_codes_covering_the_area_and_more_need_checking(self):
         for code in ("UKD", "UKD3", "UKD36", "UKD47", "UKD6", "UKD7"):
@@ -529,7 +529,9 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
 
     def test_local_neighbourhoods_are_recognised(self):
         for place in ("Wavertree", "Aigburth", "Ainsdale",
-                      "Rainford", "Newton-le-Willows", "Daresbury", "Widnes"):
+                      "Rainford", "Newton-le-Willows", "Daresbury", "Widnes",
+                      "Warrington", "Chester", "Ellesmere Port", "Northwich",
+                      "Winsford", "Frodsham", "Neston", "Helsby"):
             with self.subTest(place=place):
                 self.assertEqual(self.classify(place), "LOCAL")
 
@@ -541,6 +543,11 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
     def test_ambiguous_name_is_confirmed_by_a_postcode(self):
         self.assertEqual(self.classify("Woolton, Liverpool L25 7TA"), "LOCAL")
         self.assertEqual(self.classify("Halton Borough Council, Runcorn WA7 2PQ"), "LOCAL")
+
+    def test_wider_approved_area_does_not_make_other_areas_local(self):
+        for place in ("Manchester", "Cheshire East", "Crewe", "Wigan"):
+            with self.subTest(place=place):
+                self.assertEqual(self.classify(place), "OUT_OF_AREA")
 
     def test_liverpool_street_london_is_not_liverpool(self):
         self.assertEqual(self.classify("Liverpool Street, London"), "OUT_OF_AREA")
