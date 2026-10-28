@@ -30,6 +30,20 @@ class FindATenderPaginationTests(unittest.TestCase):
         self.assertEqual(result, [])
         self.assertEqual(calls, [2, 2, 2])
 
+    def test_page_limit_marks_window_as_truncated(self):
+        stats = {}
+        first = {"releases": [{"id": "a"}], "links": {"next": "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=next"}}
+        with patch.object(tenderscout, "get_json", return_value=first), \
+             patch.object(tenderscout, "extract_records", return_value=[{"title": "Example"}]), \
+             patch.object(tenderscout.time, "sleep"):
+            rows = tenderscout._page_through(
+                tenderscout.FTS_URL, {"limit": "100"}, "Find a Tender", 1,
+                tenderscout.time.monotonic(), None, stats
+            )
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(stats["more"])
+        self.assertEqual(stats["truncated_windows"], 1)
+
     def test_cli_audit_page_limit_is_respected_without_hosted_time_budget(self):
         windows = [
             (dt("2026-10-21T00:00:00"), dt("2026-10-28T00:00:00")),
