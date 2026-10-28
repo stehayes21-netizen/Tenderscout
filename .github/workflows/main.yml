@@ -41,11 +41,11 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      # Audit a focused 14-day period. Allow ten pages per weekly window so the
-      # audit can follow the official cursor beyond the first 200 releases.
+      # Focus on the recent notice window and follow pagination beyond the first 100 releases.
+      # Two weeks keeps the audit bounded; ten pages per window is a maximum, not a requirement.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
-        run: python tenderscout.py --days 60 --pages 1 --region "Target area" --min-score 3
+        run: python tenderscout.py --days 14 --pages 10 --region "Target area" --min-score 3
 
       - name: Save CSV results
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
