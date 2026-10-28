@@ -67,5 +67,8 @@ jobs:
           APP_USER: ${{ secrets.TENDERSCOUT_APP_USER }}
           APP_PASSWORD: ${{ secrets.TENDERSCOUT_APP_PASSWORD }}
         run: |
-          curl --fail --show-error --silent --max-time 180 \
+          # The hosted refresh can take just over three minutes while processing all feeds.
+          # Leave headroom for database writes and response delivery; do not retry POSTs,
+          # which could start overlapping refreshes.
+          curl --fail --show-error --silent --max-time 300 \
             -X POST -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh"
