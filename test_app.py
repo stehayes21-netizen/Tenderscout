@@ -82,6 +82,14 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Tender Scout", r.data)
 
+    def test_dashboard_refresh_uses_tracked_background_status(self):
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'id="refresh-form"', r.data)
+        self.assertIn(b'id="refresh-status"', r.data)
+        self.assertIn(b"/api/refresh", r.data)
+        self.assertIn(b"/api/refresh/status", r.data)
+
     def test_main_board_hides_expired_and_non_bidding_notices(self):
         for title in ("Expired cleaning tender", "Award notice for cleaning"):
             self.client.post("/add", data={
