@@ -47,7 +47,7 @@ class FindATenderPaginationTests(unittest.TestCase):
             tenderscout.fetch_fts(days=14, max_pages=10)
 
         self.assertEqual(calls, [10, 10])
-        window_mock.assert_called_once_with(14, size=0.25)
+        window_mock.assert_called_once_with(14)
 
 
 class FindATenderDirectLookupTests(unittest.TestCase):
