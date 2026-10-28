@@ -21,7 +21,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Collection can take ~8 minutes and hosted refresh may poll for another 6.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
