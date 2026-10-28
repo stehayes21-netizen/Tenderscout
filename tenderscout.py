@@ -729,6 +729,30 @@ def _windows(days, size=7):
     return windows
 
 
+def _fts_windows(days, recent_days=10):
+    """Search recent Find a Tender updates in daily slices, then older history weekly.
+
+    Daily slices avoid a busy week's first 400 releases hiding a recent notice.
+    Older history stays weekly so the hosted collector can cover more time within
+    Find a Tender's rate limit.
+    """
+    now = datetime.now(timezone.utc)
+    earliest = now - timedelta(days=days)
+    recent_cutoff = max(earliest, now - timedelta(days=min(days, recent_days)))
+    windows = []
+    end = now
+    while end > recent_cutoff:
+        start = max(recent_cutoff, end - timedelta(days=1))
+        windows.append((start, end))
+        end = start
+    end = recent_cutoff
+    while end > earliest:
+        start = max(earliest, end - timedelta(days=7))
+        windows.append((start, end))
+        end = start
+    return windows
+
+
 def _page_through(base_url, params, source, max_pages, started, max_seconds, stats):
     """Read one search page by page, following the feed's own next-page links."""
     results = []
@@ -778,10 +802,10 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
     stats = _start_stats(stats)
     results = []
     started = time.monotonic()
-    # Keep source windows at seven days, below the API maximum window length.
-    # Follow the official cursor for every window; the targeted audit can also
-    # fetch a known notice directly to distinguish lookup from discovery gaps.
-    for start, end in _windows(days):
+    # Daily windows for recent updates reduce the chance that a busy week hides
+    # new notices behind the first few cursor pages; older history remains weekly.
+    # Follow the official cursor for every window.
+    for start, end in _fts_windows(days):
         if stats["stopped"]:
             break
         if stats["windows"]:
@@ -797,13 +821,12 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        # Recent windows have the highest value and can contain more than 200
-        # releases. In the hosted app, allow up to four pages for the two newest
-        # windows, then sample one page from older windows. The source time budget
-        # remains the hard stop, so extra pages cannot run indefinitely.
-        # CLI/audit runs without a time budget use the requested page limit.
+        # Prioritise coverage across recent daily windows. In the hosted app,
+        # allow two pages for the newest three days and one page for subsequent
+        # windows; the source time budget remains the hard stop. CLI audits use
+        # their requested page limit for every window.
         if max_seconds:
-            window_page_limit = min(max_pages, 4) if stats["windows"] <= 2 else min(max_pages, 1)
+            window_page_limit = min(max_pages, 2) if stats["windows"] <= 3 else min(max_pages, 1)
         else:
             window_page_limit = max_pages
         results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
