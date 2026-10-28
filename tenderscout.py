@@ -318,9 +318,9 @@ NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
 LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     # Broad or overlapping codes remain uncertain. Specific Greater Manchester
-    # subdivisions UKD31-UKD37 are outside the agreed target area and must not
-    # linger in REVIEW as if they might be local.
-    "UKD", "UKD3", "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
+    # subdivisions with no target-area overlap are excluded from REVIEW.
+    # UKD36 remains uncertain because it can include borderline places such as Leigh.
+    "UKD", "UKD3", "UKD36", "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
 }
 
 
