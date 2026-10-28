@@ -554,13 +554,7 @@ class RefreshTests(AppTestCase):
     def test_api_refresh_alias_starts_background_job(self):
         collector = self.app_module.collector
 
-        class ImmediateThread:
-            def __init__(self, target, **kwargs):
-                self.target = target
-            def start(self):
-                self.target()
-
-        with patch.object(self.app_module.threading, "Thread", ImmediateThread), \
+        with patch.object(self.app_module, "_start_refresh_thread", side_effect=self.app_module._run_background_refresh), \
              patch.object(collector, "fetch_fts", return_value=[feed_record("liv", "WA8 7AA")]), \
              patch.object(collector, "fetch_contracts_finder", return_value=[]), \
              patch.object(collector, "fetch_bearings", return_value=[]), \
@@ -714,13 +708,7 @@ class RefreshSummaryTests(AppTestCase):
     def test_api_refresh_status_reports_success_and_summary(self):
         collector = self.app_module.collector
 
-        class ImmediateThread:
-            def __init__(self, target, **kwargs):
-                self.target = target
-            def start(self):
-                self.target()
-
-        with patch.object(self.app_module.threading, "Thread", ImmediateThread), \
+        with patch.object(self.app_module, "_start_refresh_thread", side_effect=self.app_module._run_background_refresh), \
              patch.object(collector, "fetch_fts", return_value=[feed_record("liv", "WA8 7AA")]), \
              patch.object(collector, "fetch_contracts_finder", return_value=[]), \
              patch.object(collector, "fetch_bearings", return_value=[]), \
