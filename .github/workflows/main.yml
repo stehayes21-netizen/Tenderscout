@@ -45,7 +45,7 @@ jobs:
       # Two weeks keeps the audit bounded; ten pages per window is a maximum, not a requirement.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
-        run: python tenderscout.py --days 10 --pages 10 --region "Target area" --min-score 3
+        run: python tenderscout.py --days 10 --pages 10 --fts-only --region "Target area" --min-score 3
 
       - name: Save CSV results
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
