@@ -239,6 +239,17 @@ class GeographyClassifierTests(unittest.TestCase):
                 self.assertEqual(geo_class, "OUT_OF_AREA")
                 self.assertIn("outside", reason.lower())
 
+    def test_specific_greater_manchester_nuts_codes_are_out_of_area(self):
+        # These are specific Greater Manchester subdivisions, not broad
+        # North West codes. They must be excluded rather than left in REVIEW.
+        for nuts_code in ("UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37"):
+            with self.subTest(nuts_code=nuts_code):
+                geo_class, reason = tenderscout.classify_geography(
+                    {"location_text": nuts_code}, "Target area"
+                )
+                self.assertEqual(geo_class, "OUT_OF_AREA")
+                self.assertIn("outside", reason.lower())
+
     def test_missing_location_is_review(self):
         record = {"location_text": "", "title": "Cleaning contract", "description": "Routine cleaning at facilities"}
         geo_class, reason = tenderscout.classify_geography(record, "North West")
