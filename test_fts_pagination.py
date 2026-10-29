@@ -10,7 +10,7 @@ def dt(value):
 
 
 class FindATenderPaginationTests(unittest.TestCase):
-    def test_hosted_collector_pages_deeper_into_two_newest_windows(self):
+    def test_hosted_collector_allows_three_pages_per_window(self):
         windows = [
             (dt("2026-10-21T00:00:00"), dt("2026-10-28T00:00:00")),
             (dt("2026-10-14T00:00:00"), dt("2026-10-21T00:00:00")),
@@ -28,7 +28,7 @@ class FindATenderPaginationTests(unittest.TestCase):
             result = tenderscout.fetch_fts(days=21, max_pages=10, max_seconds=150)
 
         self.assertEqual(result, [])
-        self.assertEqual(calls, [2, 2, 2])
+        self.assertEqual(calls, [3, 3, 3])
 
     def test_page_limit_marks_window_as_truncated(self):
         stats = tenderscout._start_stats({})

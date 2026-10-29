@@ -860,13 +860,13 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        # Allow up to two pages for every hosted window. Limiting older windows
-        # to one page systematically truncated busy weeks, while the duplicate
-        # window/page sleeps consumed the time budget before later windows ran.
+        # Allow up to three pages per hosted window. This preserves the newer
+        # daily slices and gives busy weekly windows more room before the source
+        # time budget becomes the hard stop.
         # The source time budget remains the hard stop; CLI audits use their
         # requested page limit for every window.
         if max_seconds:
-            window_page_limit = min(max_pages, 2)
+            window_page_limit = min(max_pages, 3)
         else:
             window_page_limit = max_pages
         results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
