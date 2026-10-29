@@ -637,6 +637,13 @@ def dashboard():
         window.location.replace('/?done=0');
         return true;
       }
+      if (state.status === 'incomplete') {
+        show((state.summary || 'Some results were saved.') + ' Collection INCOMPLETE: ' + (state.error || 'one or more sources may be missing results') + '. You can use the saved results, but do not treat this as a complete search.');
+        button.disabled = false;
+        button.textContent = '↻ Refresh tenders';
+        running = false;
+        return true;
+      }
       if (state.status === 'failed') {
         show(state.error || 'Refresh failed. Try again; if it repeats, check the service logs.');
         button.disabled = false;
@@ -975,13 +982,37 @@ def refresh():
     return redirect("/?" + query)
 
 
+def refresh_feed_issues():
+    """Return feeds with explicit signs that collection may be incomplete."""
+    issues = []
+    for name, feed in LAST_FEEDS.items():
+        if not isinstance(feed, dict):
+            continue
+        reasons = []
+        if feed.get("error"):
+            reasons.append("feed error")
+        if feed.get("partial_errors"):
+            reasons.append("partial feed errors")
+        if feed.get("stopped"):
+            reasons.append("stopped early")
+        if feed.get("more"):
+            reasons.append("more pages available")
+        if feed.get("truncated_windows"):
+            reasons.append("one or more search windows truncated")
+        if feed.get("full_end") or feed.get("last_batch", 0) >= 100:
+            reasons.append("possible page truncation")
+        if reasons:
+            issues.append(f"{name}: {', '.join(reasons)}")
+    return issues
+
+
 def _set_refresh_state(status, summary="", error=""):
     db = connect_db()
     now = datetime.now(timezone.utc).isoformat()
     try:
         db.execute(
             "UPDATE refresh_state SET status = ?, finished_at = ?, summary = ?, error = ? WHERE id = 1",
-            (status, now if status in ("completed", "failed") else None, summary, error),
+            (status, now if status in ("completed", "incomplete", "failed") else None, summary, error),
         )
         db.commit()
     finally:
@@ -994,7 +1025,18 @@ def _run_background_refresh():
         if error:
             _set_refresh_state("failed", error=error.get_data(as_text=True)[:1000])
         else:
-            _set_refresh_state("completed", summary=summary_text(stats))
+            summary = summary_text(stats)
+            issues = refresh_feed_issues()
+            if issues:
+                detail = "; ".join(issues)
+                _set_refresh_state(
+                    "incomplete",
+                    summary=summary + " Some source results may be missing.",
+                    error="Partial collection: " + detail[:900],
+                )
+                app.logger.warning("Refresh saved partial results: %s", detail)
+            else:
+                _set_refresh_state("completed", summary=summary)
     except Exception:
         app.logger.exception("Background tender refresh failed")
         try:
