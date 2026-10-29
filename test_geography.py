@@ -45,7 +45,7 @@ class FindATenderWindowCoverageTests(unittest.TestCase):
                 result["nextCursor"] = next_cursor
             return result
 
-        with patch("tenderscout._windows", return_value=windows), \
+        with patch("tenderscout._fts_windows", return_value=windows), \
              patch("tenderscout.get_json", side_effect=[
                  page(1, "cursor-1"), page(2), page(3, "cursor-3"), page(4), page(5)
              ]) as fetch, \

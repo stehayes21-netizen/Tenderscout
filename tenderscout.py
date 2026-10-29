@@ -697,7 +697,8 @@ def _page_url(base_url, params, cursor):
 def _start_stats(stats):
     stats = stats if stats is not None else {}
     stats.update({"pages": 0, "records": 0, "last_batch": 0, "more": False,
-                  "error": "", "stopped": "", "windows": 0, "full_end": False})
+                  "error": "", "stopped": "", "windows": 0, "full_end": False,
+                  "truncated_windows": 0})
     return stats
 
 
@@ -724,6 +725,30 @@ def _windows(days, size=7):
     end = now
     while end > earliest:
         start = max(earliest, end - timedelta(days=size))
+        windows.append((start, end))
+        end = start
+    return windows
+
+
+def _fts_windows(days, recent_days=10):
+    """Search recent Find a Tender updates in daily slices, then older history weekly.
+
+    Daily slices avoid a busy week's first 400 releases hiding a recent notice.
+    Older history stays weekly so the hosted collector can cover more time within
+    Find a Tender's rate limit.
+    """
+    now = datetime.now(timezone.utc)
+    earliest = now - timedelta(days=days)
+    recent_cutoff = max(earliest, now - timedelta(days=min(days, recent_days)))
+    windows = []
+    end = now
+    while end > recent_cutoff:
+        start = max(recent_cutoff, end - timedelta(days=1))
+        windows.append((start, end))
+        end = start
+    end = recent_cutoff
+    while end > earliest:
+        start = max(earliest, end - timedelta(days=7))
         windows.append((start, end))
         end = start
     return windows
@@ -759,14 +784,35 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
         # conservative 10/minute cadence rather than hammering each page/window.
         time.sleep(10.5 if source == "Find a Tender" else 0.2)
     stats["more"] = True  # used every allowed page and the feed still had more
+    stats["truncated_windows"] = stats.get("truncated_windows", 0) + 1
+    print(
+        f"[WARN] {source} pagination incomplete: reached the {max_pages}-page limit "
+        "while the feed still supplied a next-page cursor; results for this window are partial",
+        file=sys.stderr,
+    )
     return results
+
+
+def fetch_fts_notice(notice_id):
+    """Fetch one known Find a Tender notice directly by its official notice ID."""
+    notice_id = str(notice_id or "").strip()
+    if not re.fullmatch(r"[0-9]{6}-[0-9]{4}", notice_id):
+        raise ValueError("Find a Tender notice ID must look like 098300-2026")
+    payload = get_json(f"{FTS_URL}/{urllib.parse.quote(notice_id, safe='')}")
+    records = extract_records(payload, "Find a Tender")
+    if not records:
+        raise RuntimeError(f"Find a Tender returned no extractable record for {notice_id}")
+    return records
 
 
 def fetch_fts(days, max_pages, max_seconds=None, stats=None):
     stats = _start_stats(stats)
     results = []
     started = time.monotonic()
-    for start, end in _windows(days):
+    # Daily windows for recent updates reduce the chance that a busy week hides
+    # new notices behind the first few cursor pages; older history remains weekly.
+    # Follow the official cursor for every window.
+    for start, end in _fts_windows(days):
         if stats["stopped"]:
             break
         if stats["windows"]:
@@ -782,19 +828,25 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        # In the hosted app, sample every weekly window, but fetch a second
-        # page for the two newest windows. A single 100-record page can miss
-        # recent notices during busy publication periods. Older windows retain
-        # one page so the refresh stays within the free-host time budget.
-        # CLI/audit runs without a time budget retain the requested page limit.
+        # Prioritise coverage across recent daily windows. In the hosted app,
+        # allow two pages for the newest three days and one page for subsequent
+        # windows; the source time budget remains the hard stop. CLI audits use
+        # their requested page limit for every window.
         if max_seconds:
-            window_page_limit = min(max_pages, 2) if stats["windows"] <= 2 else min(max_pages, 1)
+            window_page_limit = min(max_pages, 2) if stats["windows"] <= 3 else min(max_pages, 1)
         else:
             window_page_limit = max_pages
         results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
                                      started, max_seconds, stats))
         if stats["error"]:
             break
+    coverage = "INCOMPLETE" if stats["more"] or stats["stopped"] or stats["error"] else "page-walk complete"
+    print(
+        "Find a Tender coverage: "
+        f"{coverage}; windows={stats['windows']}; pages={stats['pages']}; "
+        f"records={stats['records']}; truncated_windows={stats['truncated_windows']}; "
+        f"stopped={stats['stopped'] or 'no'}; error={stats['error'] or 'none'}"
+    )
     return results
 
 
@@ -1345,6 +1397,8 @@ def main():
     parser.add_argument("--max-value", type=float, default=None, help="Maximum estimated GBP value")
     parser.add_argument("--min-score", type=int, default=3, help="Minimum relevance score (default 3)")
     parser.add_argument("--pages", type=int, default=10, help="Maximum pages to fetch from each source")
+    parser.add_argument("--fts-only", action="store_true", help="Audit Find a Tender only; skip other feeds")
+    parser.add_argument("--notice-id", help="Fetch one known Find a Tender notice directly by ID for audit/backfill")
     parser.add_argument("--out", default="tenderscout_results.csv", help="Filtered output CSV path")
     args = parser.parse_args()
 
@@ -1352,12 +1406,35 @@ def main():
     # Keep the scheduled/CLI collector aligned with the hosted dashboard's three free feeds.
     # Bearings records have no trusted delivery location and therefore remain in REVIEW
     # until a structured site location is verified; they are never auto-labelled LOCAL.
-    all_rows = (
+    direct_notice_rows = fetch_fts_notice(args.notice_id) if args.notice_id else []
+    all_rows = fetch_fts(args.days, args.pages) if args.fts_only else (
         fetch_fts(args.days, args.pages)
         + fetch_contracts_finder(args.days, args.pages)
         + fetch_bearings()
         + fetch_standstill_northwest()
     )
+    if direct_notice_rows:
+        target_id = str(args.notice_id)
+        target_title = str(direct_notice_rows[0].get("title", "")).strip().casefold()
+        fts_found = any(
+            row.get("source") == "Find a Tender"
+            and (target_id in str(row.get("notice_url", "")) or
+                 (target_title and str(row.get("title", "")).strip().casefold() == target_title))
+            for row in all_rows
+        )
+        alternate_sources = sorted({
+            str(row.get("source", "unknown"))
+            for row in all_rows
+            if row.get("source") != "Find a Tender"
+            and (target_id in str(row.get("notice_url", "")) or
+                 (target_title and str(row.get("title", "")).strip().casefold() == target_title))
+        })
+        print(
+            f"Direct notice lookup {target_id}: confirmed; "
+            f"Find a Tender rolling feed: {'FOUND' if fts_found else 'NOT FOUND'}; "
+            f"alternate discovery sources: {', '.join(alternate_sources) if alternate_sources else 'NONE'}"
+        )
+        all_rows.extend(direct_notice_rows)
     all_rows = dedupe(all_rows)
     if not all_rows:
         print("No feed records retrieved. Check your internet connection/API availability and try again.")
