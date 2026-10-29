@@ -784,9 +784,10 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
-    # Find a Tender rate-limits pagination. Give the collector a five-minute
-    # budget and avoid duplicate sleeps between cursor pages and search windows.
-    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 300)
+    # Find a Tender rate-limits pagination. A 60-day lookback has ten daily
+    # windows plus weekly history; allow enough time to traverse them without
+    # falsely reporting incomplete coverage before the source can finish.
+    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 720)
     fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
     # Run independent free sources concurrently. Bearings and Standstill are
     # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
