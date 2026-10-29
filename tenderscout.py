@@ -866,7 +866,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
         # The source time budget remains the hard stop; CLI audits use their
         # requested page limit for every window.
         if max_seconds:
-            window_page_limit = min(max_pages, 3)
+            window_page_limit = min(max_pages, 6)
         else:
             window_page_limit = max_pages
         results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
