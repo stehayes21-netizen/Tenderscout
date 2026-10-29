@@ -781,9 +781,9 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             if len(batch) >= 100:
                 stats["full_end"] = True
             return results
-        # Find a Tender rate-limits bursty clients. Keep requests below a
-        # conservative 10/minute cadence rather than hammering each page/window.
-        time.sleep(10.5 if source == "Find a Tender" else 0.2)
+        # Find a Tender rate-limits bursty clients. A 6.2-second gap stays
+        # below 10 requests/minute while avoiding unnecessary idle time.
+        time.sleep(6.2 if source == "Find a Tender" else 0.2)
     stats["more"] = True  # used every allowed page and the feed still had more
     stats["truncated_windows"] = stats.get("truncated_windows", 0) + 1
     print(
@@ -817,10 +817,9 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
         if stats["stopped"]:
             break
         if stats["windows"] and not stats.get("last_page_had_cursor"):
-            # If the previous window ended without a cursor, no page-level delay
-            # was applied. Otherwise _page_through already waited before the next
-            # request, so sleeping here too would halve coverage unnecessarily.
-            time.sleep(10.5)
+            # Keep the same sub-10-requests/minute cadence between independent
+            # windows; cursor pages are throttled inside _page_through.
+            time.sleep(6.2)
         stats["windows"] += 1
         # Do not send the API stages filter here. Find a Tender's documented
         # filter has historically omitted many Procurement Act 2023 notices,
