@@ -777,9 +777,9 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
-    # Find a Tender needs a longer window because it rate-limits pagination;
-    # its collector now samples each week before paging deeply into one week.
-    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 150)
+    # Find a Tender rate-limits pagination. Give the collector a five-minute
+    # budget and avoid duplicate sleeps between cursor pages and search windows.
+    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 300)
     fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
     # Run independent free sources concurrently. Bearings and Standstill are
     # discovery sources, not delivery-site proof; uncertain records stay REVIEW.

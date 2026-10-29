@@ -698,7 +698,7 @@ def _start_stats(stats):
     stats = stats if stats is not None else {}
     stats.update({"pages": 0, "records": 0, "last_batch": 0, "more": False,
                   "error": "", "stopped": "", "windows": 0, "full_end": False,
-                  "truncated_windows": 0})
+                  "truncated_windows": 0, "last_page_had_cursor": False})
     return stats
 
 
@@ -776,6 +776,7 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
         _note_page(stats, batch)
         results.extend(batch)
         cursor = _next_cursor(payload)
+        stats["last_page_had_cursor"] = bool(cursor)
         if not cursor:
             if len(batch) >= 100:
                 stats["full_end"] = True
@@ -815,8 +816,10 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
     for start, end in _fts_windows(days):
         if stats["stopped"]:
             break
-        if stats["windows"]:
-            # Windows without a next-page link still count as separate API calls.
+        if stats["windows"] and not stats.get("last_page_had_cursor"):
+            # If the previous window ended without a cursor, no page-level delay
+            # was applied. Otherwise _page_through already waited before the next
+            # request, so sleeping here too would halve coverage unnecessarily.
             time.sleep(10.5)
         stats["windows"] += 1
         # Do not send the API stages filter here. Find a Tender's documented
@@ -828,12 +831,13 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        # Prioritise coverage across recent daily windows. In the hosted app,
-        # allow two pages for the newest three days and one page for subsequent
-        # windows; the source time budget remains the hard stop. CLI audits use
-        # their requested page limit for every window.
+        # Allow up to two pages for every hosted window. Limiting older windows
+        # to one page systematically truncated busy weeks, while the duplicate
+        # window/page sleeps consumed the time budget before later windows ran.
+        # The source time budget remains the hard stop; CLI audits use their
+        # requested page limit for every window.
         if max_seconds:
-            window_page_limit = min(max_pages, 2) if stats["windows"] <= 3 else min(max_pages, 1)
+            window_page_limit = min(max_pages, 2)
         else:
             window_page_limit = max_pages
         results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
