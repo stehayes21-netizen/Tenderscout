@@ -324,20 +324,9 @@ def dashboard():
     view = "review" if review_view else ("pipeline" if pipeline_view else "")
 
     db = connect_db()
-    # Render free instances can lose local SQLite data on redeploy. If the board
-    # is empty, automatically repopulate it from the official feeds once per
-    # process rather than leaving the user with a blank board.
-    global _EMPTY_BOARD_REFRESH_ATTEMPTED
-    if not app.testing and not review_view and not pipeline_view and not request.args.get("done"):
-        existing = db.execute("SELECT COUNT(*) AS n FROM tenders").fetchone()["n"]
-        db.close()
-        if existing == 0 and not _EMPTY_BOARD_REFRESH_ATTEMPTED:
-            _EMPTY_BOARD_REFRESH_ATTEMPTED = True
-            try:
-                run_refresh()
-            except Exception:
-                app.logger.exception("Automatic first-load tender refresh failed")
-        db = connect_db()
+    # Never collect feeds during a dashboard GET. External sources can be slow or
+    # rate-limit requests; render the dashboard immediately and let the explicit
+    # /api/refresh action run collection in the background.
     # The default board includes confirmed local jobs plus *potentially relevant*
     # location-review notices that mention one of the target areas. They are
     # labelled as unverified below; the full review view remains available.
