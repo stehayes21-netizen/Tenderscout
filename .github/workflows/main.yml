@@ -93,11 +93,12 @@ jobs:
           curl --fail --show-error --silent --max-time 90 \
             -X POST -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh"
 
-          # Poll status independently; tolerate transient slow responses.
-          for attempt in $(seq 1 36); do
+          # The hosted collector now has a 12-minute Find a Tender budget. Poll for
+          # up to 14 minutes so a complete rate-limited refresh can finish.
+          for attempt in $(seq 1 84); do
             if ! state_json=$(curl --fail --show-error --silent --max-time 30 \
               -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh/status"); then
-              echo "Could not read refresh status (attempt $attempt/36); retrying status check."
+              echo "Could not read refresh status (attempt $attempt/84); retrying status check."
               sleep 10
               continue
             fi
@@ -123,5 +124,5 @@ jobs:
             fi
             sleep 10
           done
-          echo "TenderScout refresh was still running after six minutes."
+          echo "TenderScout refresh was still running after fourteen minutes."
           exit 1
