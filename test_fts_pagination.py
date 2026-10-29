@@ -90,3 +90,35 @@ class FindATenderDirectLookupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FindATenderRateLimitTests(unittest.TestCase):
+    def test_429_waits_for_retry_after_before_one_retry(self):
+        import io
+        from unittest.mock import MagicMock
+        error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+            "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages",
+            429, "Too Many Requests", {"Retry-After": "120"}, io.BytesIO(b"rate limited")
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"releases": []}'
+        with patch.object(tenderscout.urllib.request, "urlopen", side_effect=[error, response]) as opener, \
+             patch.object(tenderscout.time, "sleep") as sleep:
+            result = tenderscout.get_json(tenderscout.FTS_URL)
+        self.assertEqual(result, {"releases": []})
+        sleep.assert_called_once_with(120)
+        self.assertEqual(opener.call_count, 2)
+
+    def test_429_without_retry_after_uses_conservative_120_seconds(self):
+        import io
+        from unittest.mock import MagicMock
+        error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+            "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages",
+            429, "Too Many Requests", {}, io.BytesIO(b"rate limited")
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"releases": []}'
+        with patch.object(tenderscout.urllib.request, "urlopen", side_effect=[error, response]), \
+             patch.object(tenderscout.time, "sleep") as sleep:
+            tenderscout.get_json(tenderscout.FTS_URL)
+        sleep.assert_called_once_with(120)
