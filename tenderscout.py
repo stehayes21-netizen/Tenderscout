@@ -376,7 +376,24 @@ EXPLICIT_LOCATION_KEYS = (
 )
 
 
+def source_name_for_url(url):
+    """Return a short source label without exposing a cursor URL."""
+    host = urllib.parse.urlparse(url).hostname or ""
+    if "find-tender.service.gov.uk" in host:
+        return "Find a Tender"
+    if "contractsfinder.service.gov.uk" in host:
+        return "Contracts Finder"
+    return host or "Procurement feed"
+
+
 def get_json(url: str, timeout: int = 25):
+    """Fetch JSON and honour the source's Retry-After on one rate-limit response.
+
+    Find a Tender has returned HTTP 429 with a 120-second Retry-After. Retrying
+    immediately or shortening the normal request delay causes more throttling.
+    Retry only once; if the feed is still limiting us, let the caller record a
+    clear incomplete-coverage error instead of looping or hammering the source.
+    """
     req = urllib.request.Request(
         url,
         headers={
@@ -384,21 +401,33 @@ def get_json(url: str, timeout: int = 25):
             "Accept": "application/json",
         },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8", errors="replace"))
-    except urllib.error.HTTPError as exc:
-        # Never print the full cursor URL: it can be enormous and makes the
-        # mobile results page unreadable. Preserve Retry-After for diagnostics.
+    for attempt in range(2):
         try:
-            body = " ".join(exc.read().decode("utf-8", errors="replace").split())[:180]
-        except Exception:
-            body = ""
-        retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
-        retry_note = f" Retry after {retry_after} seconds." if retry_after.isdigit() else ""
-        raise RuntimeError(
-            f"HTTP {exc.code} {exc.reason}.{retry_note} Feed said: {body or 'no details returned'}"
-        ) from None
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8", errors="replace"))
+        except urllib.error.HTTPError as exc:
+            # Never print the full cursor URL: it can be enormous and makes the
+            # mobile results page unreadable. Preserve Retry-After for diagnostics.
+            try:
+                body = " ".join(exc.read().decode("utf-8", errors="replace").split())[:180]
+            except Exception:
+                body = ""
+            retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
+            if exc.code == 429 and attempt == 0:
+                # Use the server-provided delay. If absent/malformed, use the
+                # known conservative 120-second minimum; never retry early.
+                try:
+                    delay = max(120, int(retry_after))
+                except (TypeError, ValueError):
+                    delay = 120
+                print(f"[WARN] {source_name_for_url(url)} rate limited (HTTP 429); waiting {delay}s before one retry", file=sys.stderr)
+                time.sleep(delay)
+                continue
+            retry_note = f" Retry after {retry_after} seconds." if retry_after.isdigit() else ""
+            raise RuntimeError(
+                f"HTTP {exc.code} {exc.reason}.{retry_note} Feed said: {body or 'no details returned'}"
+            ) from None
+    raise RuntimeError("Rate-limit retry exhausted.")
 
 
 def as_text(value):
