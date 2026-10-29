@@ -731,6 +731,38 @@ class RefreshSummaryTests(AppTestCase):
         self.assertIn("interrupted", response.json["error"])
         self.assertIsNotNone(response.json["finished_at"])
 
+    def test_partial_feed_collection_is_reported_incomplete(self):
+        self.app_module.LAST_FEEDS.clear()
+        self.app_module.LAST_FEEDS["Find a Tender"] = {
+            "records": 2410, "pages": 26, "windows": 15,
+            "truncated_windows": 12, "stopped": "time limit",
+            "error": "", "more": True,
+        }
+        with patch.object(self.app_module, "refresh_or_error", return_value=(
+            {"fetched": 100, "service": 20, "outside": 5, "local": 3, "review": 12}, None
+        )):
+            self.app_module._refresh_lock.acquire()
+            self.app_module._run_background_refresh()
+        status = self.client.get("/api/refresh/status")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json["status"], "incomplete")
+        self.assertIn("Some source results may be missing", status.json["summary"])
+        self.assertIn("truncated", status.json["error"])
+        self.assertIsNotNone(status.json["finished_at"])
+
+    def test_refresh_feed_issues_flags_page_and_time_truncation(self):
+        self.app_module.LAST_FEEDS.clear()
+        self.app_module.LAST_FEEDS["Find a Tender"] = {
+            "stopped": "time limit", "truncated_windows": 2
+        }
+        self.app_module.LAST_FEEDS["Contracts Finder"] = {
+            "last_batch": 100, "full_end": True
+        }
+        issues = self.app_module.refresh_feed_issues()
+        self.assertEqual(len(issues), 2)
+        self.assertIn("stopped early", issues[0])
+        self.assertIn("possible page truncation", issues[1])
+
     def test_api_refresh_status_reports_success_and_summary(self):
         collector = self.app_module.collector
 
