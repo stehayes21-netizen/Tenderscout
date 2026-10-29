@@ -84,7 +84,7 @@ jobs:
               exit 1
             fi
             if [ "$status" = "incomplete" ]; then
-              printf '%s\\n' "$state_json"
+              printf '%s\n' "$state_json"
               echo "TenderScout refresh saved some results, but collection was incomplete."
               exit 1
             fi
