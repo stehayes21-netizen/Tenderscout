@@ -66,17 +66,44 @@ jobs:
           APP_USER: ${{ secrets.TENDERSCOUT_APP_USER }}
           APP_PASSWORD: ${{ secrets.TENDERSCOUT_APP_PASSWORD }}
         run: |
-          # Starting a refresh returns quickly; the collector runs in a tracked background job.
-          # Never retry the POST automatically: the status endpoint is used for polling instead.
-          curl --fail --show-error --silent --max-time 20 \
+          # Free Render services can take time to wake. Wait for health before
+          # starting work, so a cold-start delay does not consume the POST timeout.
+          ready=0
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error --max-time 10 "$APP_URL/health" >/dev/null; then
+              ready=1
+              break
+            fi
+            echo "Hosted app not ready yet (attempt $attempt/12); waiting 5 seconds."
+            sleep 5
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "TenderScout hosted app did not become healthy within about 2 minutes."
+            exit 1
+          fi
+
+          # Do not automatically retry POST: a timeout could happen after the
+          # server accepted the request, which could start duplicate refreshes.
+          curl --fail --show-error --silent --max-time 90 \
             -X POST -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh"
+
+          # Poll status independently; tolerate transient slow responses.
           for attempt in $(seq 1 36); do
-            state_json=$(curl --fail --show-error --silent --max-time 20 \
-              -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh/status")
+            if ! state_json=$(curl --fail --show-error --silent --max-time 30 \
+              -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh/status"); then
+              echo "Could not read refresh status (attempt $attempt/36); retrying status check."
+              sleep 10
+              continue
+            fi
             status=$(printf '%s' "$state_json" | python -c "import json,sys; print(json.load(sys.stdin).get('status', 'unknown'))")
             if [ "$status" = "completed" ]; then
               printf '%s\n' "$state_json"
               exit 0
+            fi
+            if [ "$status" = "incomplete" ]; then
+              printf '%s\n' "$state_json"
+              echo "TenderScout refresh finished with incomplete collection."
+              exit 1
             fi
             if [ "$status" = "failed" ]; then
               printf '%s\n' "$state_json"
