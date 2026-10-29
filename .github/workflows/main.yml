@@ -9,8 +9,7 @@ on:
     - cron: "17 */6 * * *"
 
 # Keep test runs grouped by ref/PR, but do not cancel a live-source audit
-# halfway through when a push and pull_request event overlap. The collector has
-# a job timeout and per-source limits; completed audit artifacts are valuable.
+# halfway through when a push and pull_request event overlap. Completed audit artifacts are valuable.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
@@ -21,8 +20,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # Collection can take ~8 minutes and hosted refresh may poll for another 6.
-    timeout-minutes: 20
+    # Six-page windows need extra time for the official feed's rate limit; hosted refresh can take another 6 minutes.
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
@@ -42,11 +41,11 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      # Focus on the recent notice window and follow pagination beyond the first 100 releases.
-      # Two weeks keeps the audit bounded; ten pages per window is a maximum, not a requirement.
+      # Collect a recent 10-day window and follow up to six pages per daily slice.
+      # The collector explicitly reports any remaining truncation rather than implying full coverage.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
-        run: python tenderscout.py --days 10 --pages 4 --notice-id 098300-2026 --region "Target area" --min-score 3
+        run: python tenderscout.py --days 10 --pages 6 --notice-id 098300-2026 --region "Target area" --min-score 3
 
       - name: Save CSV results
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
