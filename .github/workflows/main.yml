@@ -41,11 +41,17 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      # Collect a recent 10-day window and follow up to six pages per daily slice.
-      # The collector explicitly reports any remaining truncation rather than implying full coverage.
+      # Pull requests use a bounded live-feed smoke audit so CI does not spend 10+ minutes
+      # walking every recent page. Scheduled/manual audits retain the broader 10-day, six-page run.
+      # Any truncation is reported by the collector; this does not claim complete feed coverage.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
-        run: python tenderscout.py --days 10 --pages 6 --notice-id 098300-2026 --region "Target area" --min-score 3
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            python tenderscout.py --days 2 --pages 2 --notice-id 098300-2026 --region "Target area" --min-score 3
+          else
+            python tenderscout.py --days 10 --pages 6 --notice-id 098300-2026 --region "Target area" --min-score 3
+          fi
 
       - name: Save CSV results
         if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
