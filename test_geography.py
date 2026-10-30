@@ -493,6 +493,20 @@ class GeographyClassifierTests(unittest.TestCase):
                     "OUT_OF_AREA",
                 )
 
+    def test_explicit_anglesey_project_site_is_out_of_area(self):
+        record = {
+            "location_text": "UK, United Kingdom",
+            "title": "Gwyndod Archaeology Investigation and Mitigation",
+            "description": (
+                "Archaeological investigation and mitigation services to support "
+                "development of the Gwyndod project in Anglesey. The requirement "
+                "covers the main site areas and associated development areas."
+            ),
+        }
+        region, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(region, "OUT_OF_AREA")
+        self.assertIn("anglesey", reason.lower())
+
     def test_structured_singapore_location_is_out_of_area(self):
         record = {"location_text": "SG, Singapore"}
         self.assertEqual(
