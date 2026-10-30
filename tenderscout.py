@@ -1519,6 +1519,7 @@ def main():
     review_rows = []
     rejected_by_scoring = 0
     excluded_by_stage = 0
+    excluded_review_by_stage = 0
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
@@ -1531,7 +1532,10 @@ def main():
         trade = scored.get("trade_category") or scored.get("service_match") or "NO TRADE MATCH"
         scored_trade_counts[trade] = scored_trade_counts.get(trade, 0) + 1
         if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
-            review_rows.append(scored)
+            if shortlist_eligible_stage(scored):
+                review_rows.append(scored)
+            else:
+                excluded_review_by_stage += 1
             continue
         if geo == "LOCAL" and scored["score"] >= args.min_score:
             if shortlist_eligible_stage(scored):
@@ -1594,6 +1598,7 @@ def main():
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
     print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
+    print(f"Excluded from location review by notice stage: {excluded_review_by_stage}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
