@@ -299,7 +299,7 @@ OUT_OF_AREA_TERMS = [
     "belfast", "flintshire", "wrexham",
     "stoke-on-trent", "samlesbury", "darent valley hospital",
     "gloucester", "cashel cross", "bradford", "juba",
-    "milton keynes", "lusaka", "singapore",
+    "milton keynes", "lerwick", "lusaka", "singapore",
     "scotland", "scottish", "glasgow", "edinburgh", "aberdeen", "dundee",
     "inverness", "perth", "stirling", "falkirk", "paisley", "ayr",
     "livingston", "kirkcaldy", "lanarkshire", "ayrshire", "fife", "highland",
@@ -1218,7 +1218,7 @@ def explicit_out_of_area_delivery_sites(text, terms):
             after = text[match.end():match.end() + 100]
             before_cue = re.search(
                 r"\b(?:within|across|throughout|delivery in|services in|works in|"
-                r"properties in|site in|project in|located in|delivered at|"
+                r"properties in|site in|sites in|project in|located in|delivered at|"
                 r"provided at|carried out at)\s+"
                 r"(?:(?:the\s+)?(?:boundaries of|area of|city of|town of|borough of|county of)\s+)*$"
                 r"|\b(?:project title|project location|site location|delivery location|location)\s*:\s*$"
@@ -1231,7 +1231,25 @@ def explicit_out_of_area_delivery_sites(text, terms):
                 r"project|works|residential compounds|garrison)\b",
                 after,
             )
-            if before_cue or after_cue:
+            # "at [named facility]" is strong site evidence, but a bare
+            # "previously worked at Falkirk" is only historical context.
+            facility_at_cue = (
+                re.search(r"\\bat\\s+$", before) is not None
+                and any(word in term.split() for word in (
+                    "hospital", "garrison", "airport", "prison", "university",
+                    "school", "campus", "estate",
+                ))
+            )
+            # The Northern Ireland HSC framework names the regional buyer and
+            # service geography in the same explicit phrase.
+            hsc_region_cue = (
+                "northern ireland" in term
+                and re.search(
+                    r"\\b(?:hsc|health and social care)(?:\\s+\\([^)]*\\))?\\s+in\\s+$",
+                    before,
+                ) is not None
+            )
+            if before_cue or after_cue or facility_at_cue or hsc_region_cue:
                 hits.append(term)
                 break
     return hits
