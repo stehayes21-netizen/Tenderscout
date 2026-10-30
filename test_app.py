@@ -731,6 +731,71 @@ class RefreshSummaryTests(AppTestCase):
         self.assertIn("interrupted", response.json["error"])
         self.assertIsNotNone(response.json["finished_at"])
 
+    def test_database_lease_prevents_a_second_process_starting_refresh(self):
+        db = self.app_module.connect_db()
+        started = self.app_module.datetime.now(self.app_module.timezone.utc).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, refresh_token = ? WHERE id = 1",
+            (started, "active-process-token"),
+        )
+        db.commit()
+        db.close()
+
+        with patch.object(self.app_module, "_start_refresh_thread") as start_thread:
+            response = self.client.post("/api/refresh")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json["status"], "running")
+        start_thread.assert_not_called()
+        db = self.app_module.connect_db()
+        state = db.execute("SELECT status, refresh_token FROM refresh_state WHERE id = 1").fetchone()
+        db.close()
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(state["refresh_token"], "active-process-token")
+
+    def test_stale_database_lease_can_be_reclaimed_after_process_crash(self):
+        db = self.app_module.connect_db()
+        started = (self.app_module.datetime.now(self.app_module.timezone.utc)
+                   - timedelta(minutes=20)).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, refresh_token = ? WHERE id = 1",
+            (started, "dead-process-token"),
+        )
+        db.commit()
+        db.close()
+
+        with patch.object(self.app_module, "_start_refresh_thread", side_effect=lambda token: None) as start_thread:
+            response = self.client.post("/api/refresh")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json["status"], "running")
+        start_thread.assert_called_once()
+        new_token = start_thread.call_args.args[0]
+        self.assertNotEqual(new_token, "dead-process-token")
+        db = self.app_module.connect_db()
+        state = db.execute("SELECT status, refresh_token FROM refresh_state WHERE id = 1").fetchone()
+        db.close()
+        self.assertEqual(state["refresh_token"], new_token)
+        self.app_module._refresh_lock.release()
+
+    def test_old_refresh_cannot_overwrite_state_owned_by_new_refresh(self):
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', refresh_token = ? WHERE id = 1",
+            ("new-owner-token",),
+        )
+        db.commit()
+        db.close()
+
+        updated = self.app_module._set_refresh_state(
+            "failed", error="old worker finished late", refresh_token="old-owner-token"
+        )
+        self.assertFalse(updated)
+        db = self.app_module.connect_db()
+        state = db.execute("SELECT status, refresh_token FROM refresh_state WHERE id = 1").fetchone()
+        db.close()
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(state["refresh_token"], "new-owner-token")
+
     def test_partial_feed_collection_is_reported_incomplete(self):
         self.app_module.LAST_FEEDS.clear()
         self.app_module.LAST_FEEDS["Find a Tender"] = {
