@@ -626,13 +626,49 @@ def extract_records(payload, source):
             raw_tags = rel.get("tag") or rel.get("tags") or []
             if isinstance(raw_tags, str):
                 raw_tags = [raw_tags]
-            tag_text = " ".join(as_text(tag) for tag in raw_tags).lower()
-            if "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
+            tag_values = [as_text(tag).strip().lower() for tag in raw_tags if as_text(tag).strip()]
+            tag_text = " ".join(tag_values)
+
+            # Cancellation and award notices can retain the original tenderPeriod.
+            # Do not mistake "tenderCancellation" for a live tender merely because
+            # its tag contains the word "tender".
+            notice_statuses = [
+                as_text(first(tender, "status")),
+                as_text(first(rel, "status")),
+            ]
+            raw_awards = rel.get("awards") or []
+            if isinstance(raw_awards, dict):
+                raw_awards = [raw_awards]
+            if isinstance(raw_awards, list):
+                notice_statuses.extend(
+                    as_text(first(award, "status"))
+                    for award in raw_awards if isinstance(award, dict)
+                )
+            status_text = " ".join(notice_statuses).lower()
+            is_cancelled = (
+                any("cancel" in value or "termination" in value for value in tag_values)
+                or "cancel" in status_text
+                or "terminated" in status_text
+            )
+            is_planning = any(
+                "planning" in value or "pipeline" in value or "early market" in value
+                for value in tag_values
+            )
+            is_tender_notice = any(
+                value in {"tender", "tendernotice", "tender_notice"}
+                for value in tag_values
+            )
+
+            if is_cancelled:
+                opportunity_stage = "Other notice"
+            elif is_planning:
                 opportunity_stage = "Planning / upcoming"
-            elif "tender" in tag_text:
+            elif is_tender_notice or (not tag_values and (
+                tender.get("tenderPeriod") or tender.get("tender_period")
+            )):
                 opportunity_stage = "Open for bids"
             else:
-                opportunity_stage = "Open for bids" if (tender.get("tenderPeriod") or tender.get("tender_period")) else "Other notice"
+                opportunity_stage = "Other notice"
 
             # Trade/category evidence is often published on tender line items rather
             # than in the notice summary. Preserve readable item text for matching.
