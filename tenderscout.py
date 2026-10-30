@@ -1352,17 +1352,19 @@ def classify_geography(record, region):
 
 
 def score_record(record, services, region, min_value, max_value):
-    fulltext = " ".join([
-        record.get("title", ""), record.get("description", ""),
-        record.get("trade_context", ""), record.get("buyer", ""),
+    # Broad service groups must be supported by the notice title or structured
+    # procurement line-item context. Long descriptions and buyer names contain
+    # incidental words (e.g. "refurbishment") and must not create false matches.
+    strong_text = " ".join([
+        record.get("title", ""), record.get("trade_context", ""),
     ]).lower()
     trade_hits = {
-        "cleaning": keyword_hits(fulltext, CLEANING_TERMS),
-        "fm": keyword_hits(fulltext, FM_TERMS),
-        "maintenance": keyword_hits(fulltext, MAINTENANCE_TERMS),
-        "construction": keyword_hits(fulltext, CONSTRUCTION_TERMS),
+        "cleaning": keyword_hits(strong_text, CLEANING_TERMS),
+        "fm": keyword_hits(strong_text, FM_TERMS),
+        "maintenance": keyword_hits(strong_text, MAINTENANCE_TERMS),
+        "construction": keyword_hits(strong_text, CONSTRUCTION_TERMS),
     }
-    exclude_hits = keyword_hits(fulltext, EXCLUDE_TERMS)
+    exclude_hits = keyword_hits(strong_text, EXCLUDE_TERMS)
     matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
     detailed_category = classify_trade_category(
         record.get("description", ""),
@@ -1445,10 +1447,25 @@ def shortlist_eligible_stage(record):
 
 
 def dedupe(records):
-    """Deduplicate procurement processes and cross-source copies of the same notice."""
-    priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
+    """Remove exact notice copies and discovery-feed shadows without merging distinct official notices."""
+    stage_priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
+    official_markers = ("Find a Tender", "Contracts Finder")
+    discovery_markers = ("Bearings", "Standstill")
     by_key = {}
     notice_key = {}
+    process_source_keys = {}
+
+    def process_key(row):
+        title = " ".join(str(row.get("title") or "").casefold().split())
+        buyer = " ".join(str(row.get("buyer") or "").casefold().split())
+        return (title, buyer) if title and buyer else None
+
+    def is_official(row):
+        return any(marker in str(row.get("source") or "") for marker in official_markers)
+
+    def is_discovery(row):
+        return any(marker in str(row.get("source") or "") for marker in discovery_markers)
+
     for row in records:
         notice_url = str(row.get("notice_url") or "").strip()
         if notice_url and notice_url in notice_key:
@@ -1459,12 +1476,41 @@ def dedupe(records):
                 "title", row.get("title", "").lower(), row.get("buyer", "").lower(),
                 row.get("published_date", ""),
             )
+
+        # Discovery feeds often repeat an official notice under a different URL
+        # and publication date. Suppress only the discovery copy; never collapse
+        # two distinct official OCIDs with the same title and buyer.
+        pkey = process_key(row)
+        if pkey and (is_official(row) or is_discovery(row)):
+            existing_key = process_source_keys.get(pkey)
+            existing = by_key.get(existing_key) if existing_key else None
+            if existing and is_official(existing) and is_discovery(row):
+                continue
+            if existing and is_discovery(existing) and is_official(row):
+                by_key.pop(existing_key, None)
+                if existing.get("notice_url"):
+                    notice_key.pop(str(existing["notice_url"]).strip(), None)
+            elif existing and (is_official(existing) == is_official(row)):
+                # Keep separate official processes and separate discovery entries.
+                process_source_keys[pkey] = key
+
         if notice_url:
             notice_key[notice_url] = key
         current = by_key.get(key)
-        if current is None or priority.get(row.get("opportunity_stage"), 0) > priority.get(current.get("opportunity_stage"), 0):
+        if current is None or stage_priority.get(row.get("opportunity_stage"), 0) > stage_priority.get(current.get("opportunity_stage"), 0):
             by_key[key] = row
-    return list(by_key.values())
+        if pkey and (is_official(row) or is_discovery(row)):
+            process_source_keys[pkey] = key
+
+    return sorted(
+        by_key.values(),
+        key=lambda row: (
+            stage_priority.get(row.get("opportunity_stage"), 0),
+            str(row.get("published_date") or ""),
+            str(row.get("title") or "").casefold(),
+        ),
+        reverse=True,
+    )
 
 
 def write_csv(path, rows):
