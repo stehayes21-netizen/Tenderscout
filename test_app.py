@@ -1,6 +1,9 @@
+import base64
 import importlib
 from io import BytesIO
 import os
+import sqlite3
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -719,8 +722,8 @@ class RefreshSummaryTests(AppTestCase):
         started = (self.app_module.datetime.now(self.app_module.timezone.utc)
                    - timedelta(minutes=20)).isoformat()
         db.execute(
-            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
-            (started,),
+            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '', refresh_token = ? WHERE id = 1",
+            (started, "stale-test-token"),
         )
         db.commit()
         db.close()
@@ -730,6 +733,211 @@ class RefreshSummaryTests(AppTestCase):
         self.assertEqual(response.json["status"], "failed")
         self.assertIn("interrupted", response.json["error"])
         self.assertIsNotNone(response.json["finished_at"])
+
+    def test_database_lease_prevents_a_second_process_starting_refresh(self):
+        db = self.app_module.connect_db()
+        started = self.app_module.datetime.now(self.app_module.timezone.utc).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, refresh_token = ? WHERE id = 1",
+            (started, "active-process-token"),
+        )
+        db.commit()
+        db.close()
+
+        with patch.object(self.app_module, "_start_refresh_thread") as start_thread:
+            response = self.client.post("/api/refresh")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json["status"], "running")
+        start_thread.assert_not_called()
+        db = self.app_module.connect_db()
+        state = db.execute("SELECT status, refresh_token FROM refresh_state WHERE id = 1").fetchone()
+        db.close()
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(state["refresh_token"], "active-process-token")
+
+    def test_recent_heartbeat_prevents_reclaim_even_when_started_at_is_old(self):
+        db = self.app_module.connect_db()
+        started = (self.app_module.datetime.now(self.app_module.timezone.utc)
+                   - timedelta(minutes=25)).isoformat()
+        heartbeat = self.app_module.datetime.now(self.app_module.timezone.utc).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, heartbeat_at = ?, refresh_token = ? WHERE id = 1",
+            (started, heartbeat, "still-active-token"),
+        )
+        db.commit()
+        db.close()
+
+        with patch.object(self.app_module, "_start_refresh_thread") as start_thread:
+            response = self.client.post("/api/refresh")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json["status"], "running")
+        start_thread.assert_not_called()
+
+    def test_heartbeat_renews_only_the_current_running_owner(self):
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', refresh_token = ?, heartbeat_at = NULL WHERE id = 1",
+            ("heartbeat-owner",),
+        )
+        db.commit()
+        db.close()
+        class OneCycleEvent:
+            def __init__(self):
+                self.calls = 0
+            def wait(self, seconds):
+                self.calls += 1
+                return self.calls > 1
+        stop = OneCycleEvent()
+        self.app_module._refresh_heartbeat("heartbeat-owner", stop)
+        db = self.app_module.connect_db()
+        state = db.execute("SELECT heartbeat_at FROM refresh_state WHERE id = 1").fetchone()
+        db.close()
+        self.assertIsNotNone(state["heartbeat_at"])
+
+    def test_legacy_refresh_route_respects_an_existing_database_lease(self):
+        db = self.app_module.connect_db()
+        started = self.app_module.datetime.now(self.app_module.timezone.utc).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, heartbeat_at = ?, refresh_token = ? WHERE id = 1",
+            (started, started, "active-api-refresh"),
+        )
+        db.commit()
+        db.close()
+        with patch.object(self.app_module, "refresh_or_error") as run_refresh:
+            response = self.client.post("/refresh")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("refresh_started=1", response.headers["Location"])
+        run_refresh.assert_not_called()
+
+    def test_stale_database_lease_can_be_reclaimed_after_process_crash(self):
+        db = self.app_module.connect_db()
+        started = (self.app_module.datetime.now(self.app_module.timezone.utc)
+                   - timedelta(minutes=20)).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, refresh_token = ? WHERE id = 1",
+            (started, "dead-process-token"),
+        )
+        db.commit()
+        db.close()
+
+        with patch.object(self.app_module, "_start_refresh_thread", side_effect=lambda token: None) as start_thread:
+            response = self.client.post("/api/refresh")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json["status"], "running")
+        start_thread.assert_called_once()
+        new_token = start_thread.call_args.args[0]
+        self.assertNotEqual(new_token, "dead-process-token")
+        db = self.app_module.connect_db()
+        state = db.execute("SELECT status, refresh_token FROM refresh_state WHERE id = 1").fetchone()
+        db.close()
+        self.assertEqual(state["refresh_token"], new_token)
+
+    def test_simultaneous_refresh_requests_only_start_one_worker(self):
+        # Initialise the schema before the two requests race for the same row.
+        db = self.app_module.connect_db()
+        db.close()
+        barrier = threading.Barrier(2)
+        started_tokens = []
+        outcomes = []
+        errors = []
+        auth = "Basic " + base64.b64encode(b"test-user:test-password").decode()
+
+        def request_refresh():
+            try:
+                with self.app_module.app.test_client() as client:
+                    barrier.wait(timeout=5)
+                    response = client.post("/api/refresh", headers={"Authorization": auth})
+                    outcomes.append((response.status_code, response.json))
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch.object(
+            self.app_module, "_start_refresh_thread",
+            side_effect=lambda token: started_tokens.append(token),
+        ):
+            workers = [threading.Thread(target=request_refresh) for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=10)
+
+        self.assertFalse(any(worker.is_alive() for worker in workers), "refresh requests did not finish")
+        self.assertEqual(errors, [])
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual([status for status, _ in outcomes], [202, 202])
+        self.assertEqual(len(started_tokens), 1, "only one request may start a refresh worker")
+        self.assertEqual(sum("started_at" in body for _, body in outcomes), 1)
+
+    def test_old_refresh_state_table_is_migrated_without_losing_its_row(self):
+        # Recreate the pre-token schema to exercise a real upgrade, not just a
+        # fresh database where CREATE TABLE already includes refresh_token.
+        connection = sqlite3.connect(self.app_module.DB_PATH)
+        connection.execute("DROP TABLE IF EXISTS refresh_state")
+        connection.execute(
+            """CREATE TABLE refresh_state (
+                id INTEGER PRIMARY KEY,
+                status TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                summary TEXT,
+                error TEXT
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO refresh_state (id, status, summary) VALUES (1, 'failed', 'previous result')"
+        )
+        connection.commit()
+        connection.close()
+        self.app_module._schema_ready = False
+
+        db = self.app_module.connect_db()
+        columns = {row[1] for row in db.execute("PRAGMA table_info(refresh_state)").fetchall()}
+        state = db.execute(
+            "SELECT status, summary, refresh_token FROM refresh_state WHERE id = 1"
+        ).fetchone()
+        db.close()
+
+        self.assertIn("refresh_token", columns)
+        self.assertIn("heartbeat_at", columns)
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["summary"], "previous result")
+        self.assertIsNone(state["refresh_token"])
+
+    def test_malformed_running_timestamp_is_reclaimed_like_stale_status_detection(self):
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, refresh_token = ? WHERE id = 1",
+            ("not-a-valid-timestamp", "malformed-old-token"),
+        )
+        db.commit()
+        db.close()
+
+        with patch.object(self.app_module, "_start_refresh_thread") as start_thread:
+            response = self.client.post("/api/refresh")
+
+        self.assertEqual(response.status_code, 202)
+        start_thread.assert_called_once()
+        self.assertNotEqual(start_thread.call_args.args[0], "malformed-old-token")
+
+    def test_old_refresh_cannot_overwrite_state_owned_by_new_refresh(self):
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', refresh_token = ? WHERE id = 1",
+            ("new-owner-token",),
+        )
+        db.commit()
+        db.close()
+
+        updated = self.app_module._set_refresh_state(
+            "failed", error="old worker finished late", refresh_token="old-owner-token"
+        )
+        self.assertFalse(updated)
+        db = self.app_module.connect_db()
+        state = db.execute("SELECT status, refresh_token FROM refresh_state WHERE id = 1").fetchone()
+        db.close()
+        self.assertEqual(state["status"], "running")
+        self.assertEqual(state["refresh_token"], "new-owner-token")
 
     def test_partial_feed_collection_is_reported_incomplete(self):
         self.app_module.LAST_FEEDS.clear()
@@ -741,7 +949,6 @@ class RefreshSummaryTests(AppTestCase):
         with patch.object(self.app_module, "refresh_or_error", return_value=(
             {"fetched": 100, "service": 20, "outside": 5, "local": 3, "review": 12}, None
         )):
-            self.app_module._refresh_lock.acquire()
             self.app_module._run_background_refresh()
         status = self.client.get("/api/refresh/status")
         self.assertEqual(status.status_code, 200)
