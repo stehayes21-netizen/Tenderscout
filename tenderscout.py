@@ -15,8 +15,8 @@ Outputs:
 
 Important:
 - Public feeds may be delayed or omit fields; always open the official notice.
-- Geography matching uses postcode districts first, then place names. It is a heuristic,
-  not a definitive location check. Target area: Liverpool, Sefton, St Helens, Halton, Knowsley and the agreed wider North West districts.
+- Geography matching uses explicit delivery/site evidence. Target area: Liverpool, Sefton,
+  St Helens, Halton, Knowsley, Wirral and Warrington. Cheshire West and Chester is excluded.
 - This script runs when you launch it. It is not a hosted service or scheduled job.
 """
 
@@ -135,7 +135,7 @@ TRADE_KEYWORDS = {
     "Catering and food services": ["catering services", "food services", "school meals"],
     "Furniture and equipment": ["furniture supply", "furniture installation", "equipment supply"],
     "IT and telecoms": ["information technology", "telecommunications", "network infrastructure", "it and telecoms", "it support", "telecoms support"],
-    "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "transport services"],
+    "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "vehicle servicing", "fleet servicing", "vehicle repairs", "fleet repairs", "commercial vehicle maintenance"],
     "Water and fire damage restoration": ["water damage restoration", "fire damage restoration", "flood restoration"],
     "Interior design": ["interior design", "interior fit out design"],
     "Signage and sign making": ["signage", "sign making", "wayfinding signs"],
@@ -209,8 +209,8 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Approved service area: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral,
-# Warrington and Cheshire West and Chester. Other North West areas remain excluded.
+# Approved service area: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral and Warrington.
+# Cheshire West and Chester, and all other Cheshire areas, are excluded.
 # Postcode districts are the main evidence. Any uncertain or mixed location goes
 # to REVIEW; never loosen these rules merely to increase the number of matches.
 TARGET_AREA_LABEL = "Target area"
@@ -224,19 +224,19 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA9", "WA10", "WA11", "WA12",
     # Halton
     "WA7", "WA8",
-    # Warrington (postcode districts can cross borough edges; verify exact site where needed)
-    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
-    # Cheshire West and Chester (CH4 remains borderline and requires review)
-    "CH1", "CH2", "CH3", "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
+    # Warrington (WA6 is Cheshire West and Chester, so excluded)
+    "WA1", "WA2", "WA3", "WA4", "WA5", "WA13",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
     # Wirral
     *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
-# CH4 is a boundary district and needs a site-level check.
-REVIEW_POSTCODE_DISTRICTS = {"CH4"}
+# Cheshire West postcode districts are excluded; Wirral districts remain in-scope.
+REVIEW_POSTCODE_DISTRICTS = set()
 EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(5, 41)),
+    *(f"CH{n}" for n in range(1, 41)),
+    "CH64", "CH65", "CH66", "WA6",
+    *(f"CW{n}" for n in range(1, 10)),
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
 }
@@ -268,9 +268,6 @@ LOCAL_PLACE_TERMS = [
     # Warrington
     "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
     "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
-    # Cheshire West and Chester
-    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
-    "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -282,7 +279,9 @@ WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire",
                    "greater manchester"]
 # Places that clearly are not in the target area, including everything in Scotland.
 OUT_OF_AREA_TERMS = [
-    "liverpool street", "chester-le-street", "crewe", "cheshire east",
+    "liverpool street", "chester-le-street", "cheshire west", "west cheshire",
+    "chester", "ellesmere port", "neston", "northwich", "winsford", "frodsham",
+    "helsby", "tarporley", "crewe", "cheshire east",
     "wigan", "hindley", "standish", "golborne", "tyldesley", "atherton",
     "ashton-in-makerfield", "ince-in-makerfield", "shevington", "aspull", "pemberton",
     "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton", "up holland",
@@ -309,13 +308,11 @@ FULL_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b")
 DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 
 # Find a Tender and Contracts Finder often give the region as a NUTS code instead
-# of a postcode. These codes are confirmed against the published code lists:
-# UKD71 covers East Merseyside (Knowsley, St Helens, Halton), UKD72 Liverpool,
-# and UKD73 Sefton and UKD74 Wirral. Broad codes that overlap target and non-target
-# places
-# require a postcode or place name; every other UK code is outside.
+# of a postcode. UKD61 is Warrington; UKD71 is East Merseyside (Knowsley, St Helens,
+# Halton); UKD72 Liverpool; UKD73 Sefton; and UKD74 Wirral. UKD63 (Cheshire West
+# and Chester) is deliberately excluded. Broad codes require further evidence.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
+LOCAL_NUTS = {"UKD61", "UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
@@ -629,13 +626,57 @@ def extract_records(payload, source):
             raw_tags = rel.get("tag") or rel.get("tags") or []
             if isinstance(raw_tags, str):
                 raw_tags = [raw_tags]
-            tag_text = " ".join(as_text(tag) for tag in raw_tags).lower()
-            if "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
+            tag_values = [as_text(tag).strip().lower() for tag in raw_tags if as_text(tag).strip()]
+            tag_text = " ".join(tag_values)
+
+            # Cancellation and award notices can retain the original tenderPeriod.
+            # Do not mistake "tenderCancellation" for a live tender merely because
+            # its tag contains the word "tender".
+            notice_statuses = [
+                as_text(first(tender, "status")),
+                as_text(first(tender, "awardStatus")),
+                as_text(first(rel, "status")),
+            ]
+            raw_awards = rel.get("awards") or []
+            if isinstance(raw_awards, dict):
+                raw_awards = [raw_awards]
+            if isinstance(raw_awards, list):
+                notice_statuses.extend(
+                    as_text(first(award, "status"))
+                    for award in raw_awards if isinstance(award, dict)
+                )
+            status_values = {value.strip().lower() for value in notice_statuses if value.strip()}
+            status_text = " ".join(status_values)
+            is_cancelled = (
+                any("cancel" in value or "termination" in value for value in tag_values)
+                or "cancel" in status_text
+                or "terminated" in status_text
+            )
+            is_closed = bool(status_values.intersection({
+                "unsuccessful", "withdrawn", "complete", "completed"
+            }))
+            is_planning = any(
+                value in {"planning", "planningupdate"}
+                or "pipeline" in value or "early market" in value
+                for value in tag_values
+            )
+            # OCDS defines tenderUpdate and tenderAmendment as releases about
+            # an existing tender, not awards or contract lifecycle notices.
+            is_tender_notice = any(
+                value in {"tender", "tenderupdate", "tenderamendment"}
+                for value in tag_values
+            )
+
+            if is_cancelled or is_closed:
+                opportunity_stage = "Other notice"
+            elif is_planning:
                 opportunity_stage = "Planning / upcoming"
-            elif "tender" in tag_text:
+            elif is_tender_notice or (not tag_values and (
+                tender.get("tenderPeriod") or tender.get("tender_period")
+            )):
                 opportunity_stage = "Open for bids"
             else:
-                opportunity_stage = "Open for bids" if (tender.get("tenderPeriod") or tender.get("tender_period")) else "Other notice"
+                opportunity_stage = "Other notice"
 
             # Trade/category evidence is often published on tender line items rather
             # than in the notice summary. Preserve readable item text for matching.
@@ -1478,6 +1519,7 @@ def main():
     review_rows = []
     rejected_by_scoring = 0
     excluded_by_stage = 0
+    excluded_review_by_stage = 0
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
@@ -1490,7 +1532,10 @@ def main():
         trade = scored.get("trade_category") or scored.get("service_match") or "NO TRADE MATCH"
         scored_trade_counts[trade] = scored_trade_counts.get(trade, 0) + 1
         if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
-            review_rows.append(scored)
+            if shortlist_eligible_stage(scored):
+                review_rows.append(scored)
+            else:
+                excluded_review_by_stage += 1
             continue
         if geo == "LOCAL" and scored["score"] >= args.min_score:
             if shortlist_eligible_stage(scored):
@@ -1553,6 +1598,7 @@ def main():
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
     print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
+    print(f"Excluded from location review by notice stage: {excluded_review_by_stage}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")

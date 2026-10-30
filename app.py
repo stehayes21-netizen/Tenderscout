@@ -246,11 +246,16 @@ def count_by_region(db):
     """Count stored opportunities without treating unverified locations as confirmed."""
     counts = {"main": 0, "review": 0, "confirmed_local": 0, "manual": 0}
     for row in db.execute(
-        "SELECT region_match, COUNT(*) AS n FROM tenders GROUP BY region_match"
+        "SELECT region_match, opportunity_stage, COUNT(*) AS n "
+        "FROM tenders GROUP BY region_match, opportunity_stage"
     ).fetchall():
         region = row["region_match"]
         if region == "REVIEW":
-            counts["review"] += row["n"]
+            # Only actionable opportunities need a location check. Awards,
+            # cancellations and other lifecycle notices remain stored/exportable
+            # but should not inflate the user's review workload.
+            if row["opportunity_stage"] in {"Open for bids", "Planning / upcoming"}:
+                counts["review"] += row["n"]
         else:
             counts["main"] += row["n"]
         if region == "LOCAL":
@@ -341,8 +346,8 @@ def dashboard():
     # location-review notices that mention one of the target areas. They are
     # labelled as unverified below; the full review view remains available.
     condition = (
-        "region_match = 'REVIEW'" if review_view
-        else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
+        "region_match = 'REVIEW' AND opportunity_stage IN ('Open for bids', 'Planning / upcoming')"
+        if review_view else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
     )
     params = []
     if pipeline_view:
