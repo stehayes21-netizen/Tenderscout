@@ -1423,7 +1423,7 @@ def classify_geography(record, region):
         return "REVIEW", (
             "Potential target-area site named in notice text, but broader or "
             "ambiguous delivery geography needs checking: "
-            + ", ".join(dict.fromkeys(prose_local_sites[:3]))
+            + ", ".join(place.title() for place in dict.fromkeys(prose_local_sites[:3]))
             + "; verify the full site list"
         )
     if weak:
