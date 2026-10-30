@@ -182,6 +182,49 @@ class OpportunityStageTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["opportunity_stage"], "Planning / upcoming")
 
+    def test_tender_cancellation_is_not_classified_as_open_even_with_tender_period(self):
+        payload = {
+            "releases": [{
+                "id": "cancelled-1",
+                "ocid": "ocds-test-cancelled",
+                "tag": ["tenderCancellation"],
+                "date": "2026-10-29T10:00:00Z",
+                "tender": {
+                    "title": "Cancelled cleaning contract",
+                    "description": "Cleaning",
+                    "status": "cancelled",
+                    "tenderPeriod": {"endDate": "2026-12-01T12:00:00Z"},
+                },
+                "awards": [{"id": "1", "status": "cancelled"}],
+                "buyer": {"name": "Test Council"},
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["opportunity_stage"], "Other notice")
+        self.assertFalse(tenderscout.shortlist_eligible_stage(rows[0]))
+
+    def test_award_notice_is_not_classified_as_open_from_retained_tender_period(self):
+        payload = {
+            "releases": [{
+                "id": "award-1",
+                "ocid": "ocds-test-award",
+                "tag": ["award"],
+                "date": "2026-10-29T10:00:00Z",
+                "tender": {
+                    "title": "Cleaning contract award",
+                    "description": "Cleaning",
+                    "tenderPeriod": {"endDate": "2026-12-01T12:00:00Z"},
+                },
+                "awards": [{"id": "1", "status": "active"}],
+                "buyer": {"name": "Test Council"},
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["opportunity_stage"], "Other notice")
+        self.assertFalse(tenderscout.shortlist_eligible_stage(rows[0]))
+
     def test_missing_stage_is_not_assumed_to_be_open_for_bids(self):
         self.assertFalse(tenderscout.shortlist_eligible_stage({}))
         self.assertFalse(tenderscout.shortlist_eligible_stage({"opportunity_stage": ""}))
