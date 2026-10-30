@@ -9,7 +9,7 @@ import sqlite3
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
@@ -152,8 +152,15 @@ def ensure_schema(db):
         started_at TEXT,
         finished_at TEXT,
         summary TEXT,
-        error TEXT
+        error TEXT,
+        refresh_token TEXT
     )""")
+    if USE_POSTGRES:
+        db.execute("ALTER TABLE refresh_state ADD COLUMN IF NOT EXISTS refresh_token TEXT")
+    else:
+        refresh_columns = {row[1] for row in db.execute("PRAGMA table_info(refresh_state)").fetchall()}
+        if "refresh_token" not in refresh_columns:
+            db.execute("ALTER TABLE refresh_state ADD COLUMN refresh_token TEXT")
     db.execute("INSERT INTO refresh_state (id, status) VALUES (1, 'idle') ON CONFLICT(id) DO NOTHING")
     if USE_POSTGRES:
         db.execute("ALTER TABLE private_leads ADD COLUMN IF NOT EXISTS urgency TEXT DEFAULT 'Normal'")
@@ -996,24 +1003,29 @@ def refresh_feed_issues():
     return issues
 
 
-def _set_refresh_state(status, summary="", error=""):
+def _set_refresh_state(status, summary="", error="", refresh_token=None):
+    """Update refresh state only while this refresh still owns the database lease."""
     db = connect_db()
     now = datetime.now(timezone.utc).isoformat()
     try:
-        db.execute(
-            "UPDATE refresh_state SET status = ?, finished_at = ?, summary = ?, error = ? WHERE id = 1",
-            (status, now if status in ("completed", "incomplete", "failed") else None, summary, error),
+        cursor = db.execute(
+            """UPDATE refresh_state
+               SET status = ?, finished_at = ?, summary = ?, error = ?
+               WHERE id = 1 AND refresh_token = ?""",
+            (status, now if status in ("completed", "incomplete", "failed") else None,
+             summary, error, refresh_token),
         )
         db.commit()
+        return cursor.rowcount == 1
     finally:
         db.close()
 
 
-def _run_background_refresh():
+def _run_background_refresh(refresh_token=None):
     try:
         stats, error = refresh_or_error()
         if error:
-            _set_refresh_state("failed", error=error.get_data(as_text=True)[:1000])
+            _set_refresh_state("failed", error=error.get_data(as_text=True)[:1000], refresh_token=refresh_token)
         else:
             summary = summary_text(stats)
             issues = refresh_feed_issues()
@@ -1023,22 +1035,28 @@ def _run_background_refresh():
                     "incomplete",
                     summary=summary + " Some source results may be missing.",
                     error="Partial collection: " + detail[:900],
+                    refresh_token=refresh_token,
                 )
                 app.logger.warning("Refresh saved partial results: %s", detail)
             else:
-                _set_refresh_state("completed", summary=summary)
+                _set_refresh_state("completed", summary=summary, refresh_token=refresh_token)
     except Exception:
         app.logger.exception("Background tender refresh failed")
         try:
-            _set_refresh_state("failed", error="Refresh failed. Check the service logs.")
+            _set_refresh_state("failed", error="Refresh failed. Check the service logs.", refresh_token=refresh_token)
         except Exception:
             app.logger.exception("Could not save failed refresh status")
     finally:
         _refresh_lock.release()
 
 
-def _start_refresh_thread():
-    threading.Thread(target=_run_background_refresh, daemon=True, name="tenderscout-refresh").start()
+def _start_refresh_thread(refresh_token):
+    threading.Thread(
+        target=_run_background_refresh,
+        args=(refresh_token,),
+        daemon=True,
+        name="tenderscout-refresh",
+    ).start()
 
 
 @app.route("/api/refresh", methods=["POST"])
@@ -1053,14 +1071,28 @@ def api_refresh():
         return {"status": "running", "message": "A refresh is already running."}, 202
 
     started = datetime.now(timezone.utc).isoformat()
+    stale_before = (datetime.now(timezone.utc) - timedelta(
+        seconds=REFRESH_STALE_AFTER_SECONDS
+    )).isoformat()
+    refresh_token = uuid.uuid4().hex
     db = None
     try:
         db = connect_db()
-        db.execute(
-            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
-            (started,),
+        # Conditional UPDATE is the cross-process lock. The database serialises
+        # competing updates to this single row; only one request can claim it.
+        # A lease older than the safety window can be reclaimed after a crash.
+        cursor = db.execute(
+            """UPDATE refresh_state
+               SET status = 'running', started_at = ?, finished_at = NULL,
+                   summary = '', error = '', refresh_token = ?
+               WHERE id = 1
+                 AND (status != 'running' OR started_at IS NULL OR started_at < ?)""",
+            (started, refresh_token, stale_before),
         )
         db.commit()
+        if cursor.rowcount != 1:
+            _refresh_lock.release()
+            return {"status": "running", "message": "A refresh is already running."}, 202
     except Exception:
         _refresh_lock.release()
         raise
@@ -1069,10 +1101,12 @@ def api_refresh():
             db.close()
 
     try:
-        _start_refresh_thread()
+        _start_refresh_thread(refresh_token)
     except Exception:
         _refresh_lock.release()
-        _set_refresh_state("failed", error="Could not start the refresh thread.")
+        _set_refresh_state(
+            "failed", error="Could not start the refresh thread.", refresh_token=refresh_token
+        )
         app.logger.exception("Could not start background tender refresh")
         return {"status": "failed", "error": "Could not start the refresh thread."}, 500
     return {"status": "running", "started_at": started}, 202
@@ -1101,7 +1135,7 @@ def api_refresh_status():
     db = connect_db()
     try:
         row = db.execute(
-            "SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1"
+            "SELECT status, started_at, finished_at, summary, error, refresh_token FROM refresh_state WHERE id = 1"
         ).fetchone()
         state = dict(row) if row else {}
     finally:
@@ -1115,11 +1149,12 @@ def api_refresh_status():
         db = connect_db()
         try:
             row = db.execute(
-                "SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1"
+                "SELECT status, started_at, finished_at, summary, error, refresh_token FROM refresh_state WHERE id = 1"
             ).fetchone()
             state = dict(row) if row else {}
         finally:
             db.close()
+    state.pop("refresh_token", None)
     return state
 
 
