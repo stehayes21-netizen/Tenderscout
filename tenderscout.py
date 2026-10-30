@@ -1310,7 +1310,13 @@ def classify_geography(record, region):
     # Description text must never promote a notice to LOCAL, but it must stop us
     # incorrectly discarding a mixed-area opportunity as OUT_OF_AREA.
     prose_local_sites = place_hits(prose, LOCAL_PLACE_TERMS)
-    prose_out_sites = explicit_out_of_area_delivery_sites(prose, OUT_OF_AREA_TERMS)
+    prose_full_postcodes, _ = postcode_districts(prose)
+    # A postcode appearing only in title/description is deliberately not
+    # authoritative. Preserve REVIEW for those records, including mixed sites.
+    prose_out_sites = (
+        [] if prose_full_postcodes
+        else explicit_out_of_area_delivery_sites(prose, OUT_OF_AREA_TERMS)
+    )
     if prose_out_sites and not prose_local_sites:
         return "OUT_OF_AREA", (
             "Explicit out-of-area delivery/site wording in notice: "
