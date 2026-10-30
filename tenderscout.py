@@ -9,9 +9,10 @@ Run:
   python tenderscout.py --services cleaning fm --out my_tenders.csv
 
 Outputs:
-  tenderscout_results.csv  - filtered shortlist (opens in Excel/Google Sheets)
-  tenderscout_review.csv   - tenders with uncertain or missing locations requiring manual review
-  tenderscout_all.csv      - all fetched tender-stage notices, for audit
+  tenderscout_results.csv  - confirmed local open bids
+  tenderscout_review.csv   - open bids with location needing manual verification
+  tenderscout_pipeline.csv - planning notices, not yet open for bids
+  tenderscout_all.csv      - all fetched notices, deduplicated for audit
 
 Important:
 - Public feeds may be delayed or omit fields; always open the official notice.
