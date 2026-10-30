@@ -1330,14 +1330,40 @@ def export_database_backup():
 
 @app.route("/export.csv")
 def export_csv():
+    """Export the clean working list by default; retain a separate full audit export."""
+    full_audit = request.args.get("view") == "all"
     db = connect_db()
-    rows = db.execute(
-        f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders ORDER BY saved_at DESC"
-    ).fetchall()
+    if full_audit:
+        rows = db.execute(
+            f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders ORDER BY saved_at DESC"
+        ).fetchall()
+    else:
+        rows = db.execute(
+            f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders "
+            "WHERE region_match IN ('LOCAL', 'REVIEW', 'MANUAL') "
+            "AND opportunity_stage IN ('Open for bids', 'Planning / upcoming')"
+        ).fetchall()
     db.close()
-    # Apply the same cross-source duplicate suppression and useful ordering
-    # to exports, including legacy duplicate rows already stored in the DB.
     rows = collector.dedupe([dict(row) for row in rows])
+    if not full_audit:
+        rows = [
+            row for row in rows
+            if not deadline_info(row["deadline"])[2]
+            and (row["region_match"] != "REVIEW" or has_target_area_clue(row))
+        ]
+        stage_order = {"Open for bids": 2, "Planning / upcoming": 1}
+        rows.sort(key=lambda row: (
+            stage_order.get(row["opportunity_stage"], 0),
+            row.get("score", 0),
+            bool(collector.parse_date(row.get("deadline"))),
+            collector.parse_date(row.get("deadline")) or datetime.max.replace(tzinfo=timezone.utc),
+            str(row.get("title") or "").casefold(),
+        ), reverse=True)
+    else:
+        rows.sort(key=lambda row: (
+            str(row.get("published_date") or ""),
+            str(row.get("title") or "").casefold(),
+        ), reverse=True)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -1348,7 +1374,7 @@ def export_csv():
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=tenderscout_export.csv"},
+        headers={"Content-Disposition": "attachment; filename=" + ("tenderscout_full_audit.csv" if full_audit else "tenderscout_actionable.csv")},
     )
 
 
