@@ -224,8 +224,8 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA9", "WA10", "WA11", "WA12",
     # Halton
     "WA7", "WA8",
-    # Warrington (postcode districts can cross borough edges; verify exact site where needed)
-    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
+    # Warrington (WA6 is Cheshire West and Chester, so excluded)
+    "WA1", "WA2", "WA3", "WA4", "WA5", "WA13",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
     # Wirral
@@ -235,7 +235,7 @@ LOCAL_POSTCODE_DISTRICTS = {
 REVIEW_POSTCODE_DISTRICTS = set()
 EXCLUDED_POSTCODE_DISTRICTS = {
     *(f"CH{n}" for n in range(1, 41)),
-    "CH64", "CH65", "CH66",
+    "CH64", "CH65", "CH66", "WA6",
     *(f"CW{n}" for n in range(1, 10)),
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
