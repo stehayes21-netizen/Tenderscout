@@ -1216,8 +1216,8 @@ def explicit_out_of_area_delivery_sites(text, terms):
             before = text[max(0, match.start() - 120):match.start()]
             after = text[match.end():match.end() + 100]
             before_cue = re.search(
-                r"\b(?:at|in|within|across|throughout|to|delivery in|services in|works in|"
-                r"properties in|site in|project in|located in|based at)\s+"
+                r"\b(?:within|across|throughout|delivery in|services in|works in|"
+                r"properties in|site in|project in|located in)\s+"
                 r"(?:(?:the\s+)?(?:boundaries of|area of|city of|town of|borough of|county of)\s+)*$",
                 before,
             )
