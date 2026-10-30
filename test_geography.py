@@ -1009,6 +1009,37 @@ class DataQualityRegressionTests(unittest.TestCase):
                     record, tenderscout.SERVICE_ORDER, "Target area", None, None
                 ))
 
+    def test_generic_construction_context_does_not_create_construction_match(self):
+        record = {
+            "title": "Provision of Baseline Measurements of Stratospheric Ozone",
+            "description": "Scientific measurements and calibration services.",
+            "trade_context": "CPV description: Construction work",
+            "buyer": "Example Department",
+            "location_text": "Liverpool L2 2DH",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        self.assertIsNone(tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        ))
+
+    def test_only_plausible_target_area_clues_enter_review_candidates(self):
+        self.assertTrue(tenderscout.has_target_area_clue({
+            "title": "Roof repairs across Knowsley",
+            "description": "",
+        }))
+        self.assertTrue(tenderscout.has_target_area_clue({
+            "title": "Commercial cleaning framework",
+            "description": "Sites include Liverpool and Sefton",
+        }))
+        self.assertFalse(tenderscout.has_target_area_clue({
+            "title": "Scaffolding in Falkirk",
+            "description": "Falkirk Council",
+        }))
+        self.assertFalse(tenderscout.has_target_area_clue({
+            "title": "UK-wide facilities framework",
+            "description": "Delivery across the United Kingdom",
+        }))
+
     def test_catering_title_is_not_mislabelled_as_construction(self):
         record = {
             "title": "Provision of Catering Services",
