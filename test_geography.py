@@ -1005,6 +1005,14 @@ class DiscoveryStageTests(unittest.TestCase):
             "Other notice",
         )
 
+    def test_award_and_withdrawn_discovery_notices_are_not_live_bids(self):
+        for title in ("Contract award notice for cleaning", "Roof repairs — withdrawn"):
+            with self.subTest(title=title):
+                self.assertEqual(
+                    tenderscout.discovery_opportunity_stage(title, "", "2099-12-31"),
+                    "Other notice",
+                )
+
     def test_pre_market_discovery_stays_in_planning_pipeline(self):
         self.assertEqual(
             tenderscout.discovery_opportunity_stage(
