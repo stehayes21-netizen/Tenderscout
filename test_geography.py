@@ -893,6 +893,28 @@ class BearingsDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(stats["records"], 1)
 
+    def test_bearings_fetches_all_offset_pages_until_reported_total(self):
+        pages = [
+            {"meta": {"total": 3, "limit": 2, "offset": 0}, "data": [
+                {"id": "one", "title": "Cleaning one", "url": "https://provider.example/1", "kind": "tender"},
+                {"id": "two", "title": "Cleaning two", "url": "https://provider.example/2", "kind": "tender"},
+            ]},
+            {"meta": {"total": 3, "limit": 2, "offset": 2}, "data": [
+                {"id": "three", "title": "Cleaning three", "url": "https://provider.example/3", "kind": "tender"},
+            ]},
+        ]
+        with patch.object(tenderscout, "get_json", side_effect=pages) as mocked, \\
+             patch.object(tenderscout.time, "sleep"):
+            stats = {}
+            rows = tenderscout.fetch_bearings(30, stats)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(stats["pages"], 2)
+        self.assertEqual(stats["total_available"], 3)
+        self.assertIn("offset=0", mocked.call_args_list[0].args[0])
+        self.assertIn("offset=2", mocked.call_args_list[1].args[0])
+        self.assertFalse(stats.get("stopped"))
+        self.assertFalse(stats.get("error"))
+
     def test_bearings_feed_failure_is_reported_without_crashing(self):
         with patch.object(tenderscout, "get_json", side_effect=RuntimeError("feed offline")):
             stats = {}
