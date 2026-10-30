@@ -35,9 +35,10 @@ _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 _EMPTY_BOARD_REFRESH_ATTEMPTED = False
 # Refresh ownership is coordinated by an atomic database lease, not process memory.
-# A refresh without a heartbeat for 15 minutes is presumed interrupted.
-# Active collectors renew the lease every 30 seconds.
-REFRESH_STALE_AFTER_SECONDS = 15 * 60
+# A refresh without a heartbeat for 20 minutes is presumed interrupted.
+# Active collectors renew the lease every 30 seconds. This accommodates the
+# rate-limited 15-minute Find a Tender collection budget plus result persistence.
+REFRESH_STALE_AFTER_SECONDS = 20 * 60
 
 
 def env_int(name, default):
@@ -785,10 +786,9 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
-    # Find a Tender rate-limits pagination. A 60-day lookback has ten daily
-    # windows plus weekly history; allow enough time to traverse them without
-    # falsely reporting incomplete coverage before the source can finish.
-    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 720)
+    # Find a Tender rate-limits pagination. Allow up to 15 minutes for the
+    # 60-day cursor walk; the CI poll and stale-refresh lease are sized above it.
+    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 900)
     fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
     # Run independent free sources concurrently. Bearings and Standstill are
     # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
@@ -956,8 +956,10 @@ def feed_notes():
             text += ". Stopped early (time limit), so there may be more"
         elif st.get("more"):
             text += ". More pages were available but not read"
-        elif st.get("full_end") or st.get("last_batch", 0) >= 100:
+        elif st.get("pagination_supported") and st.get("full_end"):
             text += ". The last page was full but no next-page link came back, so results may be cut off"
+        elif st.get("known_feed_cap"):
+            text += f". Publisher limits this RSS feed to its {st['known_feed_cap']} newest items"
         lines.append(safe(text))
     if not lines:
         return ""
@@ -1005,7 +1007,10 @@ def refresh_feed_issues():
             reasons.append("more pages available")
         if feed.get("truncated_windows"):
             reasons.append("one or more search windows truncated")
-        if feed.get("full_end") or feed.get("last_batch", 0) >= 100:
+        # A full page is only evidence of possible truncation for a source
+        # that explicitly supports cursor/offset pagination. Fixed-size RSS
+        # feeds are intentionally capped by their publisher.
+        if feed.get("pagination_supported") and feed.get("full_end"):
             reasons.append("possible page truncation")
         if reasons:
             issues.append(f"{name}: {', '.join(reasons)}")
