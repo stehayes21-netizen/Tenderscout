@@ -363,6 +363,7 @@ class GeographyClassifierTests(unittest.TestCase):
             "estimated_value_gbp": 150000,
             "deadline": "2099-12-31T00:00:00+00:00",
             "status": "tender",
+            "opportunity_stage": "Open for bids",
             "notice_url": "https://example.com/review-notice",
             "ocid": "review-001",
         }
