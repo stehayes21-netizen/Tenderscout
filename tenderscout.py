@@ -15,8 +15,8 @@ Outputs:
 
 Important:
 - Public feeds may be delayed or omit fields; always open the official notice.
-- Geography matching uses postcode districts first, then place names. It is a heuristic,
-  not a definitive location check. Target area: Liverpool, Sefton, St Helens, Halton, Knowsley and the agreed wider North West districts.
+- Geography matching uses explicit delivery/site evidence. Target area: Liverpool, Sefton,
+  St Helens, Halton, Knowsley, Wirral and Warrington. Cheshire West and Chester is excluded.
 - This script runs when you launch it. It is not a hosted service or scheduled job.
 """
 
@@ -209,8 +209,8 @@ SERVICE_LABELS = {
 }
 
 # --- Target area ------------------------------------------------------------
-# Approved service area: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral,
-# Warrington and Cheshire West and Chester. Other North West areas remain excluded.
+# Approved service area: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral and Warrington.
+# Cheshire West and Chester, and all other Cheshire areas, are excluded.
 # Postcode districts are the main evidence. Any uncertain or mixed location goes
 # to REVIEW; never loosen these rules merely to increase the number of matches.
 TARGET_AREA_LABEL = "Target area"
@@ -224,19 +224,19 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA9", "WA10", "WA11", "WA12",
     # Halton
     "WA7", "WA8",
-    # Warrington (postcode districts can cross borough edges; verify exact site where needed)
-    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
-    # Cheshire West and Chester (CH4 remains borderline and requires review)
-    "CH1", "CH2", "CH3", "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
+    # Warrington (WA6 is Cheshire West and Chester, so excluded)
+    "WA1", "WA2", "WA3", "WA4", "WA5", "WA13",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
     # Wirral
     *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
-# CH4 is a boundary district and needs a site-level check.
-REVIEW_POSTCODE_DISTRICTS = {"CH4"}
+# Cheshire West postcode districts are excluded; Wirral districts remain in-scope.
+REVIEW_POSTCODE_DISTRICTS = set()
 EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(5, 41)),
+    *(f"CH{n}" for n in range(1, 41)),
+    "CH64", "CH65", "CH66", "WA6",
+    *(f"CW{n}" for n in range(1, 10)),
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
 }
@@ -268,9 +268,6 @@ LOCAL_PLACE_TERMS = [
     # Warrington
     "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
     "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
-    # Cheshire West and Chester
-    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
-    "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -282,7 +279,9 @@ WEAK_AREA_TERMS = ["merseyside", "north west", "cheshire", "lancashire",
                    "greater manchester"]
 # Places that clearly are not in the target area, including everything in Scotland.
 OUT_OF_AREA_TERMS = [
-    "liverpool street", "chester-le-street", "crewe", "cheshire east",
+    "liverpool street", "chester-le-street", "cheshire west", "west cheshire",
+    "chester", "ellesmere port", "neston", "northwich", "winsford", "frodsham",
+    "helsby", "tarporley", "crewe", "cheshire east",
     "wigan", "hindley", "standish", "golborne", "tyldesley", "atherton",
     "ashton-in-makerfield", "ince-in-makerfield", "shevington", "aspull", "pemberton",
     "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton", "up holland",
@@ -309,13 +308,11 @@ FULL_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s*(\d[A-Z]{2})\b")
 DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 
 # Find a Tender and Contracts Finder often give the region as a NUTS code instead
-# of a postcode. These codes are confirmed against the published code lists:
-# UKD71 covers East Merseyside (Knowsley, St Helens, Halton), UKD72 Liverpool,
-# and UKD73 Sefton and UKD74 Wirral. Broad codes that overlap target and non-target
-# places
-# require a postcode or place name; every other UK code is outside.
+# of a postcode. UKD61 is Warrington; UKD71 is East Merseyside (Knowsley, St Helens,
+# Halton); UKD72 Liverpool; UKD73 Sefton; and UKD74 Wirral. UKD63 (Cheshire West
+# and Chester) is deliberately excluded. Broad codes require further evidence.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
+LOCAL_NUTS = {"UKD61", "UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",

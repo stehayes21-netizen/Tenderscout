@@ -382,12 +382,14 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
 
-    def test_newly_approved_warrington_and_west_cheshire_places_are_local(self):
-        for text in ("Warrington WA1 1AA", "Lymm WA13 0AA",
-                     "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
-                     "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA"):
+    def test_warrington_places_remain_local_and_cheshire_west_is_excluded(self):
+        for text in ("Warrington WA1 1AA", "Lymm WA13 0AA"):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
+        for text in ("Chester CH1 1AA", "Ellesmere Port CH65 4AA",
+                     "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA"):
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_wider_north_west_places_outside_approved_scope_stay_out(self):
         for text in ("Wigan WN1 1AA", "Leigh WN7 1AA",
@@ -478,7 +480,7 @@ class PostcodeCoverageTests(unittest.TestCase):
         # Representative postcode districts from all approved areas.
         for postcode in (
             "L1 1AA", "L20 1AA", "PR8 1AA", "WA9 1AA", "WA7 1AA", "L32 1AA",
-            "WA1 1AA", "WA5 1AA", "CH1 1AA", "CH2 1AA", "CW8 1AA",
+            "WA1 1AA", "WA5 1AA", "CH41 1AA",
         ):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "LOCAL")
@@ -501,8 +503,9 @@ class PostcodeCoverageTests(unittest.TestCase):
             with self.subTest(region=region):
                 self.assertEqual(self.classify(region), "OUT_OF_AREA")
 
-    def test_borderline_postcode_is_sent_for_review(self):
-        self.assertEqual(self.classify("CH4 1AA"), "REVIEW")
+    def test_cheshire_west_border_postcode_is_out_of_area(self):
+        self.assertEqual(self.classify("CH4 1AA"), "OUT_OF_AREA")
+        self.assertEqual(self.classify("WA6 7AA"), "OUT_OF_AREA")
 
 
 class RegionCodeAndCommunityTests(unittest.TestCase):
@@ -515,7 +518,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
                 self.assertEqual(self.classify(code), "LOCAL")
 
     def test_all_approved_region_codes_are_local(self):
-        for code in ("UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"):
+        for code in ("UKD61", "UKD71", "UKD72", "UKD73", "UKD74"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "LOCAL")
 
@@ -533,7 +536,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
         self.assertEqual(self.classify("Greater Manchester, Bolton"), "OUT_OF_AREA")
 
     def test_region_codes_for_other_areas_are_out_of_area(self):
-        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD62", "UKD41", "UKC11"):
+        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD62", "UKD63", "UKD41", "UKC11"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "OUT_OF_AREA")
 
@@ -545,8 +548,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
     def test_local_neighbourhoods_are_recognised(self):
         for place in ("Wavertree", "Aigburth", "Ainsdale",
                       "Rainford", "Newton-le-Willows", "Daresbury", "Widnes",
-                      "Warrington", "Chester", "Ellesmere Port", "Northwich",
-                      "Winsford", "Frodsham", "Neston", "Helsby"):
+                      "Warrington"):
             with self.subTest(place=place):
                 self.assertEqual(self.classify(place), "LOCAL")
 
@@ -560,7 +562,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
         self.assertEqual(self.classify("Halton Borough Council, Runcorn WA7 2PQ"), "LOCAL")
 
     def test_wider_approved_area_does_not_make_other_areas_local(self):
-        for place in ("Manchester", "Cheshire East", "Crewe", "Wigan"):
+        for place in ("Manchester", "Cheshire East", "Cheshire West and Chester", "Crewe", "Wigan"):
             with self.subTest(place=place):
                 self.assertEqual(self.classify(place), "OUT_OF_AREA")
 
@@ -574,7 +576,7 @@ class OverlapAndTradeTests(unittest.TestCase):
 
     def test_longer_names_win_over_the_shorter_name_inside_them(self):
         self.assertEqual(self.classify("Preston Brook, Runcorn"), "LOCAL")
-        self.assertEqual(self.classify("Cheshire West and Chester"), "LOCAL")
+        self.assertEqual(self.classify("Cheshire West and Chester"), "OUT_OF_AREA")
         self.assertEqual(self.classify("Cheshire East"), "OUT_OF_AREA")
         self.assertEqual(self.classify("Preston"), "OUT_OF_AREA")
 

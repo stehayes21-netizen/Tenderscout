@@ -488,6 +488,49 @@ class RefreshTests(AppTestCase):
         self.assertIn(b"Full location review (1)", page)
         self.assertIn(b"view=review", page)
 
+
+    def test_chester_and_cheshire_west_delivery_postcodes_are_out_of_area(self):
+        import tenderscout
+        for postcode in ("CH1 2AB", "CH2 3AB", "CH3 4AB", "CH4 5AB",
+                         "CH64 6AB", "CH65 7AB", "CH66 8AB",
+                         "CW6 9AB", "CW7 1AB", "CW8 2AB", "CW9 3AB"):
+            with self.subTest(postcode=postcode):
+                result = tenderscout.classify_geography(
+                    {"location_text": postcode}, tenderscout.TARGET_AREA_LABEL
+                )
+                self.assertEqual(result[0], "OUT_OF_AREA", (postcode, result))
+
+    def test_cheshire_west_places_are_out_of_area(self):
+        import tenderscout
+        for place in ("Chester", "Cheshire West and Chester", "West Cheshire",
+                      "Ellesmere Port", "Neston", "Northwich", "Winsford",
+                      "Frodsham", "Helsby", "Tarporley"):
+            with self.subTest(place=place):
+                result = tenderscout.classify_geography(
+                    {"location_text": place}, tenderscout.TARGET_AREA_LABEL
+                )
+                self.assertEqual(result[0], "OUT_OF_AREA", (place, result))
+
+    def test_halton_and_other_agreed_areas_remain_in_scope(self):
+        import tenderscout
+        for place in ("Liverpool L2 2DH", "Southport PR8 1AA", "Formby L37 3AA",
+                      "Knowsley L34 5AA", "St Helens WA10 1AA",
+                      "Runcorn WA7 1AA", "Widnes WA8 6AA",
+                      "Warrington WA1 1AA", "Birkenhead CH41 1AA",
+                      "Wallasey CH44 1AA"):
+            with self.subTest(place=place):
+                result = tenderscout.classify_geography(
+                    {"location_text": place}, tenderscout.TARGET_AREA_LABEL
+                )
+                self.assertEqual(result[0], "LOCAL", (place, result))
+
+    def test_generic_cheshire_label_is_not_promoted_to_local(self):
+        import tenderscout
+        result = tenderscout.classify_geography(
+            {"location_text": "Cheshire"}, tenderscout.TARGET_AREA_LABEL
+        )
+        self.assertEqual(result[0], "REVIEW", result)
+
     def test_scottish_tenders_are_never_saved(self):
         self.refresh_with([feed_record("edi", "Edinburgh EH1 1AA")])
         self.assertNotIn(b"example.com/edi", self.client.get("/export.csv").data)
