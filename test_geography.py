@@ -923,5 +923,29 @@ class BearingsDiscoveryTests(unittest.TestCase):
         self.assertIn("feed offline", stats["error"])
 
 
+class TradeClassificationEvidenceTests(unittest.TestCase):
+    def test_title_trade_wins_over_incidental_description_keyword(self):
+        category = tenderscout.classify_trade_category(
+            "The school meals service is mentioned in the background.",
+            title="Preliminary Market Engagement for Education Software Suite",
+        )
+        self.assertEqual(category, "IT and telecommunications")
+
+    def test_incidental_description_keyword_does_not_create_trade_category(self):
+        category = tenderscout.classify_trade_category(
+            "The former building includes equipment and furniture in the description.",
+            title="Development Opportunity: Former Municipal Buildings and Car Park",
+        )
+        self.assertEqual(category, "Other / unclassified")
+
+    def test_procurement_line_item_context_is_strong_evidence(self):
+        category = tenderscout.classify_trade_category(
+            "General school contract information.",
+            title="Multi-site school support contract",
+            trade_context="Catering services for school meals",
+        )
+        self.assertEqual(category, "Catering and food services")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
