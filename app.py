@@ -35,9 +35,10 @@ _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 _EMPTY_BOARD_REFRESH_ATTEMPTED = False
 # Refresh ownership is coordinated by an atomic database lease, not process memory.
-# A refresh without a heartbeat for 15 minutes is presumed interrupted.
-# Active collectors renew the lease every 30 seconds.
-REFRESH_STALE_AFTER_SECONDS = 15 * 60
+# A refresh without a heartbeat for 20 minutes is presumed interrupted.
+# Active collectors renew the lease every 30 seconds. This accommodates the
+# rate-limited 15-minute Find a Tender collection budget plus result persistence.
+REFRESH_STALE_AFTER_SECONDS = 20 * 60
 
 
 def env_int(name, default):
@@ -261,19 +262,8 @@ def count_by_region(db):
 
 
 def has_target_area_clue(row):
-    """True only when a review record names a target-area clue worth surfacing.
-
-    This does not promote a record to LOCAL. It lets the main board surface
-    potentially relevant notices while preserving the explicit location-check
-    badge. Records with no target-area evidence remain in the full review queue.
-    """
-    # Buyer names can justify a manual look, but never establish delivery geography.
-    text = " ".join(str(row[field] or "") for field in ("location_text", "title", "description", "buyer")).lower()
-    local_hits = collector.place_hits(text, collector.LOCAL_PLACE_TERMS)
-    out_hits = collector.place_hits(text, collector.OUT_OF_AREA_TERMS)
-    local_hits = collector.drop_contained(local_hits, out_hits)
-    full, bare = collector.postcode_districts(text, include_bare=True)
-    return bool(local_hits or ((full | bare) & collector.LOCAL_POSTCODE_DISTRICTS))
+    """A plausible local clue is a reason to review, never proof of delivery."""
+    return collector.has_target_area_clue(row)
 
 
 def deadline_info(deadline):
@@ -341,7 +331,7 @@ def dashboard():
     # location-review notices that mention one of the target areas. They are
     # labelled as unverified below; the full review view remains available.
     condition = (
-        "region_match = 'REVIEW'" if review_view
+        "region_match = 'REVIEW' AND opportunity_stage = 'Open for bids'" if review_view
         else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
     )
     params = []
@@ -360,26 +350,45 @@ def dashboard():
         "ORDER BY score DESC, published_date DESC",
         params,
     ).fetchall()
+    # Suppress cross-source discovery copies in the display too, including
+    # older duplicates already stored before the collector's dedupe fix.
+    rows = collector.dedupe([dict(row) for row in rows])
     counts = count_by_region(db)
-    if not review_view:
-        rows = [
-            row for row in rows
-            if row["region_match"] != "REVIEW" or has_target_area_clue(row)
-        ]
+    # The review count and page include only live open bids with a plausible
+    # target-area clue. Generic UK-wide or unrelated notices stay in the audit,
+    # not in the working review queue.
+    review_candidates = db.execute(
+        "SELECT * FROM tenders WHERE region_match = 'REVIEW' AND opportunity_stage = 'Open for bids'"
+    ).fetchall()
+    review_candidates = collector.dedupe([dict(row) for row in review_candidates])
+    counts["review"] = sum(
+        1 for row in review_candidates
+        if has_target_area_clue(row) and not deadline_info(row["deadline"])[2]
+    )
+    rows = [
+        row for row in rows
+        if row["region_match"] != "REVIEW" or has_target_area_clue(row)
+    ]
     db.close()
 
     decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
-    if not review_view and not pipeline_view:
-        # The main jobs board is for actionable bids, not expired tenders or
-        # award/contract-update notices. Keep the underlying records for review
-        # and CSV export; planning notices have their own pipeline view.
+    if not pipeline_view:
+        # Main and review boards show actionable live bids only. Planning notices
+        # have their own pipeline view; awards, updates and expired bids stay out
+        # of the working lists but remain stored for audit/export.
+        allowed_stages = {"Open for bids"}
         decorated = [
             item for item in decorated
-            if (item[0]["opportunity_stage"] or "Other notice") == "Open for bids"
+            if (item[0]["opportunity_stage"] or "Other notice") in allowed_stages
             and not item[3]
         ]
-    # Open tenders first; soon-to-close opportunities remain visible at the top.
-    decorated.sort(key=lambda item: item[3])
+    # Sort live bids by nearest deadline, then score; undated notices sit last.
+    decorated.sort(key=lambda item: (
+        collector.parse_date(item[0]["deadline"]) is None,
+        collector.parse_date(item[0]["deadline"]) or datetime.max.replace(tzinfo=timezone.utc),
+        -int(item[0]["score"] or 0),
+        str(item[0]["title"] or "").casefold(),
+    ))
 
     cards = ""
     for row, deadline_label, deadline_class, _closed in decorated:
@@ -430,11 +439,13 @@ def dashboard():
         )
         value_label = format_money(row["estimated_value_gbp"])
         duration_label = contract_length(row["contract_start_date"], row["contract_end_date"])
-        notice_label = (
-            "Open source listing — verify official notice"
-            if "Standstill UK" in str(row["source"] or "")
-            else "View official notice"
-        )
+        source_name = str(row["source"] or "")
+        if "Bearings" in source_name:
+            notice_label = "Open provider listing — verify official notice"
+        elif "Standstill UK" in source_name:
+            notice_label = "Open source listing — verify official notice"
+        else:
+            notice_label = "View official notice"
         notice = (
             f'<a href="{link}" target="_blank" rel="noopener">{notice_label}</a>'
             if link.startswith("https://") else ""
@@ -742,7 +753,7 @@ def dashboard():
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
     <p id="refresh-status" class="note" role="status" aria-live="polite" hidden></p></header>
     {banner}
-    <p>{heading} · {switch} · <a href="/export.csv">Export CSV</a></p>
+    <p>{heading} · {switch} · <a href="/export.csv">Export actionable jobs</a> · <a href="/export.csv?view=all">Full audit CSV</a></p>
     {filter_form}
     <p class="note">Always verify eligibility, location, deadline and contract details
     on the official notice.</p>
@@ -766,6 +777,52 @@ def set_stage(tender_id):
     return redirect(dashboard_url(view, service if service in SERVICE_FILTERS else ""))
 
 
+def remove_cross_source_duplicates(db):
+    """Delete legacy discovery-feed copies when the same official notice is stored."""
+    rows = db.execute(
+        "SELECT id, title, buyer, source, pipeline_status, deadline FROM tenders"
+    ).fetchall()
+    grouped = {}
+    for row in rows:
+        title = " ".join(str(row["title"] or "").casefold().split())
+        buyer = " ".join(str(row["buyer"] or "").casefold().split())
+        deadline = collector.parse_date(row["deadline"])
+        # Same title/buyer may recur; only remove a legacy shadow if its
+        # closing date also matches the official record.
+        if title and buyer and deadline:
+            grouped.setdefault((title, buyer, deadline.date().isoformat()), []).append(row)
+
+    removed = 0
+    for group in grouped.values():
+        official = [
+            row for row in group
+            if any(name in str(row["source"] or "") for name in ("Find a Tender", "Contracts Finder"))
+        ]
+        discovery = [
+            row for row in group
+            if any(name in str(row["source"] or "") for name in ("Bearings", "Standstill"))
+        ]
+        if not official or not discovery:
+            continue
+        keeper = max(official, key=lambda row: int(row["id"]))
+        # Preserve any manually changed pipeline state before removing the
+        # redundant discovery copy.
+        if str(keeper["pipeline_status"] or "Reviewing") == "Reviewing":
+            chosen = next(
+                (row for row in discovery if str(row["pipeline_status"] or "Reviewing") != "Reviewing"),
+                None,
+            )
+            if chosen:
+                db.execute(
+                    "UPDATE tenders SET pipeline_status = ? WHERE id = ?",
+                    (chosen["pipeline_status"], keeper["id"]),
+                )
+        for row in discovery:
+            db.execute("DELETE FROM tenders WHERE id = ?", (row["id"],))
+            removed += 1
+    return removed
+
+
 def sample_line(record):
     """A one-line description of a tender, for reading in the service logs."""
     def clip(value, size):
@@ -785,10 +842,9 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
-    # Find a Tender rate-limits pagination. A 60-day lookback has ten daily
-    # windows plus weekly history; allow enough time to traverse them without
-    # falsely reporting incomplete coverage before the source can finish.
-    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 720)
+    # Find a Tender rate-limits pagination. Allow up to 15 minutes for the
+    # 60-day cursor walk; the CI poll and stale-refresh lease are sized above it.
+    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 900)
     fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
     # Run independent free sources concurrently. Bearings and Standstill are
     # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
@@ -901,6 +957,7 @@ def run_refresh():
                 ),
             )
             stats["local" if region_match == "LOCAL" else "review"] += 1
+        stats["legacy_duplicates_removed"] = remove_cross_source_duplicates(db)
         db.commit()
     finally:
         db.close()
@@ -956,8 +1013,10 @@ def feed_notes():
             text += ". Stopped early (time limit), so there may be more"
         elif st.get("more"):
             text += ". More pages were available but not read"
-        elif st.get("full_end") or st.get("last_batch", 0) >= 100:
+        elif st.get("pagination_supported") and st.get("full_end"):
             text += ". The last page was full but no next-page link came back, so results may be cut off"
+        elif st.get("known_feed_cap"):
+            text += f". Publisher limits this RSS feed to its {st['known_feed_cap']} newest items"
         lines.append(safe(text))
     if not lines:
         return ""
@@ -1005,7 +1064,10 @@ def refresh_feed_issues():
             reasons.append("more pages available")
         if feed.get("truncated_windows"):
             reasons.append("one or more search windows truncated")
-        if feed.get("full_end") or feed.get("last_batch", 0) >= 100:
+        # A full page is only evidence of possible truncation for a source
+        # that explicitly supports cursor/offset pagination. Fixed-size RSS
+        # feeds are intentionally capped by their publisher.
+        if feed.get("pagination_supported") and feed.get("full_end"):
             reasons.append("possible page truncation")
         if reasons:
             issues.append(f"{name}: {', '.join(reasons)}")
@@ -1275,11 +1337,40 @@ def export_database_backup():
 
 @app.route("/export.csv")
 def export_csv():
+    """Export the clean working list by default; retain a separate full audit export."""
+    full_audit = request.args.get("view") == "all"
     db = connect_db()
-    rows = db.execute(
-        f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders ORDER BY saved_at DESC"
-    ).fetchall()
+    if full_audit:
+        rows = db.execute(
+            f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders ORDER BY saved_at DESC"
+        ).fetchall()
+    else:
+        rows = db.execute(
+            f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders "
+            "WHERE region_match IN ('LOCAL', 'REVIEW', 'MANUAL') "
+            "AND opportunity_stage IN ('Open for bids', 'Planning / upcoming')"
+        ).fetchall()
     db.close()
+    rows = collector.dedupe([dict(row) for row in rows])
+    if not full_audit:
+        rows = [
+            row for row in rows
+            if not deadline_info(row["deadline"])[2]
+            and (row["region_match"] != "REVIEW" or has_target_area_clue(row))
+        ]
+        stage_order = {"Open for bids": 2, "Planning / upcoming": 1}
+        rows.sort(key=lambda row: (
+            -stage_order.get(row["opportunity_stage"], 0),
+            -int(row.get("score") or 0),
+            collector.parse_date(row.get("deadline")) is None,
+            collector.parse_date(row.get("deadline")) or datetime.max.replace(tzinfo=timezone.utc),
+            str(row.get("title") or "").casefold(),
+        ))
+    else:
+        rows.sort(key=lambda row: (
+            str(row.get("published_date") or ""),
+            str(row.get("title") or "").casefold(),
+        ), reverse=True)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -1290,7 +1381,7 @@ def export_csv():
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=tenderscout_export.csv"},
+        headers={"Content-Disposition": "attachment; filename=" + ("tenderscout_full_audit.csv" if full_audit else "tenderscout_actionable.csv")},
     )
 
 

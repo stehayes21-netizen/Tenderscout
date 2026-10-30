@@ -92,7 +92,8 @@ class StandstillDiscoveryFeedTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(stats["records"], 1)
         self.assertEqual(rows[0]["source"], "Standstill UK (RSS discovery; verify official notice)")
-        self.assertIn("North West England", rows[0]["location_text"])
+        self.assertEqual(rows[0]["location_text"], "")
+        self.assertEqual(rows[0]["_raw"]["feed_label"], "North West region")
         self.assertEqual(rows[0]["notice_url"], "https://www.find-tender.service.gov.uk/Notice/123456-2026")
         self.assertEqual(rows[0]["deadline"], "2026-11-16T12:00:00+00:00")
         self.assertEqual(
@@ -278,6 +279,7 @@ class GeographyClassifierTests(unittest.TestCase):
             "status": "tender",
             "notice_url": "https://example.com/review-notice",
             "ocid": "review-001",
+            "opportunity_stage": "Open for bids",
         }
         local_record = {
             "source": "Find a Tender",
@@ -416,6 +418,36 @@ class PostcodeAreaTests(unittest.TestCase):
     def test_place_names_match_whole_words_only(self):
         # "Canterbury" contains "bury"; it must not be treated as Bury.
         self.assertEqual(self.classify("Canterbury"), "REVIEW")
+
+    def test_every_agreed_area_named_in_title_or_description_enters_review(self):
+        # Prose can surface a possible local opportunity, but never confirms
+        # delivery location. All nine agreed areas must be discoverable.
+        agreed_areas = (
+            "Liverpool", "Sefton", "St Helens", "Halton", "Warrington",
+            "West Cheshire", "Wirral", "Wallasey", "Knowsley",
+        )
+        for area in agreed_areas:
+            for field in ("title", "description"):
+                with self.subTest(area=area, field=field):
+                    record = {
+                        "location_text": "",
+                        "title": "Facilities contract",
+                        "description": "Services to be provided at multiple sites.",
+                    }
+                    record[field] = f"Opportunity covering {area}"
+                    geo_class, reason = tenderscout.classify_geography(record, "Target area")
+                    self.assertEqual(geo_class, "REVIEW")
+                    self.assertIn("title/description", reason.lower())
+
+    def test_local_area_in_prose_keeps_out_of_area_structured_record_in_review(self):
+        record = {
+            "location_text": "Manchester M1 1AA",
+            "title": "Maintenance framework",
+            "description": "Includes a site in Knowsley.",
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("knowsley", reason.lower())
 
     def test_full_postcode_in_title_or_description_requires_review(self):
         for field, value in (
@@ -893,11 +925,254 @@ class BearingsDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(stats["records"], 1)
 
+    def test_bearings_does_not_mislabel_listing_portal_as_buyer(self):
+        payload = {"data": [{
+            "id": "opp-portal-only",
+            "title": "Roofing works",
+            "provider": "The Chest procurement portal",
+            "url": "https://provider.example/roofing",
+            "kind": "tender",
+            "closes": "2099-12-31",
+        }]}
+        with patch.object(tenderscout, "get_json", return_value=payload):
+            rows = tenderscout.fetch_bearings(5, {})
+        self.assertEqual(rows[0]["buyer"], "")
+        self.assertIn("Listing portal/provider: The Chest procurement portal", rows[0]["description"])
+
+    def test_bearings_uses_explicit_buyer_field_when_available(self):
+        payload = {"data": [{
+            "id": "opp-with-buyer",
+            "title": "Roofing works",
+            "provider": "The Chest procurement portal",
+            "buyer": "Liverpool City Council",
+            "url": "https://provider.example/roofing",
+            "kind": "tender",
+            "closes": "2099-12-31",
+        }]}
+        with patch.object(tenderscout, "get_json", return_value=payload):
+            rows = tenderscout.fetch_bearings(5, {})
+        self.assertEqual(rows[0]["buyer"], "Liverpool City Council")
+
+    def test_bearings_fetches_all_offset_pages_until_reported_total(self):
+        pages = [
+            {"meta": {"total": 3, "limit": 2, "offset": 0}, "data": [
+                {"id": "one", "title": "Cleaning one", "url": "https://provider.example/1", "kind": "tender"},
+                {"id": "two", "title": "Cleaning two", "url": "https://provider.example/2", "kind": "tender"},
+            ]},
+            {"meta": {"total": 3, "limit": 2, "offset": 2}, "data": [
+                {"id": "three", "title": "Cleaning three", "url": "https://provider.example/3", "kind": "tender"},
+            ]},
+        ]
+        with patch.object(tenderscout, "get_json", side_effect=pages) as mocked, \
+             patch.object(tenderscout.time, "sleep"):
+            stats = {}
+            rows = tenderscout.fetch_bearings(30, stats)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(stats["pages"], 2)
+        self.assertEqual(stats["total_available"], 3)
+        self.assertIn("offset=0", mocked.call_args_list[0].args[0])
+        self.assertIn("offset=2", mocked.call_args_list[1].args[0])
+        self.assertFalse(stats.get("stopped"))
+        self.assertFalse(stats.get("error"))
+
     def test_bearings_feed_failure_is_reported_without_crashing(self):
         with patch.object(tenderscout, "get_json", side_effect=RuntimeError("feed offline")):
             stats = {}
             self.assertEqual(tenderscout.fetch_bearings(5, stats), [])
         self.assertIn("feed offline", stats["error"])
+
+
+class DiscoveryStageTests(unittest.TestCase):
+    def test_future_discovery_deadline_is_a_live_bid_but_still_requires_source_verification(self):
+        self.assertEqual(
+            tenderscout.discovery_opportunity_stage(
+                "Commercial cleaning services", "Liverpool sites", "2099-12-31"
+            ),
+            "Open for bids",
+        )
+
+    def test_expired_or_missing_discovery_deadline_is_not_promoted(self):
+        self.assertEqual(
+            tenderscout.discovery_opportunity_stage(
+                "Commercial cleaning services", "", "2000-01-01"
+            ),
+            "Other notice",
+        )
+        self.assertEqual(
+            tenderscout.discovery_opportunity_stage(
+                "Commercial cleaning services", "", ""
+            ),
+            "Other notice",
+        )
+
+    def test_award_and_withdrawn_discovery_notices_are_not_live_bids(self):
+        for title in ("Contract award notice for cleaning", "Roof repairs — withdrawn"):
+            with self.subTest(title=title):
+                self.assertEqual(
+                    tenderscout.discovery_opportunity_stage(title, "", "2099-12-31"),
+                    "Other notice",
+                )
+
+    def test_pre_market_discovery_stays_in_planning_pipeline(self):
+        self.assertEqual(
+            tenderscout.discovery_opportunity_stage(
+                "Pre-market engagement for cleaning services", "", "2099-12-31"
+            ),
+            "Planning / upcoming",
+        )
+
+
+class DataQualityRegressionTests(unittest.TestCase):
+    def test_discovery_copy_is_removed_when_same_official_notice_exists(self):
+        official = {
+            "source": "Find a Tender",
+            "ocid": "ocds-official-1",
+            "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
+            "title": "Roof repairs in Liverpool",
+            "buyer": "Example Council",
+            "published_date": "2026-10-27",
+            "deadline": "2099-11-20T17:00:00Z",
+            "opportunity_stage": "Open for bids",
+        }
+        discovery = {
+            "source": "Bearings (discovery; verify provider notice)",
+            "ocid": "opp-discovery-1",
+            "notice_url": "https://provider.example/roof-repairs",
+            "title": "Roof repairs in Liverpool",
+            "buyer": "Example Council",
+            "published_date": "2026-10-20",
+            "deadline": "2099-11-20",
+            "opportunity_stage": "Other notice",
+        }
+        rows = tenderscout.dedupe([discovery, official])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source"], "Find a Tender")
+
+    def test_same_title_cross_source_records_with_different_deadlines_are_preserved(self):
+        rows = [
+            {"source": "Find a Tender", "ocid": "ocds-2026", "title": "Grounds maintenance",
+             "buyer": "Example Council", "deadline": "2026-11-20"},
+            {"source": "Bearings (discovery; verify provider notice)", "ocid": "opp-2027",
+             "title": "Grounds maintenance", "buyer": "Example Council", "deadline": "2027-11-20"},
+        ]
+        self.assertEqual(len(tenderscout.dedupe(rows)), 2)
+
+    def test_distinct_official_processes_with_same_title_are_not_collapsed(self):
+        rows = [
+            {"source": "Find a Tender", "ocid": "ocds-1", "title": "Client Transport Services",
+             "buyer": "Surrey County Council", "published_date": "2026-10-29"},
+            {"source": "Find a Tender", "ocid": "ocds-2", "title": "Client Transport Services",
+             "buyer": "Surrey County Council", "published_date": "2026-10-30"},
+        ]
+        self.assertEqual(len(tenderscout.dedupe(rows)), 2)
+
+    def test_unrelated_description_keywords_do_not_create_broad_trade_matches(self):
+        examples = [
+            ("Mission Feasibility Studies – Spacecraft Life Extension Service Demonstration",
+             "The project mentions refurbishment and refurbish in a technical context."),
+            ("Client Support Framework (CSF)",
+             "The authority is responsible for construction and delivery of a rail programme."),
+            ("Provision of Workplace Adjustments",
+             "The service includes reuse and refurbishment of ergonomic chairs."),
+            ("Provision of Baseline Measurements of Stratospheric Ozone",
+             "Scientific measurement and calibration services across monitoring sites."),
+        ]
+        for title, description in examples:
+            with self.subTest(title=title):
+                record = {
+                    "title": title, "description": description, "buyer": "Example buyer",
+                    "trade_context": "", "location_text": "Liverpool L2 2DH",
+                    "deadline": "2099-12-31T00:00:00+00:00",
+                }
+                self.assertIsNone(tenderscout.score_record(
+                    record, tenderscout.SERVICE_ORDER, "Target area", None, None
+                ))
+
+    def test_client_support_framework_is_not_classified_from_generic_construction_context(self):
+        record = {
+            "title": "Client Support Framework (CSF)",
+            "description": (
+                "Partners support the development and delivery of a national rail programme. "
+                "The procurement is for client support services."
+            ),
+            "trade_context": "CPV description: Construction project management",
+            "buyer": "Example Rail Authority",
+            "location_text": "UK, United Kingdom",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        self.assertIsNone(tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        ))
+
+    def test_generic_construction_context_does_not_create_construction_match(self):
+        record = {
+            "title": "Provision of Baseline Measurements of Stratospheric Ozone",
+            "description": "Scientific measurements and calibration services.",
+            "trade_context": "CPV description: Construction work",
+            "buyer": "Example Department",
+            "location_text": "Liverpool L2 2DH",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        self.assertIsNone(tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        ))
+
+    def test_only_plausible_target_area_clues_enter_review_candidates(self):
+        self.assertTrue(tenderscout.has_target_area_clue({
+            "title": "Roof repairs across Knowsley",
+            "description": "",
+        }))
+        self.assertTrue(tenderscout.has_target_area_clue({
+            "title": "Commercial cleaning framework",
+            "description": "Sites include Liverpool and Sefton",
+        }))
+        self.assertFalse(tenderscout.has_target_area_clue({
+            "title": "Scaffolding in Falkirk",
+            "description": "Falkirk Council",
+        }))
+        self.assertFalse(tenderscout.has_target_area_clue({
+            "title": "UK-wide facilities framework",
+            "description": "Delivery across the United Kingdom",
+        }))
+
+    def test_catering_title_is_not_mislabelled_as_construction(self):
+        record = {
+            "title": "Provision of Catering Services",
+            "description": "The organisation is undertaking refurbishment of its main building.",
+            "buyer": "Example University", "trade_context": "",
+            "location_text": "Liverpool L2 2DH",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        scored = tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        )
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["trade_category"], "Catering and food services")
+        self.assertEqual(scored["service_match"], "Catering and food services")
+
+
+class TradeClassificationEvidenceTests(unittest.TestCase):
+    def test_title_trade_wins_over_incidental_description_keyword(self):
+        category = tenderscout.classify_trade_category(
+            "The school meals service is mentioned in the background.",
+            title="Preliminary Market Engagement for Education Software Suite",
+        )
+        self.assertEqual(category, "IT and telecoms")
+
+    def test_incidental_description_keyword_does_not_create_trade_category(self):
+        category = tenderscout.classify_trade_category(
+            "The former building includes equipment and furniture in the description.",
+            title="Development Opportunity: Former Municipal Buildings and Car Park",
+        )
+        self.assertEqual(category, "Other / unclassified")
+
+    def test_procurement_line_item_context_is_strong_evidence(self):
+        category = tenderscout.classify_trade_category(
+            "General school contract information.",
+            title="Multi-site school support contract",
+            trade_context="Catering services for school meals",
+        )
+        self.assertEqual(category, "Catering and food services")
 
 
 if __name__ == "__main__":

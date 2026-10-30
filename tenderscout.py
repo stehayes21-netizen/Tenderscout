@@ -9,9 +9,10 @@ Run:
   python tenderscout.py --services cleaning fm --out my_tenders.csv
 
 Outputs:
-  tenderscout_results.csv  - filtered shortlist (opens in Excel/Google Sheets)
-  tenderscout_review.csv   - tenders with uncertain or missing locations requiring manual review
-  tenderscout_all.csv      - all fetched tender-stage notices, for audit
+  tenderscout_results.csv  - confirmed local open bids
+  tenderscout_review.csv   - open bids with location needing manual verification
+  tenderscout_pipeline.csv - planning notices, not yet open for bids
+  tenderscout_all.csv      - all fetched notices, deduplicated for audit
 
 Important:
 - Public feeds may be delayed or omit fields; always open the official notice.
@@ -134,7 +135,7 @@ TRADE_KEYWORDS = {
     "Laundry and linen": ["laundry services", "linen services", "laundry and linen"],
     "Catering and food services": ["catering services", "food services", "school meals"],
     "Furniture and equipment": ["furniture supply", "furniture installation", "equipment supply"],
-    "IT and telecoms": ["information technology", "telecommunications", "network infrastructure", "it and telecoms", "it support", "telecoms support"],
+    "IT and telecoms": ["information technology", "telecommunications", "network infrastructure", "it and telecoms", "it support", "telecoms support", "software suite", "education software", "software system", "software services"],
     "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "transport services"],
     "Water and fire damage restoration": ["water damage restoration", "fire damage restoration", "flood restoration"],
     "Interior design": ["interior design", "interior fit out design"],
@@ -144,18 +145,45 @@ TRADE_KEYWORDS = {
     "Other / unclassified": [],
 }
 
-def classify_trade_category(fulltext):
-    """Return the best detailed category; leave unmatched opportunities unclassified."""
-    text = (fulltext or "").lower()
-    matches = []
+def classify_trade_category(fulltext, title="", trade_context=""):
+    """Classify from strong procurement evidence, not incidental words in long prose.
+
+    Title matches carry the most weight, followed by tender line-item/classification
+    context. General description matches are weak and cannot classify a notice alone.
+    The one-argument form remains supported for older callers and tests.
+    """
+    if not title and not trade_context:
+        title_text = (fulltext or "").lower()
+        context_text = ""
+        description_text = ""
+        legacy_mode = True
+    else:
+        title_text = (title or "").lower()
+        context_text = (trade_context or "").lower()
+        description_text = (fulltext or "").lower()
+        legacy_mode = False
+
+    scores = {}
     for category, terms in TRADE_KEYWORDS.items():
+        score = 0
         for term in terms:
-            if term in text:
-                matches.append((len(term), category))
-    if matches:
-        matches.sort(reverse=True)
-        return matches[0][1]
-    return "Other / unclassified"
+            if term in title_text:
+                score += 6
+            if term in context_text:
+                # A generic construction-project-management CPV/context label
+                # can describe the wider programme, not the service purchased.
+                score += 2 if category == "Construction project management" else 4
+            if term in description_text:
+                score += 1
+        if legacy_mode and score:
+            score = max(score, 4)
+        if score:
+            scores[category] = score
+
+    if not scores:
+        return "Other / unclassified"
+    category, score = max(scores.items(), key=lambda item: (item[1], item[0]))
+    return category if score >= 4 else "Other / unclassified"
 
 
 CLEANING_TERMS = [
@@ -272,6 +300,9 @@ LOCAL_PLACE_TERMS = [
     "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
     "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
+# Prose-only hints: enough to surface a notice for human review, never to confirm a site.
+PROSE_TARGET_AREA_TERMS = LOCAL_PLACE_TERMS + ["halton"]
+
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
     "eccleston", "halton", "orrell", "thornton", "sutton", "kirkby", "whiston",
@@ -469,6 +500,33 @@ def parse_date(value):
         return dt
     except (ValueError, TypeError):
         return None
+
+
+def discovery_opportunity_stage(title, description, deadline):
+    """Infer a discovery lead's stage only from an explicit, unexpired closing date.
+
+    Aggregator/RSS records are not official notices. A future closing date makes
+    them plausible live bids, but the source label must still tell users to verify
+    the provider notice. No deadline means do not promote the record.
+    """
+    text = " ".join((str(title or ""), str(description or ""))).casefold()
+    non_bidding_terms = (
+        "contract award", "award notice", "notice of award", "contract details notice",
+        "result notice", "cancelled", "canceled", "withdrawn", "terminated",
+    )
+    if any(term in text for term in non_bidding_terms):
+        return "Other notice"
+    planning_terms = (
+        "pre-market", "pre market", "market engagement", "early market",
+        "prior information notice", "pipeline", "planned procurement",
+        "preliminary market",
+    )
+    if any(term in text for term in planning_terms):
+        return "Planning / upcoming"
+    closing = parse_date(deadline)
+    if closing and closing >= datetime.now(timezone.utc):
+        return "Open for bids"
+    return "Other notice"
 
 
 def money_value(value):
@@ -727,7 +785,8 @@ def _start_stats(stats):
     stats = stats if stats is not None else {}
     stats.update({"pages": 0, "records": 0, "last_batch": 0, "more": False,
                   "error": "", "stopped": "", "windows": 0, "full_end": False,
-                  "truncated_windows": 0, "last_page_had_cursor": False})
+                  "truncated_windows": 0, "last_page_had_cursor": False,
+                  "pagination_supported": False})
     return stats
 
 
@@ -787,6 +846,7 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
     """Read one search page by page, following the feed's own next-page links."""
     results = []
     cursor = None
+    stats["pagination_supported"] = True
     for _ in range(max_pages):
         if max_seconds and time.monotonic() - started > max_seconds:
             print("[WARN] Stopped early: the time limit for this source was reached", file=sys.stderr)
@@ -860,15 +920,10 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        # Allow up to three pages per hosted window. This preserves the newer
-        # daily slices and gives busy weekly windows more room before the source
-        # time budget becomes the hard stop.
-        # The source time budget remains the hard stop; CLI audits use their
-        # requested page limit for every window.
-        if max_seconds:
-            window_page_limit = min(max_pages, 6)
-        else:
-            window_page_limit = max_pages
+        # Follow the official cursor through each window. The overall source
+        # time budget is the safety stop; an arbitrary six-page window cap was
+        # cutting off busy periods even when time remained.
+        window_page_limit = max_pages
         results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
                                      started, max_seconds, stats))
         if stats["error"]:
@@ -915,57 +970,95 @@ def fetch_bearings(max_seconds=None, stats=None):
     stats = _start_stats(stats)
     started = time.monotonic()
     results = []
-    params = {"area": "lcr,cheshire", "kind": "tender", "limit": "200", "sort": "newest"}
-    url = "https://getbearings.co.uk/api/v1/opportunities?" + urllib.parse.urlencode(params)
-    try:
-        payload = get_json(url)
-    except Exception as exc:
-        stats["error"] = str(exc)[:320]
-        print(f"[WARN] Bearings fetch failed: {exc}", file=sys.stderr)
-        return results
-    data = payload.get("data", []) if isinstance(payload, dict) else []
-    if not isinstance(data, list):
-        stats["error"] = "Unexpected Bearings API response shape"
-        return results
-    for item in data:
-        if max_seconds and time.monotonic() - started > max_seconds:
+    limit = 200
+    offset = 0
+    total_available = None
+    stats["pagination_supported"] = True
+    while True:
+        if max_seconds and time.monotonic() - started >= max_seconds:
             stats["stopped"] = "time limit"
             break
-        if not isinstance(item, dict) or str(item.get("kind", "")).lower() != "tender":
-            continue
-        title = as_text(item.get("title")).strip()
-        provider_url = as_text(item.get("url")).strip()
-        if not title or not provider_url.startswith("https://"):
-            continue
-        bearings_url = as_text(item.get("bearings_url")).strip()
-        description_parts = [as_text(item.get("summary")).strip(), as_text(item.get("conditions")).strip()]
-        where = as_text(item.get("where")).strip()
-        if where:
-            description_parts.append("Eligibility/location wording from Bearings (not verified delivery site): " + where)
-        if bearings_url.startswith("https://"):
-            description_parts.append("Source credit: Bearings — " + bearings_url)
-        results.append({
-            "source": "Bearings (discovery; verify provider notice)",
-            "opportunity_stage": "Other notice",
-            "location_text": "",
-            "published_date": as_text(item.get("first_seen") or ""),
-            "title": title,
-            "buyer": as_text(item.get("provider") or ""),
-            "description": " ".join(part for part in description_parts if part),
-            "contact_name": "", "contact_email": "", "contact_phone": "",
-            "eligibility_text": as_text(item.get("conditions") or ""),
-            "estimated_value_gbp": "",
-            "contract_start_date": "", "contract_end_date": "",
-            "deadline": as_text(item.get("closes") or ""),
-            "status": "Bearings discovery listing — verify provider notice",
-            "notice_url": provider_url,
-            "ocid": as_text(item.get("id") or provider_url),
-            "_raw": item,
-        })
-    stats.update({"pages": 1 if data else 0, "records": len(results), "last_batch": len(results),
-                  "windows": 1, "more": False, "full_end": len(data) >= 200})
+        params = {
+            "area": "lcr,cheshire", "kind": "tender", "limit": str(limit),
+            "offset": str(offset), "sort": "newest",
+        }
+        url = "https://getbearings.co.uk/api/v1/opportunities?" + urllib.parse.urlencode(params)
+        try:
+            payload = get_json(url)
+        except Exception as exc:
+            stats["error"] = str(exc)[:320]
+            print(f"[WARN] Bearings fetch failed: {exc}", file=sys.stderr)
+            break
+        if not isinstance(payload, dict) or not isinstance(payload.get("data", []), list):
+            stats["error"] = "Unexpected Bearings API response shape"
+            break
+        data = payload.get("data", [])
+        meta = payload.get("meta", {})
+        if isinstance(meta, dict):
+            try:
+                total_available = int(meta["total"])
+            except (KeyError, TypeError, ValueError):
+                pass
+        stats["pages"] = stats.get("pages", 0) + 1
+        stats["last_batch"] = len(data)
+        for item in data:
+            if not isinstance(item, dict) or str(item.get("kind", "")).lower() != "tender":
+                continue
+            title = as_text(item.get("title")).strip()
+            provider_url = as_text(item.get("url")).strip()
+            if not title or not provider_url.startswith("https://"):
+                continue
+            bearings_url = as_text(item.get("bearings_url")).strip()
+            description_parts = [as_text(item.get("summary")).strip(), as_text(item.get("conditions")).strip()]
+            # "provider" identifies the listing portal on some records (for
+            # example The Chest), not the contracting authority. Only populate
+            # buyer from explicit buyer/authority fields.
+            buyer_value = first(item, "buyer", "buyer_name", "organisation", "organization", "authority", "customer")
+            if isinstance(buyer_value, dict):
+                buyer_value = first(buyer_value, "name", "legalName", "title")
+            buyer_name = as_text(buyer_value).strip()
+            listing_provider = as_text(item.get("provider")).strip()
+            if listing_provider:
+                description_parts.append("Listing portal/provider: " + listing_provider)
+            where = as_text(item.get("where")).strip()
+            if where:
+                description_parts.append("Eligibility/location wording from Bearings (not verified delivery site): " + where)
+            if bearings_url.startswith("https://"):
+                description_parts.append("Source credit: Bearings — " + bearings_url)
+            closing_date = as_text(item.get("closes") or "")
+            results.append({
+                "source": "Bearings (discovery; verify provider notice)",
+                "opportunity_stage": discovery_opportunity_stage(title, " ".join(description_parts), closing_date),
+                "location_text": "",
+                "published_date": as_text(item.get("first_seen") or ""),
+                "title": title,
+                "buyer": buyer_name,
+                "description": " ".join(part for part in description_parts if part),
+                "contact_name": "", "contact_email": "", "contact_phone": "",
+                "eligibility_text": as_text(item.get("conditions") or ""),
+                "estimated_value_gbp": "",
+                "contract_start_date": "", "contract_end_date": "",
+                "deadline": closing_date,
+                "status": "Bearings discovery listing — verify provider notice",
+                "notice_url": provider_url,
+                "ocid": as_text(item.get("id") or provider_url),
+                "_raw": item,
+            })
+        offset += len(data)
+        if not data or (total_available is not None and offset >= total_available):
+            break
+        if total_available is None and len(data) < limit:
+            break
+        if total_available is None and len(data) == limit:
+            stats["error"] = "Bearings response omitted meta.total; stopped rather than assume pagination was complete"
+            break
+        # Bearings documents a 60-requests/minute limit; keep a safe margin.
+        time.sleep(1.05)
+    stats.update({
+        "records": len(results), "windows": 1, "more": False,
+        "total_available": total_available,
+    })
     return results
-
 
 def fetch_standstill_northwest(max_seconds=None, stats=None):
     """Fetch free Standstill RSS discovery feeds, retaining source attribution.
@@ -1087,8 +1180,8 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
             buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
             output.append({
                 "source": "Standstill UK (RSS discovery; verify official notice)",
-                "opportunity_stage": "Other notice",
-                "location_text": "North West England (aggregator region only; delivery site not confirmed)",
+                "opportunity_stage": discovery_opportunity_stage(title, description, deadline),
+                "location_text": "",  # Feed geography is not a delivery/site address.
                 "published_date": published,
                 "title": title,
                 "buyer": buyer,
@@ -1115,7 +1208,7 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
         "last_batch": len(output),
         "windows": len(feed_counts),
         "more": False,
-        "full_end": any(value >= 50 for value in feed_counts.values()),
+        "known_feed_cap": 50,
         "feed_counts": feed_counts,
         "partial_errors": "; ".join(errors)[:320] if feed_counts else "",
         "error": ("; ".join(errors)[:320] if errors and not feed_counts else ""),
@@ -1165,6 +1258,19 @@ def postcode_districts(text, include_bare=False):
         known = LOCAL_POSTCODE_DISTRICTS | REVIEW_POSTCODE_DISTRICTS | EXCLUDED_POSTCODE_DISTRICTS
         bare = {m.group(1) for m in DISTRICT_RE.finditer(upper) if m.group(1) in known}
     return full, bare
+
+
+def has_target_area_clue(record):
+    """Whether a notice has a plausible target-area clue worth human review."""
+    text = " ".join(
+        str(record.get(field) or "")
+        for field in ("location_text", "title", "description", "buyer")
+    ).lower()
+    local_hits = place_hits(text, LOCAL_PLACE_TERMS)
+    out_hits = place_hits(text, OUT_OF_AREA_TERMS)
+    local_hits = drop_contained(local_hits, out_hits)
+    full, bare = postcode_districts(text, include_bare=True)
+    return bool(local_hits or ((full | bare) & LOCAL_POSTCODE_DISTRICTS))
 
 
 def classify_geography(record, region):
@@ -1234,7 +1340,7 @@ def classify_geography(record, region):
     # a multi-school cleaning contract spanning Trafford, Knowsley and Wigan).
     # Description text must never promote a notice to LOCAL, but it must stop us
     # incorrectly discarding a mixed-area opportunity as OUT_OF_AREA.
-    prose_local_sites = place_hits(prose, LOCAL_PLACE_TERMS)
+    prose_local_sites = place_hits(prose, PROSE_TARGET_AREA_TERMS)
     if strong_out and prose_local_sites:
         return "REVIEW", (
             "Structured delivery location includes non-target areas, while the "
@@ -1285,7 +1391,7 @@ def classify_geography(record, region):
     # are the only route to a confirmed LOCAL classification.
     prose_hits = (
         sorted(prose_full)
-        + place_hits(prose, LOCAL_PLACE_TERMS)
+        + place_hits(prose, PROSE_TARGET_AREA_TERMS)
         + place_hits(prose, OUT_OF_AREA_TERMS)
     )
     if prose_hits:
@@ -1300,19 +1406,36 @@ def classify_geography(record, region):
 
 
 def score_record(record, services, region, min_value, max_value):
-    fulltext = " ".join([
-        record.get("title", ""), record.get("description", ""),
-        record.get("trade_context", ""), record.get("buyer", ""),
-    ]).lower()
+    # Broad service groups must be supported by the notice title or structured
+    # procurement line-item context. Long descriptions and buyer names contain
+    # incidental words (e.g. "refurbishment") and must not create false matches.
+    title_text = str(record.get("title") or "").lower()
+    context_text = str(record.get("trade_context") or "").lower()
+    strong_text = " ".join([title_text, context_text])
+    # A generic CPV/context label such as "construction work" can describe the
+    # wider programme rather than the purchased service. Require specific
+    # construction wording in structured context; generic terms count only in
+    # the actual notice title.
+    specific_construction_context = [
+        term for term in CONSTRUCTION_TERMS
+        if term not in {"construction", "refurbishment", "refurbish", "construction project management"}
+    ]
     trade_hits = {
-        "cleaning": keyword_hits(fulltext, CLEANING_TERMS),
-        "fm": keyword_hits(fulltext, FM_TERMS),
-        "maintenance": keyword_hits(fulltext, MAINTENANCE_TERMS),
-        "construction": keyword_hits(fulltext, CONSTRUCTION_TERMS),
+        "cleaning": keyword_hits(strong_text, CLEANING_TERMS),
+        "fm": keyword_hits(strong_text, FM_TERMS),
+        "maintenance": keyword_hits(strong_text, MAINTENANCE_TERMS),
+        "construction": (
+            keyword_hits(title_text, CONSTRUCTION_TERMS)
+            + keyword_hits(context_text, specific_construction_context)
+        ),
     }
-    exclude_hits = keyword_hits(fulltext, EXCLUDE_TERMS)
+    exclude_hits = keyword_hits(strong_text, EXCLUDE_TERMS)
     matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
-    detailed_category = classify_trade_category(fulltext)
+    detailed_category = classify_trade_category(
+        record.get("description", ""),
+        title=record.get("title", ""),
+        trade_context=record.get("trade_context", ""),
+    )
     # The default scope now covers the full detailed trade taxonomy. Keep
     # backwards compatibility for callers explicitly selecting a subset of the
     # legacy service groups: those switches must still exclude disabled groups.
@@ -1389,10 +1512,30 @@ def shortlist_eligible_stage(record):
 
 
 def dedupe(records):
-    """Deduplicate procurement processes and cross-source copies of the same notice."""
-    priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
+    """Remove exact notice copies and discovery-feed shadows without merging distinct official notices."""
+    stage_priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
+    official_markers = ("Find a Tender", "Contracts Finder")
+    discovery_markers = ("Bearings", "Standstill")
     by_key = {}
     notice_key = {}
+    process_source_keys = {}
+
+    def process_key(row):
+        title = " ".join(str(row.get("title") or "").casefold().split())
+        buyer = " ".join(str(row.get("buyer") or "").casefold().split())
+        deadline = parse_date(row.get("deadline"))
+        # Same title and buyer can recur in different years. Only suppress a
+        # cross-source shadow when its closing date also matches.
+        if not title or not buyer or not deadline:
+            return None
+        return (title, buyer, deadline.date().isoformat())
+
+    def is_official(row):
+        return any(marker in str(row.get("source") or "") for marker in official_markers)
+
+    def is_discovery(row):
+        return any(marker in str(row.get("source") or "") for marker in discovery_markers)
+
     for row in records:
         notice_url = str(row.get("notice_url") or "").strip()
         if notice_url and notice_url in notice_key:
@@ -1400,15 +1543,46 @@ def dedupe(records):
         else:
             ocid = row.get("ocid")
             key = ("ocid", ocid) if ocid else (
-                "title", row.get("title", "").lower(), row.get("buyer", "").lower(),
-                row.get("published_date", ""),
+                ("url", notice_url) if notice_url else (
+                    "title", row.get("title", "").lower(), row.get("buyer", "").lower(),
+                    row.get("published_date", ""),
+                )
             )
+
+        # Discovery feeds often repeat an official notice under a different URL
+        # and publication date. Suppress only the discovery copy; never collapse
+        # two distinct official OCIDs with the same title and buyer.
+        pkey = process_key(row)
+        if pkey and (is_official(row) or is_discovery(row)):
+            existing_key = process_source_keys.get(pkey)
+            existing = by_key.get(existing_key) if existing_key else None
+            if existing and is_official(existing) and is_discovery(row):
+                continue
+            if existing and is_discovery(existing) and is_official(row):
+                by_key.pop(existing_key, None)
+                if existing.get("notice_url"):
+                    notice_key.pop(str(existing["notice_url"]).strip(), None)
+            elif existing and (is_official(existing) == is_official(row)):
+                # Keep separate official processes and separate discovery entries.
+                process_source_keys[pkey] = key
+
         if notice_url:
             notice_key[notice_url] = key
         current = by_key.get(key)
-        if current is None or priority.get(row.get("opportunity_stage"), 0) > priority.get(current.get("opportunity_stage"), 0):
+        if current is None or stage_priority.get(row.get("opportunity_stage"), 0) > stage_priority.get(current.get("opportunity_stage"), 0):
             by_key[key] = row
-    return list(by_key.values())
+        if pkey and (is_official(row) or is_discovery(row)):
+            process_source_keys[pkey] = key
+
+    return sorted(
+        by_key.values(),
+        key=lambda row: (
+            stage_priority.get(row.get("opportunity_stage"), 0),
+            str(row.get("published_date") or ""),
+            str(row.get("title") or "").casefold(),
+        ),
+        reverse=True,
+    )
 
 
 def write_csv(path, rows):
@@ -1474,8 +1648,9 @@ def main():
         print("No CSV was written because no source records were received.")
         sys.exit(2)
 
-    filtered = []
-    review_rows = []
+    filtered = []             # confirmed local, open for bids
+    review_rows = []           # possible local, open for bids; verify site
+    pipeline_rows = []         # planning notices; not yet bidable
     rejected_by_scoring = 0
     excluded_by_stage = 0
     scored_geography_counts = {}
@@ -1489,16 +1664,32 @@ def main():
         scored_geography_counts[geo] = scored_geography_counts.get(geo, 0) + 1
         trade = scored.get("trade_category") or scored.get("service_match") or "NO TRADE MATCH"
         scored_trade_counts[trade] = scored_trade_counts.get(trade, 0) + 1
-        if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
-            review_rows.append(scored)
-            continue
-        if geo == "LOCAL" and scored["score"] >= args.min_score:
-            if shortlist_eligible_stage(scored):
-                filtered.append(scored)
+
+        stage = scored.get("opportunity_stage") or "Other notice"
+        if stage == "Planning / upcoming":
+            if (
+                geo == "LOCAL"
+                or (geo == "REVIEW" and has_target_area_clue(scored))
+            ) and scored["score"] >= args.min_score:
+                pipeline_rows.append(scored)
             else:
                 excluded_by_stage += 1
-    filtered.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
-    review_rows.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
+            continue
+        if stage != "Open for bids":
+            excluded_by_stage += 1
+            continue
+
+        if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
+            if has_target_area_clue(scored):
+                review_rows.append(scored)
+            continue
+        if geo == "LOCAL" and scored["score"] >= args.min_score:
+            filtered.append(scored)
+
+    sort_key = lambda r: (r.get("score", 0), r.get("deadline", ""), r.get("published_date", ""), str(r.get("title", "")).casefold())
+    filtered.sort(key=sort_key, reverse=True)
+    review_rows.sort(key=sort_key, reverse=True)
+    pipeline_rows.sort(key=sort_key, reverse=True)
 
     all_path = Path("tenderscout_all.csv")
     write_csv(all_path, all_rows)
@@ -1506,6 +1697,8 @@ def main():
     write_csv(out_path, filtered)
     review_path = Path("tenderscout_review.csv")
     write_csv(review_path, review_rows)
+    pipeline_path = Path("tenderscout_pipeline.csv")
+    write_csv(pipeline_path, pipeline_rows)
 
     print(f"Fetched/deduplicated notices: {len(all_rows)}")
     stage_counts = {}
@@ -1553,11 +1746,13 @@ def main():
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
     print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
-    print(f"Matches after filters: {len(filtered)}")
-    print(f"Review queue: {len(review_rows)}")
+    print(f"Confirmed local open bids: {len(filtered)}")
+    print(f"Location review (open bids only): {len(review_rows)}")
+    print(f"Planning pipeline (not yet bidable): {len(pipeline_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
     print(f"Filtered shortlist: {out_path.resolve()}")
     print(f"Location review file: {review_path.resolve()}")
+    print(f"Planning pipeline file: {pipeline_path.resolve()}")
     print("\nTop matches:")
     for row in filtered[:10]:
         print(f"- [{row['score']}] {row['title']} | {row['buyer']} | {row['deadline'] or 'deadline not found'}")

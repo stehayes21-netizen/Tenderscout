@@ -80,6 +80,29 @@ class AppTestCase(unittest.TestCase):
 
 
 class AppSmokeTest(AppTestCase):
+    def test_legacy_discovery_duplicate_is_removed_and_pipeline_status_preserved(self):
+        db = self.app_module.connect_db()
+        db.execute(
+            "INSERT INTO tenders (source,title,buyer,published_date,deadline,notice_url,region_match,opportunity_stage,pipeline_status) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("Find a Tender", "Roof repairs in Liverpool", "Example Council", "2026-10-27",
+             "2099-11-20T17:00:00Z", "https://official.example/notice", "REVIEW", "Open for bids", "Reviewing"),
+        )
+        db.execute(
+            "INSERT INTO tenders (source,title,buyer,published_date,deadline,notice_url,region_match,opportunity_stage,pipeline_status) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            ("Bearings (discovery; verify provider notice)", "Roof repairs in Liverpool", "Example Council",
+             "2026-10-20", "2099-11-20", "https://discovery.example/notice", "REVIEW", "Other notice", "Interested"),
+        )
+        removed = self.app_module.remove_cross_source_duplicates(db)
+        db.commit()
+        rows = db.execute("SELECT source,pipeline_status FROM tenders").fetchall()
+        db.close()
+        self.assertEqual(removed, 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source"], "Find a Tender")
+        self.assertEqual(rows[0]["pipeline_status"], "Interested")
+
     def test_dashboard_loads(self):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
@@ -117,14 +140,25 @@ class AppSmokeTest(AppTestCase):
         self.assertNotIn("Award notice for cleaning", page)
         # Filtering the active board must not delete the records from storage.
         exported = self.client.get("/export.csv").data.decode()
-        self.assertIn("Expired cleaning tender", exported)
-        self.assertIn("Award notice for cleaning", exported)
+        self.assertNotIn("Expired cleaning tender", exported)
+        self.assertNotIn("Award notice for cleaning", exported)
+        full_audit = self.client.get("/export.csv?view=all").data.decode()
+        self.assertIn("Expired cleaning tender", full_audit)
+        self.assertIn("Award notice for cleaning", full_audit)
+
+    def test_bearings_link_is_labelled_as_provider_listing_not_official_notice(self):
+        record = feed_record("bearings-provider", "Liverpool L2 2DH")
+        record["source"] = "Bearings (discovery; verify provider notice)"
+        self.refresh_with([record])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Open provider listing — verify official notice", page)
+        self.assertNotIn("View official notice", page)
 
     def test_review_queue_keeps_relevant_notice_when_deadline_is_missing(self):
         record = feed_record(
             "review-no-deadline",
             "Greater Manchester",
-            title="Cleaning services framework",
+            title="Cleaning services framework for Liverpool sites",
             description="Commercial cleaning for public buildings.",
         )
         record["deadline"] = ""
@@ -134,7 +168,8 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Cleaning services framework", review_page)
         self.assertIn("Check official notice", review_page)
         main_page = self.client.get("/").data.decode()
-        self.assertNotIn("Cleaning services framework", main_page)
+        self.assertIn("Cleaning services framework", main_page)
+        self.assertIn("POTENTIAL LOCAL — verify delivery site", main_page)
 
     def test_jobs_board_shows_scope_and_contract_period_without_expanding_card(self):
         self.refresh_with([feed_record(
@@ -470,6 +505,7 @@ class RefreshTests(AppTestCase):
             feed_record("liv", "Liverpool L2 2DH"),
             feed_record("edi", "Edinburgh EH1 1AA"),
             feed_record("unk", ""),
+            feed_record("review", "", title="Cleaning services in Liverpool"),
         ])
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Refresh complete.", r.data)
@@ -478,15 +514,16 @@ class RefreshTests(AppTestCase):
         self.assertNotIn(b"https://example.com/edi", main)
         self.assertNotIn(b"https://example.com/unk", main)
         self.assertNotIn(b"Location needs checking", main)
-        self.assertIn(b"https://example.com/unk", self.client.get("/?view=review").data)
+        review_page = self.client.get("/?view=review").data
+        self.assertIn(b"https://example.com/review", review_page)
+        self.assertNotIn(b"https://example.com/unk", review_page)
 
-    def test_empty_dashboard_points_to_saved_location_review_tenders(self):
+    def test_empty_dashboard_hides_review_notices_without_a_local_clue(self):
         self.refresh_with([feed_record("unk", "")])
         page = self.client.get("/").data
         self.assertNotIn(b"https://example.com/unk", page)
-        self.assertIn(b"https://example.com/unk", self.client.get("/?view=review").data)
-        self.assertIn(b"Full location review (1)", page)
-        self.assertIn(b"view=review", page)
+        self.assertNotIn(b"https://example.com/unk", self.client.get("/?view=review").data)
+        self.assertIn(b"Full location review (0)", page)
 
     def test_scottish_tenders_are_never_saved(self):
         self.refresh_with([feed_record("edi", "Edinburgh EH1 1AA")])
@@ -500,11 +537,11 @@ class RefreshTests(AppTestCase):
         )
         self.assertEqual(result[0], "OUT_OF_AREA")
 
-    def test_unclear_locations_wait_in_the_review_view(self):
+    def test_unclear_locations_without_a_target_area_clue_are_hidden(self):
         self.refresh_with([feed_record("unk", "")])
         self.assertNotIn(b"https://example.com/unk", self.client.get("/").data)
         review = self.client.get("/?view=review").data
-        self.assertIn(b"https://example.com/unk", review)
+        self.assertNotIn(b"https://example.com/unk", review)
 
     def test_job_board_card_shows_description_and_public_buyer_contact(self):
         record = feed_record("contact-card", "Liverpool L2 2DH")
@@ -662,9 +699,11 @@ class DashboardFeatureTests(AppTestCase):
         page = self.client.get("/").data.decode()
         self.assertIn("example.com/open", page)
         self.assertNotIn("example.com/old", page)
-        # Expired records remain stored for audit/export; only the active board hides them.
+        # Expired records remain stored for the full audit, not the working export.
         exported = self.client.get("/export.csv").data.decode()
-        self.assertIn("example.com/old", exported)
+        self.assertNotIn("example.com/old", exported)
+        full_audit = self.client.get("/export.csv?view=all").data.decode()
+        self.assertIn("example.com/old", full_audit)
 
     def test_service_filter_only_shows_that_service(self):
         self.refresh_with([
@@ -963,7 +1002,10 @@ class RefreshSummaryTests(AppTestCase):
             "stopped": "time limit", "truncated_windows": 2
         }
         self.app_module.LAST_FEEDS["Contracts Finder"] = {
-            "last_batch": 100, "full_end": True
+            "last_batch": 100, "full_end": True, "pagination_supported": True
+        }
+        self.app_module.LAST_FEEDS["Standstill UK RSS discovery"] = {
+            "last_batch": 148, "known_feed_cap": 50, "pagination_supported": False
         }
         issues = self.app_module.refresh_feed_issues()
         self.assertEqual(len(issues), 2)
@@ -992,7 +1034,7 @@ class FeedDiagnosticsTests(AppTestCase):
 
         def fake_fts(days, pages, limit, stats):
             stats.update({"pages": 1, "records": 100, "last_batch": 100, "more": False,
-                          "error": "", "stopped": "", "first_date": "2026-10-11",
+                          "error": "", "stopped": "", "pagination_supported": True, "full_end": True, "first_date": "2026-10-11",
                           "last_date": "2026-10-12"})
             return [feed_record("liv", "Liverpool L2 2DH")]
 
