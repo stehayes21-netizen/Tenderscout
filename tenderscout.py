@@ -1337,7 +1337,7 @@ def classify_geography(record, region):
     # are the only route to a confirmed LOCAL classification.
     prose_hits = (
         sorted(prose_full)
-        + place_hits(prose, LOCAL_PLACE_TERMS)
+        + place_hits(prose, PROSE_TARGET_AREA_TERMS)
         + place_hits(prose, OUT_OF_AREA_TERMS)
     )
     if prose_hits:
