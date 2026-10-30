@@ -140,8 +140,11 @@ class AppSmokeTest(AppTestCase):
         self.assertNotIn("Award notice for cleaning", page)
         # Filtering the active board must not delete the records from storage.
         exported = self.client.get("/export.csv").data.decode()
-        self.assertIn("Expired cleaning tender", exported)
-        self.assertIn("Award notice for cleaning", exported)
+        self.assertNotIn("Expired cleaning tender", exported)
+        self.assertNotIn("Award notice for cleaning", exported)
+        full_audit = self.client.get("/export.csv?view=all").data.decode()
+        self.assertIn("Expired cleaning tender", full_audit)
+        self.assertIn("Award notice for cleaning", full_audit)
 
     def test_review_queue_keeps_relevant_notice_when_deadline_is_missing(self):
         record = feed_record(
@@ -688,9 +691,11 @@ class DashboardFeatureTests(AppTestCase):
         page = self.client.get("/").data.decode()
         self.assertIn("example.com/open", page)
         self.assertNotIn("example.com/old", page)
-        # Expired records remain stored for audit/export; only the active board hides them.
+        # Expired records remain stored for the full audit, not the working export.
         exported = self.client.get("/export.csv").data.decode()
-        self.assertIn("example.com/old", exported)
+        self.assertNotIn("example.com/old", exported)
+        full_audit = self.client.get("/export.csv?view=all").data.decode()
+        self.assertIn("example.com/old", full_audit)
 
     def test_service_filter_only_shows_that_service(self):
         self.refresh_with([
