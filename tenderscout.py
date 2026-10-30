@@ -1576,8 +1576,9 @@ def main():
         print("No CSV was written because no source records were received.")
         sys.exit(2)
 
-    filtered = []
-    review_rows = []
+    filtered = []             # confirmed local, open for bids
+    review_rows = []           # possible local, open for bids; verify site
+    pipeline_rows = []         # planning notices; not yet bidable
     rejected_by_scoring = 0
     excluded_by_stage = 0
     scored_geography_counts = {}
@@ -1591,16 +1592,28 @@ def main():
         scored_geography_counts[geo] = scored_geography_counts.get(geo, 0) + 1
         trade = scored.get("trade_category") or scored.get("service_match") or "NO TRADE MATCH"
         scored_trade_counts[trade] = scored_trade_counts.get(trade, 0) + 1
+
+        stage = scored.get("opportunity_stage") or "Other notice"
+        if stage == "Planning / upcoming":
+            if geo in ("LOCAL", "REVIEW") and scored["score"] >= args.min_score:
+                pipeline_rows.append(scored)
+            else:
+                excluded_by_stage += 1
+            continue
+        if stage != "Open for bids":
+            excluded_by_stage += 1
+            continue
+
         if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
             review_rows.append(scored)
             continue
         if geo == "LOCAL" and scored["score"] >= args.min_score:
-            if shortlist_eligible_stage(scored):
-                filtered.append(scored)
-            else:
-                excluded_by_stage += 1
-    filtered.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
-    review_rows.sort(key=lambda r: (r.get("score", 0), r.get("published_date", "")), reverse=True)
+            filtered.append(scored)
+
+    sort_key = lambda r: (r.get("score", 0), r.get("deadline", ""), r.get("published_date", ""), str(r.get("title", "")).casefold())
+    filtered.sort(key=sort_key, reverse=True)
+    review_rows.sort(key=sort_key, reverse=True)
+    pipeline_rows.sort(key=sort_key, reverse=True)
 
     all_path = Path("tenderscout_all.csv")
     write_csv(all_path, all_rows)
@@ -1608,6 +1621,8 @@ def main():
     write_csv(out_path, filtered)
     review_path = Path("tenderscout_review.csv")
     write_csv(review_path, review_rows)
+    pipeline_path = Path("tenderscout_pipeline.csv")
+    write_csv(pipeline_path, pipeline_rows)
 
     print(f"Fetched/deduplicated notices: {len(all_rows)}")
     stage_counts = {}
@@ -1655,11 +1670,13 @@ def main():
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
     print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
-    print(f"Matches after filters: {len(filtered)}")
-    print(f"Review queue: {len(review_rows)}")
+    print(f"Confirmed local open bids: {len(filtered)}")
+    print(f"Location review (open bids only): {len(review_rows)}")
+    print(f"Planning pipeline (not yet bidable): {len(pipeline_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
     print(f"Filtered shortlist: {out_path.resolve()}")
     print(f"Location review file: {review_path.resolve()}")
+    print(f"Planning pipeline file: {pipeline_path.resolve()}")
     print("\nTop matches:")
     for row in filtered[:10]:
         print(f"- [{row['score']}] {row['title']} | {row['buyer']} | {row['deadline'] or 'deadline not found'}")
