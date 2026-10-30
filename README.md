@@ -8,7 +8,9 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 - Confirmed local tenders appear on the main list. Open bids with a plausible target-area clue in their title/description or buyer name can also appear, clearly labelled **POTENTIAL LOCAL — verify delivery site**. This surfaces candidates without treating buyer HQ or text mentions as proof of delivery. The location-review queue excludes generic UK-wide and unrelated notices; those remain in the full audit only.
 - Each tender card starts with a **10-second check** in three scan lines: **JOB** (work required), **WHERE** (delivery location and whether it is verified), and **VALUE / DEADLINE / CONTRACT**. Full eligibility, buyer contact, application instructions and the official notice remain underneath. Missing facts are labelled as not stated rather than guessed.
 - **Pipeline / upcoming** notices are early warnings: they are not necessarily open for bids yet. They stay separate from the live-bid list.
-- The working lists suppress duplicate discovery-feed copies, hide expired and non-bidding notices, and sort current opportunities ahead of older records. The full source audit remains available in the CSV export.
+- The working lists suppress exact duplicates and cross-source copies only when title, buyer and closing date match. Separate official notices are retained. Expired and non-bidding notices are hidden from working lists but retained in the full audit. Live opportunities are sorted by nearest deadline, then score.
+- Discovery listings with an explicit future closing date can enter the live-bid list, but their links are labelled as provider/source listings that must be checked against the official notice. Missing or expired discovery deadlines are not promoted.
+- The dashboard's **Export actionable jobs** download contains only current local/review/pipeline candidates. **Full audit CSV** retains the wider collected records for checking.
 - Collector CSVs are separated by purpose: `tenderscout_results.csv` (confirmed local open bids), `tenderscout_review.csv` (open bids with location needing verification), `tenderscout_pipeline.csv` (planning notices), and `tenderscout_all.csv` (full deduplicated audit).
 
 ## Opportunity types and source directory
@@ -63,8 +65,8 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 `.github/workflows/main.yml` runs the tests on every push. On a schedule (every 6 hours) and on manual runs it also saves a CSV of matches and can refresh the live site. To enable the refresh, set the repository variable `TENDERSCOUT_APP_URL` and the secrets `TENDERSCOUT_APP_USER` and `TENDERSCOUT_APP_PASSWORD`.
 
 ## Pages
-- `/` confirmed tenders plus clearly labelled target-area candidates · `/?view=review` all tenders needing a location check · `/?view=pipeline` planning/upcoming notices · add `trade=...` or `service=...` to filter
-- Each tender shows how long is left to bid (closed tenders sink to the bottom) and has a **Stage** dropdown: Reviewing, Interested, Bidding, Submitted, Won, Lost, Not for us
+- `/` confirmed tenders plus clearly labelled target-area candidates · `/?view=review` live bids needing a location check · `/?view=pipeline` planning/upcoming notices · `/export.csv` actionable export · `/export.csv?view=all` full audit · add `trade=...` or `service=...` to filter
+- Each tender shows its deadline (expired tenders are hidden from the working list) and has a **Stage** dropdown: Reviewing, Interested, Bidding, Submitted, Won, Lost, Not for us
 - `POST /refresh` fetch new tenders and return to the dashboard with a summary; `POST /api/refresh` does the same but replies in plain text for scheduled jobs
 - `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)
 - `/export.csv` download public-sector tender records
