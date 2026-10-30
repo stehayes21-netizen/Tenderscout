@@ -995,6 +995,7 @@ class DataQualityRegressionTests(unittest.TestCase):
             "title": "Roof repairs in Liverpool",
             "buyer": "Example Council",
             "published_date": "2026-10-27",
+            "deadline": "2099-11-20T17:00:00Z",
             "opportunity_stage": "Open for bids",
         }
         discovery = {
@@ -1004,6 +1005,7 @@ class DataQualityRegressionTests(unittest.TestCase):
             "title": "Roof repairs in Liverpool",
             "buyer": "Example Council",
             "published_date": "2026-10-20",
+            "deadline": "2099-11-20",
             "opportunity_stage": "Other notice",
         }
         rows = tenderscout.dedupe([discovery, official])
