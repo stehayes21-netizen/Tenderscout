@@ -170,7 +170,9 @@ def classify_trade_category(fulltext, title="", trade_context=""):
             if term in title_text:
                 score += 6
             if term in context_text:
-                score += 4
+                # A generic construction-project-management CPV/context label
+                # can describe the wider programme, not the service purchased.
+                score += 2 if category == "Construction project management" else 4
             if term in description_text:
                 score += 1
         if legacy_mode and score:
@@ -1378,7 +1380,7 @@ def score_record(record, services, region, min_value, max_value):
     # the actual notice title.
     specific_construction_context = [
         term for term in CONSTRUCTION_TERMS
-        if term not in {"construction", "refurbishment", "refurbish"}
+        if term not in {"construction", "refurbishment", "refurbish", "construction project management"}
     ]
     trade_hits = {
         "cleaning": keyword_hits(strong_text, CLEANING_TERMS),
