@@ -7,7 +7,9 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 - `app.py` is the Flask dashboard. **Refresh tenders** runs the collector and saves matches to the database.
 - Confirmed local tenders appear on the main list. Notices that mention a target-area place in their title/description or buyer name can also appear, clearly labelled **POTENTIAL LOCAL — verify delivery site**. This surfaces candidates without treating buyer HQ or text mentions as proof of delivery. The full location-review queue remains available separately.
 - Each tender card starts with a **10-second check** in three scan lines: **JOB** (work required), **WHERE** (delivery location and whether it is verified), and **VALUE / DEADLINE / CONTRACT**. Full eligibility, buyer contact, application instructions and the official notice remain underneath. Missing facts are labelled as not stated rather than guessed.
-- **Pipeline / upcoming** notices are early warnings: they are not necessarily open for bids yet. Open the official notice to confirm its status and next steps.
+- **Pipeline / upcoming** notices are early warnings: they are not necessarily open for bids yet. They stay separate from the live-bid list.
+- The working lists suppress duplicate discovery-feed copies, hide expired and non-bidding notices, and sort current opportunities ahead of older records. The full source audit remains available in the CSV export.
+- Collector CSVs are separated by purpose: `tenderscout_results.csv` (confirmed local open bids), `tenderscout_review.csv` (open bids with location needing verification), `tenderscout_pipeline.csv` (planning notices), and `tenderscout_all.csv` (full deduplicated audit).
 
 ## Opportunity types and source directory
 
