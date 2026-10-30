@@ -297,7 +297,7 @@ LOCAL_PLACE_TERMS = [
     "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
     "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
-AMBIGUOUS_PLACE_TERMS = [
+# Prose-only hints: enough to surface a notice for human review, never to confirm a site.\nPROSE_TARGET_AREA_TERMS = LOCAL_PLACE_TERMS + ["halton"]\n\nAMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
     "eccleston", "halton", "orrell", "thornton", "sutton", "kirkby", "whiston",
     "birchwood", "leigh", "astley",
@@ -1283,7 +1283,7 @@ def classify_geography(record, region):
     # a multi-school cleaning contract spanning Trafford, Knowsley and Wigan).
     # Description text must never promote a notice to LOCAL, but it must stop us
     # incorrectly discarding a mixed-area opportunity as OUT_OF_AREA.
-    prose_local_sites = place_hits(prose, LOCAL_PLACE_TERMS)
+    prose_local_sites = place_hits(prose, PROSE_TARGET_AREA_TERMS)
     if strong_out and prose_local_sites:
         return "REVIEW", (
             "Structured delivery location includes non-target areas, while the "
