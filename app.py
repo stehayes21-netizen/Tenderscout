@@ -779,8 +779,11 @@ def remove_cross_source_duplicates(db):
     for row in rows:
         title = " ".join(str(row["title"] or "").casefold().split())
         buyer = " ".join(str(row["buyer"] or "").casefold().split())
-        if title and buyer:
-            grouped.setdefault((title, buyer), []).append(row)
+        deadline = collector.parse_date(row["deadline"])
+        # Same title/buyer may recur; only remove a legacy shadow if its
+        # closing date also matches the official record.
+        if title and buyer and deadline:
+            grouped.setdefault((title, buyer, deadline.date().isoformat()), []).append(row)
 
     removed = 0
     for group in grouped.values():
