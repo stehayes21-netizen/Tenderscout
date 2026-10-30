@@ -1112,7 +1112,7 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
             output.append({
                 "source": "Standstill UK (RSS discovery; verify official notice)",
                 "opportunity_stage": "Other notice",
-                "location_text": "North West England (aggregator region only; delivery site not confirmed)",
+                "location_text": "",  # Feed geography is not a delivery/site address.
                 "published_date": published,
                 "title": title,
                 "buyer": buyer,
