@@ -336,6 +336,66 @@ class GeographyClassifierTests(unittest.TestCase):
                 self.assertEqual(geo_class, "OUT_OF_AREA")
                 self.assertIn("outside", reason.lower())
 
+    def test_explicit_out_of_area_delivery_sites_are_excluded_from_review(self):
+        cases = [
+            {
+                "title": "Repairs and maintenance framework",
+                "description": "Works to council properties within the boundaries of Stoke-on-Trent.",
+            },
+            {
+                "title": "Foul water drainage",
+                "description": "The provision of foul water drainage at Samlesbury Enterprise Zone.",
+            },
+            {
+                "title": "Scaffolding hire",
+                "description": "The works are to Falkirk Council housing properties.",
+            },
+            {
+                "title": "Solar PV feasibility",
+                "description": "Site assessments at the Lusaka estate.",
+            },
+            {
+                "title": "Communal facilities",
+                "description": "The service will be delivered at Darent Valley Hospital.",
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
+    def test_structured_singapore_location_is_out_of_area(self):
+        record = {"location_text": "SG, Singapore"}
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "OUT_OF_AREA",
+        )
+
+    def test_general_mention_of_out_of_area_place_does_not_exclude(self):
+        record = {
+            "location_text": "",
+            "title": "Framework for property maintenance",
+            "description": "The supplier has previously completed work in Falkirk.",
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_mixed_local_and_out_of_area_prose_remains_in_review(self):
+        record = {
+            "location_text": "",
+            "title": "Regional maintenance contract",
+            "description": "Works at Falkirk and Liverpool sites.",
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
     def test_missing_location_is_review(self):
         record = {"location_text": "", "title": "Cleaning contract", "description": "Routine cleaning at facilities"}
         geo_class, reason = tenderscout.classify_geography(record, "North West")
