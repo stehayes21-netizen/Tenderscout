@@ -135,7 +135,7 @@ TRADE_KEYWORDS = {
     "Catering and food services": ["catering services", "food services", "school meals"],
     "Furniture and equipment": ["furniture supply", "furniture installation", "equipment supply"],
     "IT and telecoms": ["information technology", "telecommunications", "network infrastructure", "it and telecoms", "it support", "telecoms support"],
-    "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "transport services"],
+    "Transport and vehicle maintenance": ["vehicle maintenance", "fleet maintenance", "vehicle servicing", "fleet servicing", "vehicle repairs", "fleet repairs", "commercial vehicle maintenance"],
     "Water and fire damage restoration": ["water damage restoration", "fire damage restoration", "flood restoration"],
     "Interior design": ["interior design", "interior fit out design"],
     "Signage and sign making": ["signage", "sign making", "wayfinding signs"],
