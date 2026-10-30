@@ -510,6 +510,12 @@ def discovery_opportunity_stage(title, description, deadline):
     the provider notice. No deadline means do not promote the record.
     """
     text = " ".join((str(title or ""), str(description or ""))).casefold()
+    non_bidding_terms = (
+        "contract award", "award notice", "notice of award", "contract details notice",
+        "result notice", "cancelled", "canceled", "withdrawn", "terminated",
+    )
+    if any(term in text for term in non_bidding_terms):
+        return "Other notice"
     planning_terms = (
         "pre-market", "pre market", "market engagement", "early market",
         "prior information notice", "pipeline", "planned procurement",
