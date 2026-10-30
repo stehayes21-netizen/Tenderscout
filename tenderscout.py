@@ -1220,6 +1220,19 @@ def postcode_districts(text, include_bare=False):
     return full, bare
 
 
+def has_target_area_clue(record):
+    """Whether a notice has a plausible target-area clue worth human review."""
+    text = " ".join(
+        str(record.get(field) or "")
+        for field in ("location_text", "title", "description", "buyer")
+    ).lower()
+    local_hits = place_hits(text, LOCAL_PLACE_TERMS)
+    out_hits = place_hits(text, OUT_OF_AREA_TERMS)
+    local_hits = drop_contained(local_hits, out_hits)
+    full, bare = postcode_districts(text, include_bare=True)
+    return bool(local_hits or ((full | bare) & LOCAL_POSTCODE_DISTRICTS))
+
+
 def classify_geography(record, region):
     """Classify a tender as LOCAL, OUT_OF_AREA or REVIEW from delivery/site evidence.
 
@@ -1356,14 +1369,25 @@ def score_record(record, services, region, min_value, max_value):
     # Broad service groups must be supported by the notice title or structured
     # procurement line-item context. Long descriptions and buyer names contain
     # incidental words (e.g. "refurbishment") and must not create false matches.
-    strong_text = " ".join([
-        record.get("title", ""), record.get("trade_context", ""),
-    ]).lower()
+    title_text = str(record.get("title") or "").lower()
+    context_text = str(record.get("trade_context") or "").lower()
+    strong_text = " ".join([title_text, context_text])
+    # A generic CPV/context label such as "construction work" can describe the
+    # wider programme rather than the purchased service. Require specific
+    # construction wording in structured context; generic terms count only in
+    # the actual notice title.
+    specific_construction_context = [
+        term for term in CONSTRUCTION_TERMS
+        if term not in {"construction", "refurbishment", "refurbish"}
+    ]
     trade_hits = {
         "cleaning": keyword_hits(strong_text, CLEANING_TERMS),
         "fm": keyword_hits(strong_text, FM_TERMS),
         "maintenance": keyword_hits(strong_text, MAINTENANCE_TERMS),
-        "construction": keyword_hits(strong_text, CONSTRUCTION_TERMS),
+        "construction": (
+            keyword_hits(title_text, CONSTRUCTION_TERMS)
+            + keyword_hits(context_text, specific_construction_context)
+        ),
     }
     exclude_hits = keyword_hits(strong_text, EXCLUDE_TERMS)
     matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
@@ -1598,7 +1622,10 @@ def main():
 
         stage = scored.get("opportunity_stage") or "Other notice"
         if stage == "Planning / upcoming":
-            if geo in ("LOCAL", "REVIEW") and scored["score"] >= args.min_score:
+            if (
+                geo == "LOCAL"
+                or (geo == "REVIEW" and has_target_area_clue(scored))
+            ) and scored["score"] >= args.min_score:
                 pipeline_rows.append(scored)
             else:
                 excluded_by_stage += 1
@@ -1608,7 +1635,8 @@ def main():
             continue
 
         if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
-            review_rows.append(scored)
+            if has_target_area_clue(scored):
+                review_rows.append(scored)
             continue
         if geo == "LOCAL" and scored["score"] >= args.min_score:
             filtered.append(scored)
