@@ -1234,7 +1234,7 @@ def explicit_out_of_area_delivery_sites(text, terms):
             # "at [named facility]" is strong site evidence, but a bare
             # "previously worked at Falkirk" is only historical context.
             facility_at_cue = (
-                re.search(r"\\bat\\s+$", before) is not None
+                re.search(r"\bat\s+$", before) is not None
                 and any(word in term.split() for word in (
                     "hospital", "garrison", "airport", "prison", "university",
                     "school", "campus", "estate",
@@ -1245,7 +1245,7 @@ def explicit_out_of_area_delivery_sites(text, terms):
             hsc_region_cue = (
                 "northern ireland" in term
                 and re.search(
-                    r"\\b(?:hsc|health and social care)(?:\\s+\\([^)]*\\))?\\s+in\\s+$",
+                    r"\b(?:hsc|health and social care)(?:\s+\([^)]*\))?\s+in\s+$",
                     before,
                 ) is not None
             )
