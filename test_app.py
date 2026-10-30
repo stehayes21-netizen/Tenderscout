@@ -146,6 +146,14 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Expired cleaning tender", full_audit)
         self.assertIn("Award notice for cleaning", full_audit)
 
+    def test_bearings_link_is_labelled_as_provider_listing_not_official_notice(self):
+        record = feed_record("bearings-provider", "Liverpool L2 2DH")
+        record["source"] = "Bearings (discovery; verify provider notice)"
+        self.refresh_with([record])
+        page = self.client.get("/").data.decode()
+        self.assertIn("Open provider listing — verify official notice", page)
+        self.assertNotIn("View official notice", page)
+
     def test_review_queue_keeps_relevant_notice_when_deadline_is_missing(self):
         record = feed_record(
             "review-no-deadline",
