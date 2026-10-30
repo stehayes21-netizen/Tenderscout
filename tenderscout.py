@@ -297,6 +297,8 @@ OUT_OF_AREA_TERMS = [
     "south west", "yorkshire and the humber", "north east",
     "north east england", "south east england", "south west england",
     "belfast", "flintshire", "wrexham",
+    "stoke-on-trent", "samlesbury", "darent valley hospital",
+    "lusaka", "singapore",
     "scotland", "scottish", "glasgow", "edinburgh", "aberdeen", "dundee",
     "inverness", "perth", "stirling", "falkirk", "paisley", "ayr",
     "livingston", "kirkcaldy", "lanarkshire", "ayrshire", "fife", "highland",
@@ -1197,6 +1199,38 @@ def drop_contained(hits, longer_hits):
     return kept
 
 
+def explicit_out_of_area_delivery_sites(text, terms):
+    """Find named out-of-area places only when nearby wording describes a site or delivery scope.
+
+    General mentions of a place (for example, a buyer's address or a previous
+    project) are not enough. This is a one-way exclusion safeguard: prose can
+    never promote a record to LOCAL.
+    """
+    hits = []
+    for term in place_hits(text, terms):
+        pattern = r"(?<![a-z])" + re.escape(term) + r"(?![a-z])"
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        before = text[max(0, match.start() - 100):match.start()]
+        after = text[match.end():match.end() + 90]
+        before_cue = re.search(
+            r"\b(?:at|within|across|throughout|to|delivery in|services in|works in|"
+            r"properties in|site in|project in|located in|based at)\s+"
+            r"(?:(?:the|boundaries of|area of|city of|town of|borough of|county of)\s+)*$",
+            before,
+        )
+        after_cue = re.match(
+            r"\s*(?:enterprise zone|council housing properties|housing properties|"
+            r"properties|premises|estate|campus|hospital|schools|facilities|site|"
+            r"project|works|residential compounds)\b",
+            after,
+        )
+        if before_cue or after_cue:
+            hits.append(term)
+    return hits
+
+
 def postcode_districts(text, include_bare=False):
     """Return (full-postcode districts, bare target/review districts) found in text."""
     upper = text.upper()
@@ -1276,6 +1310,12 @@ def classify_geography(record, region):
     # Description text must never promote a notice to LOCAL, but it must stop us
     # incorrectly discarding a mixed-area opportunity as OUT_OF_AREA.
     prose_local_sites = place_hits(prose, LOCAL_PLACE_TERMS)
+    prose_out_sites = explicit_out_of_area_delivery_sites(prose, OUT_OF_AREA_TERMS)
+    if prose_out_sites and not prose_local_sites:
+        return "OUT_OF_AREA", (
+            "Explicit out-of-area delivery/site wording in notice: "
+            + ", ".join(dict.fromkeys(prose_out_sites[:5]))
+        )
     if strong_out and prose_local_sites:
         return "REVIEW", (
             "Structured delivery location includes non-target areas, while the "
