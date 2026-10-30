@@ -439,11 +439,13 @@ def dashboard():
         )
         value_label = format_money(row["estimated_value_gbp"])
         duration_label = contract_length(row["contract_start_date"], row["contract_end_date"])
-        notice_label = (
-            "Open source listing — verify official notice"
-            if "Standstill UK" in str(row["source"] or "")
-            else "View official notice"
-        )
+        source_name = str(row["source"] or "")
+        if "Bearings" in source_name:
+            notice_label = "Open provider listing — verify official notice"
+        elif "Standstill UK" in source_name:
+            notice_label = "Open source listing — verify official notice"
+        else:
+            notice_label = "View official notice"
         notice = (
             f'<a href="{link}" target="_blank" rel="noopener">{notice_label}</a>'
             if link.startswith("https://") else ""
