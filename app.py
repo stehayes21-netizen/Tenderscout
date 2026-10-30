@@ -1010,9 +1010,10 @@ def _set_refresh_state(status, summary="", error="", refresh_token=None):
         cursor = db.execute(
             """UPDATE refresh_state
                SET status = ?, finished_at = ?, summary = ?, error = ?
-               WHERE id = 1 AND refresh_token = ?""",
+               WHERE id = 1
+                 AND (refresh_token = ? OR (refresh_token IS NULL AND ? IS NULL))""",
             (status, now if status in ("completed", "incomplete", "failed") else None,
-             summary, error, refresh_token),
+             summary, error, refresh_token, refresh_token),
         )
         db.commit()
         return cursor.rowcount == 1
