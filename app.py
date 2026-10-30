@@ -382,8 +382,13 @@ def dashboard():
             if (item[0]["opportunity_stage"] or "Other notice") in allowed_stages
             and not item[3]
         ]
-    # Open tenders first; soon-to-close opportunities remain visible at the top.
-    decorated.sort(key=lambda item: item[3])
+    # Sort live bids by nearest deadline, then score; undated notices sit last.
+    decorated.sort(key=lambda item: (
+        collector.parse_date(item[0]["deadline"]) is None,
+        collector.parse_date(item[0]["deadline"]) or datetime.max.replace(tzinfo=timezone.utc),
+        -int(item[0]["score"] or 0),
+        str(item[0]["title"] or "").casefold(),
+    ))
 
     cards = ""
     for row, deadline_label, deadline_class, _closed in decorated:
@@ -1353,12 +1358,12 @@ def export_csv():
         ]
         stage_order = {"Open for bids": 2, "Planning / upcoming": 1}
         rows.sort(key=lambda row: (
-            stage_order.get(row["opportunity_stage"], 0),
-            row.get("score", 0),
-            bool(collector.parse_date(row.get("deadline"))),
+            -stage_order.get(row["opportunity_stage"], 0),
+            -int(row.get("score") or 0),
+            collector.parse_date(row.get("deadline")) is None,
             collector.parse_date(row.get("deadline")) or datetime.max.replace(tzinfo=timezone.utc),
             str(row.get("title") or "").casefold(),
-        ), reverse=True)
+        ))
     else:
         rows.sort(key=lambda row: (
             str(row.get("published_date") or ""),
