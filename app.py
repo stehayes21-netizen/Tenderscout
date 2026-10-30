@@ -34,8 +34,7 @@ TRADE_CATEGORIES = list(collector.TRADE_CATEGORIES)
 _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 _EMPTY_BOARD_REFRESH_ATTEMPTED = False
-# A single Gunicorn worker runs the refresh thread; the DB row keeps status visible across requests.
-_refresh_lock = threading.Lock()
+# Refresh ownership is coordinated by an atomic database lease, not process memory.
 # A refresh that has been marked running for 15 minutes is considered interrupted.
 # This is deliberately longer than the normal feed timeout to avoid false alarms.
 REFRESH_STALE_AFTER_SECONDS = 15 * 60
@@ -1046,8 +1045,6 @@ def _run_background_refresh(refresh_token=None):
             _set_refresh_state("failed", error="Refresh failed. Check the service logs.", refresh_token=refresh_token)
         except Exception:
             app.logger.exception("Could not save failed refresh status")
-    finally:
-        _refresh_lock.release()
 
 
 def _start_refresh_thread(refresh_token):
@@ -1061,15 +1058,7 @@ def _start_refresh_thread(refresh_token):
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    """Start a tracked refresh without holding the HTTP request open."""
-    if not _refresh_lock.acquire(blocking=False):
-        db = connect_db()
-        try:
-            state = db.execute("SELECT status, started_at, finished_at, summary, error FROM refresh_state WHERE id = 1").fetchone()
-        finally:
-            db.close()
-        return {"status": "running", "message": "A refresh is already running."}, 202
-
+    """Claim the shared database lease, then start one background refresh."""
     started = datetime.now(timezone.utc).isoformat()
     stale_before = (datetime.now(timezone.utc) - timedelta(
         seconds=REFRESH_STALE_AFTER_SECONDS
@@ -1091,11 +1080,7 @@ def api_refresh():
         )
         db.commit()
         if cursor.rowcount != 1:
-            _refresh_lock.release()
             return {"status": "running", "message": "A refresh is already running."}, 202
-    except Exception:
-        _refresh_lock.release()
-        raise
     finally:
         if db is not None:
             db.close()
@@ -1103,7 +1088,6 @@ def api_refresh():
     try:
         _start_refresh_thread(refresh_token)
     except Exception:
-        _refresh_lock.release()
         _set_refresh_state(
             "failed", error="Could not start the refresh thread.", refresh_token=refresh_token
         )
@@ -1145,6 +1129,7 @@ def api_refresh_status():
         _set_refresh_state(
             "failed",
             error="Refresh appears to have been interrupted or exceeded the 15-minute safety limit. Start a new refresh.",
+            refresh_token=state.get("refresh_token"),
         )
         db = connect_db()
         try:
