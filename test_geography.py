@@ -925,6 +925,34 @@ class BearingsDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(stats["records"], 1)
 
+    def test_bearings_does_not_mislabel_listing_portal_as_buyer(self):
+        payload = {"data": [{
+            "id": "opp-portal-only",
+            "title": "Roofing works",
+            "provider": "The Chest procurement portal",
+            "url": "https://provider.example/roofing",
+            "kind": "tender",
+            "closes": "2099-12-31",
+        }]}
+        with patch.object(tenderscout, "get_json", return_value=payload):
+            rows = tenderscout.fetch_bearings(5, {})
+        self.assertEqual(rows[0]["buyer"], "")
+        self.assertIn("Listing portal/provider: The Chest procurement portal", rows[0]["description"])
+
+    def test_bearings_uses_explicit_buyer_field_when_available(self):
+        payload = {"data": [{
+            "id": "opp-with-buyer",
+            "title": "Roofing works",
+            "provider": "The Chest procurement portal",
+            "buyer": "Liverpool City Council",
+            "url": "https://provider.example/roofing",
+            "kind": "tender",
+            "closes": "2099-12-31",
+        }]}
+        with patch.object(tenderscout, "get_json", return_value=payload):
+            rows = tenderscout.fetch_bearings(5, {})
+        self.assertEqual(rows[0]["buyer"], "Liverpool City Council")
+
     def test_bearings_fetches_all_offset_pages_until_reported_total(self):
         pages = [
             {"meta": {"total": 3, "limit": 2, "offset": 0}, "data": [
