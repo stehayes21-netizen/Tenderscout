@@ -751,7 +751,7 @@ def dashboard():
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
     <p id="refresh-status" class="note" role="status" aria-live="polite" hidden></p></header>
     {banner}
-    <p>{heading} · {switch} · <a href="/export.csv">Export CSV</a></p>
+    <p>{heading} · {switch} · <a href="/export.csv">Export actionable jobs</a> · <a href="/export.csv?view=all">Full audit CSV</a></p>
     {filter_form}
     <p class="note">Always verify eligibility, location, deadline and contract details
     on the official notice.</p>
