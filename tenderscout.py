@@ -1004,6 +1004,16 @@ def fetch_bearings(max_seconds=None, stats=None):
                 continue
             bearings_url = as_text(item.get("bearings_url")).strip()
             description_parts = [as_text(item.get("summary")).strip(), as_text(item.get("conditions")).strip()]
+            # "provider" identifies the listing portal on some records (for
+            # example The Chest), not the contracting authority. Only populate
+            # buyer from explicit buyer/authority fields.
+            buyer_value = first(item, "buyer", "buyer_name", "organisation", "organization", "authority", "customer")
+            if isinstance(buyer_value, dict):
+                buyer_value = first(buyer_value, "name", "legalName", "title")
+            buyer_name = as_text(buyer_value).strip()
+            listing_provider = as_text(item.get("provider")).strip()
+            if listing_provider:
+                description_parts.append("Listing portal/provider: " + listing_provider)
             where = as_text(item.get("where")).strip()
             if where:
                 description_parts.append("Eligibility/location wording from Bearings (not verified delivery site): " + where)
@@ -1016,7 +1026,7 @@ def fetch_bearings(max_seconds=None, stats=None):
                 "location_text": "",
                 "published_date": as_text(item.get("first_seen") or ""),
                 "title": title,
-                "buyer": as_text(item.get("provider") or ""),
+                "buyer": buyer_name,
                 "description": " ".join(part for part in description_parts if part),
                 "contact_name": "", "contact_email": "", "contact_phone": "",
                 "eligibility_text": as_text(item.get("conditions") or ""),
