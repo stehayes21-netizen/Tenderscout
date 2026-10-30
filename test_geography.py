@@ -903,7 +903,7 @@ class BearingsDiscoveryTests(unittest.TestCase):
                 {"id": "three", "title": "Cleaning three", "url": "https://provider.example/3", "kind": "tender"},
             ]},
         ]
-        with patch.object(tenderscout, "get_json", side_effect=pages) as mocked, \\
+        with patch.object(tenderscout, "get_json", side_effect=pages) as mocked, \
              patch.object(tenderscout.time, "sleep"):
             stats = {}
             rows = tenderscout.fetch_bearings(30, stats)
