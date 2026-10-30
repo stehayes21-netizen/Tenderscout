@@ -120,6 +120,30 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Expired cleaning tender", exported)
         self.assertIn("Award notice for cleaning", exported)
 
+    def test_review_queue_hides_non_actionable_other_notices_but_keeps_export(self):
+        record = feed_record(
+            "review-award",
+            "North West England",
+            title="Award notice for cleaning services",
+        )
+        self.refresh_with([record])
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET opportunity_stage = 'Other notice' WHERE title = ?",
+            ("Award notice for cleaning services",),
+        )
+        db.commit()
+        db.close()
+
+        review_page = self.client.get("/?view=review").data.decode()
+        self.assertNotIn("Award notice for cleaning services", review_page)
+        self.assertIn(
+            "Award notice for cleaning services",
+            self.client.get("/export.csv").data.decode(),
+        )
+        main_page = self.client.get("/").data.decode()
+        self.assertIn("Full location review (0)", main_page)
+
     def test_review_queue_keeps_relevant_notice_when_deadline_is_missing(self):
         record = feed_record(
             "review-no-deadline",
