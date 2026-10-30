@@ -954,6 +954,38 @@ class BearingsDiscoveryTests(unittest.TestCase):
         self.assertIn("feed offline", stats["error"])
 
 
+class DiscoveryStageTests(unittest.TestCase):
+    def test_future_discovery_deadline_is_a_live_bid_but_still_requires_source_verification(self):
+        self.assertEqual(
+            tenderscout.discovery_opportunity_stage(
+                "Commercial cleaning services", "Liverpool sites", "2099-12-31"
+            ),
+            "Open for bids",
+        )
+
+    def test_expired_or_missing_discovery_deadline_is_not_promoted(self):
+        self.assertEqual(
+            tenderscout.discovery_opportunity_stage(
+                "Commercial cleaning services", "", "2000-01-01"
+            ),
+            "Other notice",
+        )
+        self.assertEqual(
+            tenderscout.discovery_opportunity_stage(
+                "Commercial cleaning services", "", ""
+            ),
+            "Other notice",
+        )
+
+    def test_pre_market_discovery_stays_in_planning_pipeline(self):
+        self.assertEqual(
+            tenderscout.discovery_opportunity_stage(
+                "Pre-market engagement for cleaning services", "", "2099-12-31"
+            ),
+            "Planning / upcoming",
+        )
+
+
 class DataQualityRegressionTests(unittest.TestCase):
     def test_discovery_copy_is_removed_when_same_official_notice_exists(self):
         official = {
