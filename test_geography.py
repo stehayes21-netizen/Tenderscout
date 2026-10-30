@@ -953,6 +953,77 @@ class BearingsDiscoveryTests(unittest.TestCase):
         self.assertIn("feed offline", stats["error"])
 
 
+class DataQualityRegressionTests(unittest.TestCase):
+    def test_discovery_copy_is_removed_when_same_official_notice_exists(self):
+        official = {
+            "source": "Find a Tender",
+            "ocid": "ocds-official-1",
+            "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
+            "title": "Roof repairs in Liverpool",
+            "buyer": "Example Council",
+            "published_date": "2026-10-27",
+            "opportunity_stage": "Open for bids",
+        }
+        discovery = {
+            "source": "Bearings (discovery; verify provider notice)",
+            "ocid": "opp-discovery-1",
+            "notice_url": "https://provider.example/roof-repairs",
+            "title": "Roof repairs in Liverpool",
+            "buyer": "Example Council",
+            "published_date": "2026-10-20",
+            "opportunity_stage": "Other notice",
+        }
+        rows = tenderscout.dedupe([discovery, official])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source"], "Find a Tender")
+
+    def test_distinct_official_processes_with_same_title_are_not_collapsed(self):
+        rows = [
+            {"source": "Find a Tender", "ocid": "ocds-1", "title": "Client Transport Services",
+             "buyer": "Surrey County Council", "published_date": "2026-10-29"},
+            {"source": "Find a Tender", "ocid": "ocds-2", "title": "Client Transport Services",
+             "buyer": "Surrey County Council", "published_date": "2026-10-30"},
+        ]
+        self.assertEqual(len(tenderscout.dedupe(rows)), 2)
+
+    def test_unrelated_description_keywords_do_not_create_broad_trade_matches(self):
+        examples = [
+            ("Mission Feasibility Studies – Spacecraft Life Extension Service Demonstration",
+             "The project mentions refurbishment and refurbish in a technical context."),
+            ("Client Support Framework (CSF)",
+             "The authority is responsible for construction and delivery of a rail programme."),
+            ("Provision of Workplace Adjustments",
+             "The service includes reuse and refurbishment of ergonomic chairs."),
+            ("Provision of Baseline Measurements of Stratospheric Ozone",
+             "Scientific measurement and calibration services across monitoring sites."),
+        ]
+        for title, description in examples:
+            with self.subTest(title=title):
+                record = {
+                    "title": title, "description": description, "buyer": "Example buyer",
+                    "trade_context": "", "location_text": "Liverpool L2 2DH",
+                    "deadline": "2099-12-31T00:00:00+00:00",
+                }
+                self.assertIsNone(tenderscout.score_record(
+                    record, tenderscout.SERVICE_ORDER, "Target area", None, None
+                ))
+
+    def test_catering_title_is_not_mislabelled_as_construction(self):
+        record = {
+            "title": "Provision of Catering Services",
+            "description": "The organisation is undertaking refurbishment of its main building.",
+            "buyer": "Example University", "trade_context": "",
+            "location_text": "Liverpool L2 2DH",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        scored = tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        )
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["trade_category"], "Catering and food services")
+        self.assertEqual(scored["service_match"], "Catering and food services")
+
+
 class TradeClassificationEvidenceTests(unittest.TestCase):
     def test_title_trade_wins_over_incidental_description_keyword(self):
         category = tenderscout.classify_trade_category(
