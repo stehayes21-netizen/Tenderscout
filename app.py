@@ -262,19 +262,8 @@ def count_by_region(db):
 
 
 def has_target_area_clue(row):
-    """True only when a review record names a target-area clue worth surfacing.
-
-    This does not promote a record to LOCAL. It lets the main board surface
-    potentially relevant notices while preserving the explicit location-check
-    badge. Records with no target-area evidence remain in the full review queue.
-    """
-    # Buyer names can justify a manual look, but never establish delivery geography.
-    text = " ".join(str(row[field] or "") for field in ("location_text", "title", "description", "buyer")).lower()
-    local_hits = collector.place_hits(text, collector.LOCAL_PLACE_TERMS)
-    out_hits = collector.place_hits(text, collector.OUT_OF_AREA_TERMS)
-    local_hits = collector.drop_contained(local_hits, out_hits)
-    full, bare = collector.postcode_districts(text, include_bare=True)
-    return bool(local_hits or ((full | bare) & collector.LOCAL_POSTCODE_DISTRICTS))
+    """A plausible local clue is a reason to review, never proof of delivery."""
+    return collector.has_target_area_clue(row)
 
 
 def deadline_info(deadline):
@@ -365,11 +354,21 @@ def dashboard():
     # older duplicates already stored before the collector's dedupe fix.
     rows = collector.dedupe([dict(row) for row in rows])
     counts = count_by_region(db)
-    if not review_view:
-        rows = [
-            row for row in rows
-            if row["region_match"] != "REVIEW" or has_target_area_clue(row)
-        ]
+    # The review count and page include only live open bids with a plausible
+    # target-area clue. Generic UK-wide or unrelated notices stay in the audit,
+    # not in the working review queue.
+    review_candidates = db.execute(
+        "SELECT * FROM tenders WHERE region_match = 'REVIEW' AND opportunity_stage = 'Open for bids'"
+    ).fetchall()
+    review_candidates = collector.dedupe([dict(row) for row in review_candidates])
+    counts["review"] = sum(
+        1 for row in review_candidates
+        if has_target_area_clue(row) and not deadline_info(row["deadline"])[2]
+    )
+    rows = [
+        row for row in rows
+        if row["region_match"] != "REVIEW" or has_target_area_clue(row)
+    ]
     db.close()
 
     decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
