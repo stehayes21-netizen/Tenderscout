@@ -506,6 +506,23 @@ def add_location_values(obj, location_parts, in_location=False):
         if isinstance(description, str) and description.strip():
             location_parts.append(description.strip())
 
+        # The OCDS Location extension stores geographic identifiers inside
+        # deliveryLocation.gazetteer. Preserve NUTS identifiers so the existing
+        # postcode/NUTS classifier can evaluate the actual delivery geography.
+        gazetteer = obj.get("gazetteer")
+        if isinstance(gazetteer, dict):
+            scheme = as_text(gazetteer.get("scheme")).strip().upper()
+            identifiers = gazetteer.get("identifiers") or []
+            if scheme == "NUTS":
+                if isinstance(identifiers, (str, int)):
+                    identifiers = [identifiers]
+                if isinstance(identifiers, list):
+                    location_parts.extend(
+                        " ".join(str(identifier).split()).upper()
+                        for identifier in identifiers
+                        if str(identifier).strip()
+                    )
+
     for key in EXPLICIT_LOCATION_KEYS:
         if key in obj:
             # A location becomes trusted context only through a known delivery,
