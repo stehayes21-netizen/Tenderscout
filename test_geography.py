@@ -418,6 +418,36 @@ class PostcodeAreaTests(unittest.TestCase):
         # "Canterbury" contains "bury"; it must not be treated as Bury.
         self.assertEqual(self.classify("Canterbury"), "REVIEW")
 
+    def test_every_agreed_area_named_in_title_or_description_enters_review(self):
+        # Prose can surface a possible local opportunity, but never confirms
+        # delivery location. All nine agreed areas must be discoverable.
+        agreed_areas = (
+            "Liverpool", "Sefton", "St Helens", "Halton", "Warrington",
+            "West Cheshire", "Wirral", "Wallasey", "Knowsley",
+        )
+        for area in agreed_areas:
+            for field in ("title", "description"):
+                with self.subTest(area=area, field=field):
+                    record = {
+                        "location_text": "",
+                        "title": "Facilities contract",
+                        "description": "Services to be provided at multiple sites.",
+                    }
+                    record[field] = f"Opportunity covering {area}"
+                    geo_class, reason = tenderscout.classify_geography(record, "Target area")
+                    self.assertEqual(geo_class, "REVIEW")
+                    self.assertIn("title/description", reason.lower())
+
+    def test_local_area_in_prose_keeps_out_of_area_structured_record_in_review(self):
+        record = {
+            "location_text": "Manchester M1 1AA",
+            "title": "Maintenance framework",
+            "description": "Includes a site in Knowsley.",
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("knowsley", reason.lower())
+
     def test_full_postcode_in_title_or_description_requires_review(self):
         for field, value in (
             ("title", "Cleaning at Civic Centre WA7 2PQ"),
