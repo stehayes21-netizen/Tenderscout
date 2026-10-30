@@ -409,6 +409,22 @@ class AppSmokeTest(AppTestCase):
             "Roofing and roof repairs",
         )
 
+    def test_transport_services_are_not_misclassified_as_vehicle_maintenance(self):
+        import tenderscout
+        self.assertEqual(
+            tenderscout.classify_trade_category(
+                "Client Transport Services - taxi and minibus transport with driver"
+            ),
+            "Other / unclassified",
+        )
+
+    def test_specific_vehicle_maintenance_terms_are_still_classified(self):
+        import tenderscout
+        self.assertEqual(
+            tenderscout.classify_trade_category("Fleet vehicle maintenance and repairs"),
+            "Transport and vehicle maintenance",
+        )
+
     def test_public_tenders_can_be_filtered_by_detailed_trade(self):
         # Isolate the dashboard filter from feed-fetching behavior: seed two
         # valid local records, then verify only the selected detailed trade shows.
