@@ -435,6 +435,64 @@ class GeographyClassifierTests(unittest.TestCase):
             "OUT_OF_AREA",
         )
 
+    def test_explicit_regional_and_multi_site_scopes_are_excluded(self):
+        cases = [
+            {
+                "title": "Non Invasive Ventilation community framework",
+                "description": (
+                    "This Framework Agreement is being established on behalf of "
+                    "Health and Social Care (HSC) in Northern Ireland. The aim is "
+                    "to develop a regional managed service for patients."
+                ),
+            },
+            {
+                "title": "Helipad design and construction",
+                "description": (
+                    "Upgrade the existing helipad at Darent Valley Hospital "
+                    "following detailed site surveys."
+                ),
+            },
+            {
+                "title": "Ozone and ultraviolet monitoring services",
+                "description": (
+                    "Daily observations across the United Kingdom's three "
+                    "ozone monitoring sites in Manchester, Reading and Lerwick."
+                ),
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
+    def test_historical_facility_mention_is_not_delivery_evidence(self):
+        record = {
+            "location_text": "",
+            "title": "Framework for property maintenance",
+            "description": "The supplier previously worked at Falkirk.",
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_transport_for_wales_brand_alone_stays_in_review(self):
+        record = {
+            "location_text": "UK, United Kingdom",
+            "title": "Control of Contractors Portal",
+            "description": (
+                "Transport for Wales has a requirement for a software solution "
+                "to support a portal across its station network."
+            ),
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
     def test_general_mention_of_out_of_area_place_does_not_exclude(self):
         record = {
             "location_text": "",
