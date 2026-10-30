@@ -1289,6 +1289,9 @@ def export_csv():
         f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders ORDER BY saved_at DESC"
     ).fetchall()
     db.close()
+    # Apply the same cross-source duplicate suppression and useful ordering
+    # to exports, including legacy duplicate rows already stored in the DB.
+    rows = collector.dedupe([dict(row) for row in rows])
 
     output = io.StringIO()
     writer = csv.writer(output)
