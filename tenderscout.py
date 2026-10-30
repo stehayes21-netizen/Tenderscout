@@ -297,7 +297,10 @@ LOCAL_PLACE_TERMS = [
     "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
     "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
-# Prose-only hints: enough to surface a notice for human review, never to confirm a site.\nPROSE_TARGET_AREA_TERMS = LOCAL_PLACE_TERMS + ["halton"]\n\nAMBIGUOUS_PLACE_TERMS = [
+# Prose-only hints: enough to surface a notice for human review, never to confirm a site.
+PROSE_TARGET_AREA_TERMS = LOCAL_PLACE_TERMS + ["halton"]
+
+AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
     "eccleston", "halton", "orrell", "thornton", "sutton", "kirkby", "whiston",
     "birchwood", "leigh", "astley",
