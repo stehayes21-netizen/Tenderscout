@@ -92,7 +92,8 @@ class StandstillDiscoveryFeedTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(stats["records"], 1)
         self.assertEqual(rows[0]["source"], "Standstill UK (RSS discovery; verify official notice)")
-        self.assertIn("North West England", rows[0]["location_text"])
+        self.assertEqual(rows[0]["location_text"], "")
+        self.assertEqual(rows[0]["_raw"]["feed_label"], "North West region")
         self.assertEqual(rows[0]["notice_url"], "https://www.find-tender.service.gov.uk/Notice/123456-2026")
         self.assertEqual(rows[0]["deadline"], "2026-11-16T12:00:00+00:00")
         self.assertEqual(
