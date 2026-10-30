@@ -1209,25 +1209,27 @@ def explicit_out_of_area_delivery_sites(text, terms):
     hits = []
     for term in place_hits(text, terms):
         pattern = r"(?<![a-z])" + re.escape(term) + r"(?![a-z])"
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        before = text[max(0, match.start() - 100):match.start()]
-        after = text[match.end():match.end() + 90]
-        before_cue = re.search(
-            r"\b(?:at|within|across|throughout|to|delivery in|services in|works in|"
-            r"properties in|site in|project in|located in|based at)\s+"
-            r"(?:(?:the|boundaries of|area of|city of|town of|borough of|county of)\s+)*$",
-            before,
-        )
-        after_cue = re.match(
-            r"\s*(?:enterprise zone|council housing properties|housing properties|"
-            r"properties|premises|estate|campus|hospital|schools|facilities|site|"
-            r"project|works|residential compounds)\b",
-            after,
-        )
-        if before_cue or after_cue:
-            hits.append(term)
+        # A place can appear first in the buyer/title and later in the actual
+        # scope. Check every occurrence rather than letting the first mention
+        # hide stronger delivery-site wording later in the notice.
+        for match in re.finditer(pattern, text):
+            before = text[max(0, match.start() - 120):match.start()]
+            after = text[match.end():match.end() + 100]
+            before_cue = re.search(
+                r"\\b(?:at|in|within|across|throughout|to|delivery in|services in|works in|"
+                r"properties in|site in|project in|located in|based at)\\s+"
+                r"(?:(?:the\\s+)?(?:boundaries of|area of|city of|town of|borough of|county of)\\s+)*$",
+                before,
+            )
+            after_cue = re.match(
+                r"\\s*(?:enterprise zone|council housing properties|housing properties|"
+                r"properties|premises|estate|campus|hospital|schools|facilities|site|"
+                r"project|works|residential compounds)\\b",
+                after,
+            )
+            if before_cue or after_cue:
+                hits.append(term)
+                break
     return hits
 
 
