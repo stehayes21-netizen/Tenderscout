@@ -502,6 +502,27 @@ def parse_date(value):
         return None
 
 
+def discovery_opportunity_stage(title, description, deadline):
+    """Infer a discovery lead's stage only from an explicit, unexpired closing date.
+
+    Aggregator/RSS records are not official notices. A future closing date makes
+    them plausible live bids, but the source label must still tell users to verify
+    the provider notice. No deadline means do not promote the record.
+    """
+    text = " ".join((str(title or ""), str(description or ""))).casefold()
+    planning_terms = (
+        "pre-market", "pre market", "market engagement", "early market",
+        "prior information notice", "pipeline", "planned procurement",
+        "preliminary market",
+    )
+    if any(term in text for term in planning_terms):
+        return "Planning / upcoming"
+    closing = parse_date(deadline)
+    if closing and closing >= datetime.now(timezone.utc):
+        return "Open for bids"
+    return "Other notice"
+
+
 def money_value(value):
     if isinstance(value, dict):
         value = value.get("amount")
@@ -988,9 +1009,10 @@ def fetch_bearings(max_seconds=None, stats=None):
                 description_parts.append("Eligibility/location wording from Bearings (not verified delivery site): " + where)
             if bearings_url.startswith("https://"):
                 description_parts.append("Source credit: Bearings — " + bearings_url)
+            closing_date = as_text(item.get("closes") or "")
             results.append({
                 "source": "Bearings (discovery; verify provider notice)",
-                "opportunity_stage": "Other notice",
+                "opportunity_stage": discovery_opportunity_stage(title, " ".join(description_parts), closing_date),
                 "location_text": "",
                 "published_date": as_text(item.get("first_seen") or ""),
                 "title": title,
@@ -1000,7 +1022,7 @@ def fetch_bearings(max_seconds=None, stats=None):
                 "eligibility_text": as_text(item.get("conditions") or ""),
                 "estimated_value_gbp": "",
                 "contract_start_date": "", "contract_end_date": "",
-                "deadline": as_text(item.get("closes") or ""),
+                "deadline": closing_date,
                 "status": "Bearings discovery listing — verify provider notice",
                 "notice_url": provider_url,
                 "ocid": as_text(item.get("id") or provider_url),
@@ -1142,7 +1164,7 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
             buyer = buyer_match.group(1).strip()[:180] if buyer_match else ""
             output.append({
                 "source": "Standstill UK (RSS discovery; verify official notice)",
-                "opportunity_stage": "Other notice",
+                "opportunity_stage": discovery_opportunity_stage(title, description, deadline),
                 "location_text": "",  # Feed geography is not a delivery/site address.
                 "published_date": published,
                 "title": title,
