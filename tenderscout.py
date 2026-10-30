@@ -298,7 +298,7 @@ OUT_OF_AREA_TERMS = [
     "north east england", "south east england", "south west england",
     "belfast", "flintshire", "wrexham",
     "stoke-on-trent", "samlesbury", "darent valley hospital",
-    "gloucester", "cashel cross garrison", "bradford", "juba",
+    "gloucester", "cashel cross", "bradford", "juba",
     "milton keynes", "lusaka", "singapore",
     "scotland", "scottish", "glasgow", "edinburgh", "aberdeen", "dundee",
     "inverness", "perth", "stirling", "falkirk", "paisley", "ayr",
