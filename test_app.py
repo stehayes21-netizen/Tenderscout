@@ -995,7 +995,7 @@ class FeedDiagnosticsTests(AppTestCase):
 
         def fake_fts(days, pages, limit, stats):
             stats.update({"pages": 1, "records": 100, "last_batch": 100, "more": False,
-                          "error": "", "stopped": "", "first_date": "2026-10-11",
+                          "error": "", "stopped": "", "pagination_supported": True, "full_end": True, "first_date": "2026-10-11",
                           "last_date": "2026-10-12"})
             return [feed_record("liv", "Liverpool L2 2DH")]
 
