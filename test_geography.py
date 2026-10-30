@@ -1009,6 +1009,22 @@ class DataQualityRegressionTests(unittest.TestCase):
                     record, tenderscout.SERVICE_ORDER, "Target area", None, None
                 ))
 
+    def test_client_support_framework_is_not_classified_from_generic_construction_context(self):
+        record = {
+            "title": "Client Support Framework (CSF)",
+            "description": (
+                "Partners support the development and delivery of a national rail programme. "
+                "The procurement is for client support services."
+            ),
+            "trade_context": "CPV description: Construction project management",
+            "buyer": "Example Rail Authority",
+            "location_text": "UK, United Kingdom",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        self.assertIsNone(tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        ))
+
     def test_generic_construction_context_does_not_create_construction_match(self):
         record = {
             "title": "Provision of Baseline Measurements of Stratospheric Ozone",
