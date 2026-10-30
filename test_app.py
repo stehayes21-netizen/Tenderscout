@@ -134,7 +134,8 @@ class AppSmokeTest(AppTestCase):
         self.assertIn("Cleaning services framework", review_page)
         self.assertIn("Check official notice", review_page)
         main_page = self.client.get("/").data.decode()
-        self.assertNotIn("Cleaning services framework", main_page)
+        self.assertIn("Cleaning services framework", main_page)
+        self.assertIn("POTENTIAL LOCAL — verify delivery site", main_page)
 
     def test_jobs_board_shows_scope_and_contract_period_without_expanding_card(self):
         self.refresh_with([feed_record(
