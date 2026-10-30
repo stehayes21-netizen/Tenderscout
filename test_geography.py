@@ -367,6 +367,36 @@ class GeographyClassifierTests(unittest.TestCase):
                     "OUT_OF_AREA",
                 )
 
+    def test_delivery_site_mention_after_buyer_name_is_detected(self):
+        cases = [
+            {
+                "title": "Stoke-on-Trent City Council repairs framework",
+                "description": (
+                    "Works to council owned properties within the boundaries "
+                    "of Stoke-on-Trent."
+                ),
+            },
+            {
+                "title": "Solar PV study for British High Commission Lusaka",
+                "description": (
+                    "Site assessments at the British High Commission Lusaka estate."
+                ),
+            },
+            {
+                "title": "Falkirk Council scaffolding framework",
+                "description": (
+                    "The works are to Falkirk Council housing properties."
+                ),
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
     def test_structured_singapore_location_is_out_of_area(self):
         record = {"location_text": "SG, Singapore"}
         self.assertEqual(
