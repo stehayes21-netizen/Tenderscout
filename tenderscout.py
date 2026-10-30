@@ -1507,7 +1507,12 @@ def dedupe(records):
     def process_key(row):
         title = " ".join(str(row.get("title") or "").casefold().split())
         buyer = " ".join(str(row.get("buyer") or "").casefold().split())
-        return (title, buyer) if title and buyer else None
+        deadline = parse_date(row.get("deadline"))
+        # Same title and buyer can recur in different years. Only suppress a
+        # cross-source shadow when its closing date also matches.
+        if not title or not buyer or not deadline:
+            return None
+        return (title, buyer, deadline.date().isoformat())
 
     def is_official(row):
         return any(marker in str(row.get("source") or "") for marker in official_markers)
