@@ -124,7 +124,7 @@ class AppSmokeTest(AppTestCase):
         record = feed_record(
             "review-no-deadline",
             "Greater Manchester",
-            title="Cleaning services framework",
+            title="Cleaning services framework for Liverpool sites",
             description="Commercial cleaning for public buildings.",
         )
         record["deadline"] = ""
@@ -470,6 +470,7 @@ class RefreshTests(AppTestCase):
             feed_record("liv", "Liverpool L2 2DH"),
             feed_record("edi", "Edinburgh EH1 1AA"),
             feed_record("unk", ""),
+            feed_record("review", "", title="Cleaning services in Liverpool"),
         ])
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Refresh complete.", r.data)
@@ -478,15 +479,16 @@ class RefreshTests(AppTestCase):
         self.assertNotIn(b"https://example.com/edi", main)
         self.assertNotIn(b"https://example.com/unk", main)
         self.assertNotIn(b"Location needs checking", main)
-        self.assertIn(b"https://example.com/unk", self.client.get("/?view=review").data)
+        review_page = self.client.get("/?view=review").data
+        self.assertIn(b"https://example.com/review", review_page)
+        self.assertNotIn(b"https://example.com/unk", review_page)
 
-    def test_empty_dashboard_points_to_saved_location_review_tenders(self):
+    def test_empty_dashboard_hides_review_notices_without_a_local_clue(self):
         self.refresh_with([feed_record("unk", "")])
         page = self.client.get("/").data
         self.assertNotIn(b"https://example.com/unk", page)
-        self.assertIn(b"https://example.com/unk", self.client.get("/?view=review").data)
-        self.assertIn(b"Full location review (1)", page)
-        self.assertIn(b"view=review", page)
+        self.assertNotIn(b"https://example.com/unk", self.client.get("/?view=review").data)
+        self.assertIn(b"Full location review (0)", page)
 
     def test_scottish_tenders_are_never_saved(self):
         self.refresh_with([feed_record("edi", "Edinburgh EH1 1AA")])
@@ -500,11 +502,11 @@ class RefreshTests(AppTestCase):
         )
         self.assertEqual(result[0], "OUT_OF_AREA")
 
-    def test_unclear_locations_wait_in_the_review_view(self):
+    def test_unclear_locations_without_a_target_area_clue_are_hidden(self):
         self.refresh_with([feed_record("unk", "")])
         self.assertNotIn(b"https://example.com/unk", self.client.get("/").data)
         review = self.client.get("/?view=review").data
-        self.assertIn(b"https://example.com/unk", review)
+        self.assertNotIn(b"https://example.com/unk", review)
 
     def test_job_board_card_shows_description_and_public_buyer_contact(self):
         record = feed_record("contact-card", "Liverpool L2 2DH")
