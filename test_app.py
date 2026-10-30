@@ -83,16 +83,16 @@ class AppSmokeTest(AppTestCase):
     def test_legacy_discovery_duplicate_is_removed_and_pipeline_status_preserved(self):
         db = self.app_module.connect_db()
         db.execute(
-            "INSERT INTO tenders (source,title,buyer,published_date,notice_url,region_match,opportunity_stage,pipeline_status) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO tenders (source,title,buyer,published_date,deadline,notice_url,region_match,opportunity_stage,pipeline_status) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             ("Find a Tender", "Roof repairs in Liverpool", "Example Council", "2026-10-27",
-             "https://official.example/notice", "REVIEW", "Open for bids", "Reviewing"),
+             "2099-11-20T17:00:00Z", "https://official.example/notice", "REVIEW", "Open for bids", "Reviewing"),
         )
         db.execute(
-            "INSERT INTO tenders (source,title,buyer,published_date,notice_url,region_match,opportunity_stage,pipeline_status) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO tenders (source,title,buyer,published_date,deadline,notice_url,region_match,opportunity_stage,pipeline_status) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             ("Bearings (discovery; verify provider notice)", "Roof repairs in Liverpool", "Example Council",
-             "2026-10-20", "https://discovery.example/notice", "REVIEW", "Other notice", "Interested"),
+             "2026-10-20", "2099-11-20", "https://discovery.example/notice", "REVIEW", "Other notice", "Interested"),
         )
         removed = self.app_module.remove_cross_source_duplicates(db)
         db.commit()
