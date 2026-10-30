@@ -1,6 +1,9 @@
+import base64
 import importlib
 from io import BytesIO
 import os
+import sqlite3
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -775,6 +778,92 @@ class RefreshSummaryTests(AppTestCase):
         state = db.execute("SELECT status, refresh_token FROM refresh_state WHERE id = 1").fetchone()
         db.close()
         self.assertEqual(state["refresh_token"], new_token)
+
+    def test_simultaneous_refresh_requests_only_start_one_worker(self):
+        # Initialise the schema before the two requests race for the same row.
+        db = self.app_module.connect_db()
+        db.close()
+        barrier = threading.Barrier(2)
+        started_tokens = []
+        outcomes = []
+        errors = []
+        auth = "Basic " + base64.b64encode(b"test-user:test-password").decode()
+
+        def request_refresh():
+            try:
+                with self.app_module.app.test_client() as client:
+                    barrier.wait(timeout=5)
+                    response = client.post("/api/refresh", headers={"Authorization": auth})
+                    outcomes.append((response.status_code, response.json))
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch.object(
+            self.app_module, "_start_refresh_thread",
+            side_effect=lambda token: started_tokens.append(token),
+        ):
+            workers = [threading.Thread(target=request_refresh) for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=10)
+
+        self.assertFalse(any(worker.is_alive() for worker in workers), "refresh requests did not finish")
+        self.assertEqual(errors, [])
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual([status for status, _ in outcomes], [202, 202])
+        self.assertEqual(len(started_tokens), 1, "only one request may start a refresh worker")
+        self.assertEqual(sum("started_at" in body for _, body in outcomes), 1)
+
+    def test_old_refresh_state_table_is_migrated_without_losing_its_row(self):
+        # Recreate the pre-token schema to exercise a real upgrade, not just a
+        # fresh database where CREATE TABLE already includes refresh_token.
+        connection = sqlite3.connect(self.app_module.DB_PATH)
+        connection.execute("DROP TABLE IF EXISTS refresh_state")
+        connection.execute(
+            """CREATE TABLE refresh_state (
+                id INTEGER PRIMARY KEY,
+                status TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                summary TEXT,
+                error TEXT
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO refresh_state (id, status, summary) VALUES (1, 'failed', 'previous result')"
+        )
+        connection.commit()
+        connection.close()
+        self.app_module._schema_ready = False
+
+        db = self.app_module.connect_db()
+        columns = {row[1] for row in db.execute("PRAGMA table_info(refresh_state)").fetchall()}
+        state = db.execute(
+            "SELECT status, summary, refresh_token FROM refresh_state WHERE id = 1"
+        ).fetchone()
+        db.close()
+
+        self.assertIn("refresh_token", columns)
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["summary"], "previous result")
+        self.assertIsNone(state["refresh_token"])
+
+    def test_malformed_running_timestamp_is_reclaimed_like_stale_status_detection(self):
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, refresh_token = ? WHERE id = 1",
+            ("not-a-valid-timestamp", "malformed-old-token"),
+        )
+        db.commit()
+        db.close()
+
+        with patch.object(self.app_module, "_start_refresh_thread") as start_thread:
+            response = self.client.post("/api/refresh")
+
+        self.assertEqual(response.status_code, 202)
+        start_thread.assert_called_once()
+        self.assertNotEqual(start_thread.call_args.args[0], "malformed-old-token")
 
     def test_old_refresh_cannot_overwrite_state_owned_by_new_refresh(self):
         db = self.app_module.connect_db()
