@@ -1236,3 +1236,51 @@ class BearingsDiscoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class NoticeUrlExtractionTests(unittest.TestCase):
+    def test_prefers_latest_official_tender_notice_document(self):
+        payload = {
+            "releases": [{
+                "id": "103222-2026",
+                "ocid": "ocds-test-amended-notice",
+                "tag": ["tenderUpdate"],
+                "tender": {
+                    "title": "Audio visual system",
+                    "status": "active",
+                    "tenderPeriod": {"endDate": "2026-11-18T10:00:00Z"},
+                    "documents": [
+                        {
+                            "id": "096833-2026",
+                            "documentType": "tenderNotice",
+                            "datePublished": "2026-10-14T10:20:12Z",
+                            "url": "https://www.find-tender.service.gov.uk/Notice/096833-2026",
+                        },
+                        {
+                            "id": "103222-2026",
+                            "documentType": "tenderNotice",
+                            "datePublished": "2026-10-30T13:26:50Z",
+                            "url": "https://www.find-tender.service.gov.uk/Notice/103222-2026",
+                        },
+                    ],
+                },
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(
+            rows[0]["notice_url"],
+            "https://www.find-tender.service.gov.uk/Notice/103222-2026",
+        )
+
+    def test_mann_island_description_is_review_not_automatically_local(self):
+        record = {
+            "title": "Audio visual, digital signage and visitor management system",
+            "description": (
+                "New meeting room audio-visual equipment across the Authority's estate, "
+                "including the larger ground floor auditoriums at Mann Island HQ."
+            ),
+            "location_text": "UKD, United Kingdom",
+        }
+        region, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(region, "REVIEW")
+        self.assertIn("Mann Island", reason)
