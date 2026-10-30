@@ -309,6 +309,71 @@ class OpportunityStageTests(unittest.TestCase):
 
 
 class GeographyClassifierTests(unittest.TestCase):
+    def test_extracts_nuts_gazetteer_identifier_from_delivery_location(self):
+        payload = {
+            "releases": [{
+                "id": "notice-1",
+                "tender": {
+                    "title": "Window cleaning services",
+                    "items": [{
+                        "id": "item-1",
+                        "deliveryLocation": {
+                            "description": "Wirral",
+                            "gazetteer": {
+                                "scheme": "NUTS",
+                                "identifiers": ["UKD74"],
+                            },
+                        },
+                    }],
+                },
+            }],
+        }
+        record = tenderscout.extract_records(payload, "Find a Tender")[0]
+        self.assertIn("UKD74", record["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "LOCAL",
+        )
+
+    def test_mixed_nuts_delivery_locations_remain_in_review(self):
+        payload = {
+            "releases": [{
+                "id": "notice-2",
+                "tender": {
+                    "title": "Regional cleaning framework",
+                    "items": [
+                        {
+                            "id": "local",
+                            "deliveryLocation": {
+                                "description": "Wirral",
+                                "gazetteer": {
+                                    "scheme": "NUTS",
+                                    "identifiers": ["UKD74"],
+                                },
+                            },
+                        },
+                        {
+                            "id": "outside",
+                            "deliveryLocation": {
+                                "description": "Cheshire West",
+                                "gazetteer": {
+                                    "scheme": "NUTS",
+                                    "identifiers": ["UKD63"],
+                                },
+                            },
+                        },
+                    ],
+                },
+            }],
+        }
+        record = tenderscout.extract_records(payload, "Find a Tender")[0]
+        self.assertIn("UKD74", record["location_text"])
+        self.assertIn("UKD63", record["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
     def test_confirmed_liverpool_location_is_local(self):
         record = {"location_text": "Liverpool"}
         geo_class, reason = tenderscout.classify_geography(record, "North West")
