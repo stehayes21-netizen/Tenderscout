@@ -35,8 +35,8 @@ _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 _EMPTY_BOARD_REFRESH_ATTEMPTED = False
 # Refresh ownership is coordinated by an atomic database lease, not process memory.
-# A refresh that has been marked running for 15 minutes is considered interrupted.
-# This is deliberately longer than the normal feed timeout to avoid false alarms.
+# A refresh without a heartbeat for 15 minutes is presumed interrupted.
+# Active collectors renew the lease every 30 seconds.
 REFRESH_STALE_AFTER_SECONDS = 15 * 60
 
 
@@ -152,14 +152,18 @@ def ensure_schema(db):
         finished_at TEXT,
         summary TEXT,
         error TEXT,
-        refresh_token TEXT
+        refresh_token TEXT,
+        heartbeat_at TEXT
     )""")
     if USE_POSTGRES:
         db.execute("ALTER TABLE refresh_state ADD COLUMN IF NOT EXISTS refresh_token TEXT")
+        db.execute("ALTER TABLE refresh_state ADD COLUMN IF NOT EXISTS heartbeat_at TEXT")
     else:
         refresh_columns = {row[1] for row in db.execute("PRAGMA table_info(refresh_state)").fetchall()}
         if "refresh_token" not in refresh_columns:
             db.execute("ALTER TABLE refresh_state ADD COLUMN refresh_token TEXT")
+        if "heartbeat_at" not in refresh_columns:
+            db.execute("ALTER TABLE refresh_state ADD COLUMN heartbeat_at TEXT")
     db.execute("INSERT INTO refresh_state (id, status) VALUES (1, 'idle') ON CONFLICT(id) DO NOTHING")
     if USE_POSTGRES:
         db.execute("ALTER TABLE private_leads ADD COLUMN IF NOT EXISTS urgency TEXT DEFAULT 'Normal'")
@@ -595,6 +599,8 @@ def dashboard():
     )
 
     banner = ""
+    if request.args.get("refresh_started") == "1":
+        banner = '<div class="banner"><b>Refresh already running.</b> The existing search is still in progress. Reload this page shortly to see its results.</div>'
     if request.args.get("done") == "1":
         try:
             counts = {k: max(0, min(int(request.args.get(k, "")), 1000000))
@@ -968,13 +974,17 @@ def summary_text(stats):
 
 @app.route("/refresh", methods=["POST"])
 def refresh():
-    stats, error = refresh_or_error()
+    # The non-JavaScript form path must acquire the same cross-process lease.
+    token, result, status_code = _claim_refresh_lease()
+    if token is None:
+        if status_code >= 500:
+            return Response(result.get("error", "Could not start refresh."), status=status_code)
+        return redirect("/?refresh_started=1")
+    stats, error = _run_background_refresh(token)
     if error:
         return error
-    query = urlencode({
-        "done": 1, "n": stats["fetched"], "s": stats["service"],
-        "o": stats["outside"], "l": stats["local"], "r": stats["review"],
-    })
+    query = urlencode({"done": 1, "n": stats["fetched"], "s": stats["service"],
+                       "o": stats["outside"], "l": stats["local"], "r": stats["review"]})
     return redirect("/?" + query)
 
 
@@ -1009,7 +1019,7 @@ def _set_refresh_state(status, summary="", error="", refresh_token=None):
     try:
         cursor = db.execute(
             """UPDATE refresh_state
-               SET status = ?, finished_at = ?, summary = ?, error = ?
+               SET status = ?, finished_at = ?, summary = ?, error = ?, heartbeat_at = NULL
                WHERE id = 1
                  AND (refresh_token = ? OR (refresh_token IS NULL AND ? IS NULL))""",
             (status, now if status in ("completed", "incomplete", "failed") else None,
@@ -1021,31 +1031,59 @@ def _set_refresh_state(status, summary="", error="", refresh_token=None):
         db.close()
 
 
+def _refresh_heartbeat(refresh_token, stop_event):
+    """Renew the lease every 30 seconds while the owning collector is active."""
+    while not stop_event.wait(30):
+        db = None
+        try:
+            db = connect_db()
+            now = datetime.now(timezone.utc).isoformat()
+            db.execute(
+                """UPDATE refresh_state SET heartbeat_at = ?
+                   WHERE id = 1 AND status = 'running' AND refresh_token = ?""",
+                (now, refresh_token),
+            )
+            db.commit()
+        except Exception:
+            app.logger.exception("Could not renew tender refresh lease")
+        finally:
+            if db is not None:
+                db.close()
+
+
 def _run_background_refresh(refresh_token=None):
+    stop_event = threading.Event()
+    heartbeat = None
+    if refresh_token is not None:
+        heartbeat = threading.Thread(target=_refresh_heartbeat, args=(refresh_token, stop_event),
+                                     daemon=True, name="tenderscout-refresh-heartbeat")
+        heartbeat.start()
     try:
         stats, error = refresh_or_error()
         if error:
             _set_refresh_state("failed", error=error.get_data(as_text=True)[:1000], refresh_token=refresh_token)
+            return None, error
+        summary = summary_text(stats)
+        issues = refresh_feed_issues()
+        if issues:
+            detail = "; ".join(issues)
+            _set_refresh_state("incomplete", summary=summary + " Some source results may be missing.",
+                               error="Partial collection: " + detail[:900], refresh_token=refresh_token)
+            app.logger.warning("Refresh saved partial results: %s", detail)
         else:
-            summary = summary_text(stats)
-            issues = refresh_feed_issues()
-            if issues:
-                detail = "; ".join(issues)
-                _set_refresh_state(
-                    "incomplete",
-                    summary=summary + " Some source results may be missing.",
-                    error="Partial collection: " + detail[:900],
-                    refresh_token=refresh_token,
-                )
-                app.logger.warning("Refresh saved partial results: %s", detail)
-            else:
-                _set_refresh_state("completed", summary=summary, refresh_token=refresh_token)
+            _set_refresh_state("completed", summary=summary, refresh_token=refresh_token)
+        return stats, None
     except Exception:
         app.logger.exception("Background tender refresh failed")
         try:
             _set_refresh_state("failed", error="Refresh failed. Check the service logs.", refresh_token=refresh_token)
         except Exception:
             app.logger.exception("Could not save failed refresh status")
+        return None, Response("Refresh failed. Check the service logs.", status=500)
+    finally:
+        stop_event.set()
+        if heartbeat is not None:
+            heartbeat.join(timeout=2)
 
 
 def _start_refresh_thread(refresh_token):
@@ -1057,60 +1095,61 @@ def _start_refresh_thread(refresh_token):
     ).start()
 
 
-@app.route("/api/refresh", methods=["POST"])
-def api_refresh():
-    """Claim the shared database lease, then start one background refresh."""
+def _claim_refresh_lease():
+    """Atomically claim the shared database lease for any refresh entry point."""
     started = datetime.now(timezone.utc).isoformat()
-    refresh_token = uuid.uuid4().hex
+    token = uuid.uuid4().hex
     db = None
     try:
         db = connect_db()
-        # Read the current lease, then claim it with a compare-and-swap UPDATE.
-        # Comparing every ownership field makes the claim atomic across workers.
-        current_row = db.execute(
-            "SELECT status, started_at, refresh_token FROM refresh_state WHERE id = 1"
+        row = db.execute(
+            "SELECT status, started_at, refresh_token, heartbeat_at FROM refresh_state WHERE id = 1"
         ).fetchone()
-        current = dict(current_row) if current_row else {}
+        current = dict(row) if row else {}
         if current.get("status") == "running" and not _refresh_state_is_stale(current):
-            return {"status": "running", "message": "A refresh is already running."}, 202
-
+            return None, {"status": "running", "message": "A refresh is already running."}, 202
         cursor = db.execute(
-            """UPDATE refresh_state
-               SET status = 'running', started_at = ?, finished_at = NULL,
-                   summary = '', error = '', refresh_token = ?
-               WHERE id = 1
-                 AND status = ?
+            """UPDATE refresh_state SET status = 'running', started_at = ?, heartbeat_at = ?,
+                   finished_at = NULL, summary = '', error = '', refresh_token = ?
+               WHERE id = 1 AND status = ?
                  AND (started_at = ? OR (started_at IS NULL AND ? IS NULL))
                  AND (refresh_token = ? OR (refresh_token IS NULL AND ? IS NULL))""",
-            (
-                started, refresh_token, current.get("status"),
-                current.get("started_at"), current.get("started_at"),
-                current.get("refresh_token"), current.get("refresh_token"),
-            ),
+            (started, started, token, current.get("status"), current.get("started_at"),
+             current.get("started_at"), current.get("refresh_token"), current.get("refresh_token")),
         )
         db.commit()
         if cursor.rowcount != 1:
-            return {"status": "running", "message": "A refresh is already running."}, 202
+            return None, {"status": "running", "message": "A refresh is already running."}, 202
+        return token, {"status": "running", "started_at": started}, 202
+    except Exception:
+        app.logger.exception("Could not claim tender refresh lease")
+        return None, {"status": "failed", "error": "Could not claim the refresh lease."}, 500
     finally:
         if db is not None:
             db.close()
 
+
+@app.route("/api/refresh", methods=["POST"])
+def api_refresh():
+    """Claim the shared database lease, then start one background refresh."""
+    token, result, status_code = _claim_refresh_lease()
+    if token is None:
+        return result, status_code
     try:
-        _start_refresh_thread(refresh_token)
+        _start_refresh_thread(token)
     except Exception:
-        _set_refresh_state(
-            "failed", error="Could not start the refresh thread.", refresh_token=refresh_token
-        )
+        _set_refresh_state("failed", error="Could not start the refresh thread.", refresh_token=token)
         app.logger.exception("Could not start background tender refresh")
         return {"status": "failed", "error": "Could not start the refresh thread."}, 500
-    return {"status": "running", "started_at": started}, 202
+    return result, status_code
 
 
 def _refresh_state_is_stale(row, now=None):
     """Return True when a persisted running refresh is old enough to be presumed interrupted."""
     if not row or row["status"] != "running":
         return False
-    started_at = row["started_at"]
+    heartbeat_at = row.get("heartbeat_at") if hasattr(row, "get") else None
+    started_at = heartbeat_at or row["started_at"]
     if not started_at:
         return True
     try:
@@ -1129,7 +1168,7 @@ def api_refresh_status():
     db = connect_db()
     try:
         row = db.execute(
-            "SELECT status, started_at, finished_at, summary, error, refresh_token FROM refresh_state WHERE id = 1"
+            "SELECT status, started_at, finished_at, summary, error, refresh_token, heartbeat_at FROM refresh_state WHERE id = 1"
         ).fetchone()
         state = dict(row) if row else {}
     finally:
