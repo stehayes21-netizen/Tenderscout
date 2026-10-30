@@ -342,7 +342,7 @@ def dashboard():
     # location-review notices that mention one of the target areas. They are
     # labelled as unverified below; the full review view remains available.
     condition = (
-        "region_match = 'REVIEW'" if review_view
+        "region_match = 'REVIEW' AND opportunity_stage IN ('Open for bids', 'Planning / upcoming')" if review_view
         else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
     )
     params = []
@@ -361,6 +361,9 @@ def dashboard():
         "ORDER BY score DESC, published_date DESC",
         params,
     ).fetchall()
+    # Suppress cross-source discovery copies in the display too, including
+    # older duplicates already stored before the collector's dedupe fix.
+    rows = collector.dedupe([dict(row) for row in rows])
     counts = count_by_region(db)
     if not review_view:
         rows = [
@@ -370,13 +373,14 @@ def dashboard():
     db.close()
 
     decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
-    if not review_view and not pipeline_view:
-        # The main jobs board is for actionable bids, not expired tenders or
-        # award/contract-update notices. Keep the underlying records for review
-        # and CSV export; planning notices have their own pipeline view.
+    if not pipeline_view:
+        # Main and review boards show actionable live bids only. Planning notices
+        # have their own pipeline view; awards, updates and expired bids stay out
+        # of the working lists but remain stored for audit/export.
+        allowed_stages = {"Open for bids"} if not review_view else {"Open for bids", "Planning / upcoming"}
         decorated = [
             item for item in decorated
-            if (item[0]["opportunity_stage"] or "Other notice") == "Open for bids"
+            if (item[0]["opportunity_stage"] or "Other notice") in allowed_stages
             and not item[3]
         ]
     # Open tenders first; soon-to-close opportunities remain visible at the top.
