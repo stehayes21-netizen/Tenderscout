@@ -367,6 +367,37 @@ class GeographyClassifierTests(unittest.TestCase):
                     "OUT_OF_AREA",
                 )
 
+    def test_explicit_named_project_and_facility_locations_are_excluded(self):
+        cases = [
+            {
+                "title": "Market and food court construction",
+                "description": "Project Title: Gloucester Greyfriars Project. Location: Eastgate Shopping Centre.",
+            },
+            {
+                "title": "Social housing design team",
+                "description": "The scheme is for delivery of seven dwellings at Cashel Cross Garrison.",
+            },
+            {
+                "title": "Museum exhibition fit-out",
+                "description": "Fit-out services at the National Science and Media Museum (NSMM), Bradford.",
+            },
+            {
+                "title": "Security guard services",
+                "description": "The contract will operate across HMG Juba residential compounds.",
+            },
+            {
+                "title": "Catering services",
+                "description": "Catering services will be provided at Walton Hall, Milton Keynes.",
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
     def test_delivery_site_mention_after_buyer_name_is_detected(self):
         cases = [
             {
