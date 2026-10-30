@@ -719,8 +719,8 @@ class RefreshSummaryTests(AppTestCase):
         started = (self.app_module.datetime.now(self.app_module.timezone.utc)
                    - timedelta(minutes=20)).isoformat()
         db.execute(
-            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '' WHERE id = 1",
-            (started,),
+            "UPDATE refresh_state SET status = 'running', started_at = ?, finished_at = NULL, summary = '', error = '', refresh_token = ? WHERE id = 1",
+            (started, "stale-test-token"),
         )
         db.commit()
         db.close()
@@ -775,7 +775,6 @@ class RefreshSummaryTests(AppTestCase):
         state = db.execute("SELECT status, refresh_token FROM refresh_state WHERE id = 1").fetchone()
         db.close()
         self.assertEqual(state["refresh_token"], new_token)
-        self.app_module._refresh_lock.release()
 
     def test_old_refresh_cannot_overwrite_state_owned_by_new_refresh(self):
         db = self.app_module.connect_db()
@@ -806,7 +805,6 @@ class RefreshSummaryTests(AppTestCase):
         with patch.object(self.app_module, "refresh_or_error", return_value=(
             {"fetched": 100, "service": 20, "outside": 5, "local": 3, "review": 12}, None
         )):
-            self.app_module._refresh_lock.acquire()
             self.app_module._run_background_refresh()
         status = self.client.get("/api/refresh/status")
         self.assertEqual(status.status_code, 200)
