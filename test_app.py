@@ -963,7 +963,10 @@ class RefreshSummaryTests(AppTestCase):
             "stopped": "time limit", "truncated_windows": 2
         }
         self.app_module.LAST_FEEDS["Contracts Finder"] = {
-            "last_batch": 100, "full_end": True
+            "last_batch": 100, "full_end": True, "pagination_supported": True
+        }
+        self.app_module.LAST_FEEDS["Standstill UK RSS discovery"] = {
+            "last_batch": 148, "known_feed_cap": 50, "pagination_supported": False
         }
         issues = self.app_module.refresh_feed_issues()
         self.assertEqual(len(issues), 2)
