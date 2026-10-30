@@ -1012,6 +1012,15 @@ class DataQualityRegressionTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source"], "Find a Tender")
 
+    def test_same_title_cross_source_records_with_different_deadlines_are_preserved(self):
+        rows = [
+            {"source": "Find a Tender", "ocid": "ocds-2026", "title": "Grounds maintenance",
+             "buyer": "Example Council", "deadline": "2026-11-20"},
+            {"source": "Bearings (discovery; verify provider notice)", "ocid": "opp-2027",
+             "title": "Grounds maintenance", "buyer": "Example Council", "deadline": "2027-11-20"},
+        ]
+        self.assertEqual(len(tenderscout.dedupe(rows)), 2)
+
     def test_distinct_official_processes_with_same_title_are_not_collapsed(self):
         rows = [
             {"source": "Find a Tender", "ocid": "ocds-1", "title": "Client Transport Services",
