@@ -279,6 +279,7 @@ class GeographyClassifierTests(unittest.TestCase):
             "status": "tender",
             "notice_url": "https://example.com/review-notice",
             "ocid": "review-001",
+            "opportunity_stage": "Open for bids",
         }
         local_record = {
             "source": "Find a Tender",
