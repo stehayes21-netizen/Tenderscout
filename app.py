@@ -773,7 +773,7 @@ def set_stage(tender_id):
 def remove_cross_source_duplicates(db):
     """Delete legacy discovery-feed copies when the same official notice is stored."""
     rows = db.execute(
-        "SELECT id, title, buyer, source, pipeline_status FROM tenders"
+        "SELECT id, title, buyer, source, pipeline_status, deadline FROM tenders"
     ).fetchall()
     grouped = {}
     for row in rows:
