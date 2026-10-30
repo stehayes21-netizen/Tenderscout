@@ -268,6 +268,8 @@ LOCAL_PLACE_TERMS = [
     # Warrington
     "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
     "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
+    # Named Liverpool city-centre site; supporting evidence only, not a postcode substitute.
+    "mann island",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -290,13 +292,16 @@ OUT_OF_AREA_TERMS = [
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
     "lancaster", "cumbria", "barrow-in-furness", "northumberland", "chorley",
     "leeds", "sheffield", "nottingham", "london", "birmingham", "bristol",
-    "cardiff", "newcastle", "oxford", "cambridge", "wales", "northern ireland",
+    "cardiff", "newcastle", "oxford", "cambridge", "wales", "anglesey", "northern ireland",
     # Regional labels in procurement feeds are useful when no postcode is supplied.
     # These are outside the configured target area and must not sit in its review queue.
     "east midlands", "west midlands", "east of england", "south east",
     "south west", "yorkshire and the humber", "north east",
     "north east england", "south east england", "south west england",
     "belfast", "flintshire", "wrexham",
+    "stoke-on-trent", "samlesbury", "darent valley hospital",
+    "gloucester", "cashel cross", "bradford", "juba",
+    "milton keynes", "lerwick", "lusaka", "singapore",
     "scotland", "scottish", "glasgow", "edinburgh", "aberdeen", "dundee",
     "inverness", "perth", "stirling", "falkirk", "paisley", "ayr",
     "livingston", "kirkcaldy", "lanarkshire", "ayrshire", "fife", "highland",
@@ -503,6 +508,23 @@ def add_location_values(obj, location_parts, in_location=False):
         if isinstance(description, str) and description.strip():
             location_parts.append(description.strip())
 
+        # The OCDS Location extension stores geographic identifiers inside
+        # deliveryLocation.gazetteer. Preserve NUTS identifiers so the existing
+        # postcode/NUTS classifier can evaluate the actual delivery geography.
+        gazetteer = obj.get("gazetteer")
+        if isinstance(gazetteer, dict):
+            scheme = as_text(gazetteer.get("scheme")).strip().upper()
+            identifiers = gazetteer.get("identifiers") or []
+            if scheme == "NUTS":
+                if isinstance(identifiers, (str, int)):
+                    identifiers = [identifiers]
+                if isinstance(identifiers, list):
+                    location_parts.extend(
+                        " ".join(str(identifier).split()).upper()
+                        for identifier in identifiers
+                        if str(identifier).strip()
+                    )
+
     for key in EXPLICIT_LOCATION_KEYS:
         if key in obj:
             # A location becomes trusted context only through a known delivery,
@@ -585,13 +607,29 @@ def extract_records(payload, source):
             contract_start_date = as_text(first(contract_period, "startDate", "start_date", "start"))
             contract_end_date = as_text(first(contract_period, "endDate", "end_date", "end"))
             notice_url = ""
+            # A procurement process can publish an original notice and later
+            # amended/replacement notices. Prefer the newest official tender
+            # notice document, rather than whichever URL happens to appear first.
+            official_notice_docs = []
             for doc in (tender.get("documents") or []) + (rel.get("documents") or []):
-                if isinstance(doc, dict):
-                    url = first(doc, "url", "uri")
-                    if url and ("find-tender.service.gov.uk/Notice/" in str(url)
-                                or "contractsfinder.service.gov.uk" in str(url)):
-                        notice_url = str(url)
-                        break
+                if not isinstance(doc, dict):
+                    continue
+                url = first(doc, "url", "uri")
+                doc_type = as_text(first(doc, "documentType", "document_type")).strip().lower()
+                if url and (
+                    "find-tender.service.gov.uk/Notice/" in str(url)
+                    or "contractsfinder.service.gov.uk" in str(url)
+                ):
+                    if not doc_type or "notice" in doc_type:
+                        official_notice_docs.append(doc)
+            if official_notice_docs:
+                def notice_doc_sort_key(doc):
+                    return (
+                        as_text(first(doc, "datePublished", "date_published", "date")).strip(),
+                        as_text(first(doc, "id")).strip(),
+                    )
+                latest_notice_doc = max(official_notice_docs, key=notice_doc_sort_key)
+                notice_url = str(first(latest_notice_doc, "url", "uri"))
             if not notice_url:
                 release_id = as_text(first(rel, "id"))
                 if source == "Find a Tender" and re.fullmatch(r"\d{6}-\d{4}", release_id):
@@ -1197,6 +1235,61 @@ def drop_contained(hits, longer_hits):
     return kept
 
 
+def explicit_out_of_area_delivery_sites(text, terms):
+    """Find named out-of-area places only when nearby wording describes a site or delivery scope.
+
+    General mentions of a place (for example, a buyer's address or a previous
+    project) are not enough. This is a one-way exclusion safeguard: prose can
+    never promote a record to LOCAL.
+    """
+    hits = []
+    for term in place_hits(text, terms):
+        pattern = r"(?<![a-z])" + re.escape(term) + r"(?![a-z])"
+        # A place can appear first in the buyer/title and later in the actual
+        # scope. Check every occurrence rather than letting the first mention
+        # hide stronger delivery-site wording later in the notice.
+        for match in re.finditer(pattern, text):
+            before = text[max(0, match.start() - 120):match.start()]
+            after = text[match.end():match.end() + 100]
+            before_cue = re.search(
+                r"\b(?:within|across|throughout|delivery in|services in|works in|"
+                r"properties in|site in|sites in|project in|located in|delivered at|"
+                r"provided at|carried out at)\s+"
+                r"(?:(?:the\s+)?(?:boundaries of|area of|city of|town of|borough of|county of)\s+)*$"
+                r"|\b(?:project title|project location|site location|delivery location|location)\s*:\s*$"
+                r"|\bat\b.{0,100},\s*$",
+                before,
+            )
+            after_cue = re.match(
+                r"\s*(?:enterprise zone|council housing properties|housing properties|"
+                r"properties|premises|estate|campus|hospital|schools|facilities|site|"
+                r"project|works|residential compounds|garrison)\b",
+                after,
+            )
+            # "at [named facility]" is strong site evidence, but a bare
+            # "previously worked at Falkirk" is only historical context.
+            facility_at_cue = (
+                re.search(r"\bat\s+$", before) is not None
+                and any(word in term.split() for word in (
+                    "hospital", "garrison", "airport", "prison", "university",
+                    "school", "campus", "estate",
+                ))
+            )
+            # The Northern Ireland HSC framework names the regional buyer and
+            # service geography in the same explicit phrase.
+            hsc_region_cue = (
+                "northern ireland" in term
+                and re.search(
+                    r"\b(?:hsc|health and social care)(?:\s+\([^)]*\))?\s+in\s+$",
+                    before,
+                ) is not None
+            )
+            if before_cue or after_cue or facility_at_cue or hsc_region_cue:
+                hits.append(term)
+                break
+    return hits
+
+
 def postcode_districts(text, include_bare=False):
     """Return (full-postcode districts, bare target/review districts) found in text."""
     upper = text.upper()
@@ -1276,6 +1369,18 @@ def classify_geography(record, region):
     # Description text must never promote a notice to LOCAL, but it must stop us
     # incorrectly discarding a mixed-area opportunity as OUT_OF_AREA.
     prose_local_sites = place_hits(prose, LOCAL_PLACE_TERMS)
+    prose_full_postcodes, _ = postcode_districts(prose)
+    # A postcode appearing only in title/description is deliberately not
+    # authoritative. Preserve REVIEW for those records, including mixed sites.
+    prose_out_sites = (
+        [] if prose_full_postcodes
+        else explicit_out_of_area_delivery_sites(prose, OUT_OF_AREA_TERMS)
+    )
+    if prose_out_sites and not prose_local_sites:
+        return "OUT_OF_AREA", (
+            "Explicit out-of-area delivery/site wording in notice: "
+            + ", ".join(dict.fromkeys(prose_out_sites[:5]))
+        )
     if strong_out and prose_local_sites:
         return "REVIEW", (
             "Structured delivery location includes non-target areas, while the "
@@ -1313,6 +1418,13 @@ def classify_geography(record, region):
         return "OUT_OF_AREA", (
             "Structured delivery/site location outside preferred area: "
             + ", ".join(strong_out[:3])
+        )
+    if weak and prose_local_sites:
+        return "REVIEW", (
+            "Potential target-area site named in notice text, but broader or "
+            "ambiguous delivery geography needs checking: "
+            + ", ".join(place.title() for place in dict.fromkeys(prose_local_sites[:3]))
+            + "; verify the full site list"
         )
     if weak:
         return "REVIEW", (

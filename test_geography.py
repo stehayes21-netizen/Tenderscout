@@ -309,6 +309,71 @@ class OpportunityStageTests(unittest.TestCase):
 
 
 class GeographyClassifierTests(unittest.TestCase):
+    def test_extracts_nuts_gazetteer_identifier_from_delivery_location(self):
+        payload = {
+            "releases": [{
+                "id": "notice-1",
+                "tender": {
+                    "title": "Window cleaning services",
+                    "items": [{
+                        "id": "item-1",
+                        "deliveryLocation": {
+                            "description": "Wirral",
+                            "gazetteer": {
+                                "scheme": "NUTS",
+                                "identifiers": ["UKD74"],
+                            },
+                        },
+                    }],
+                },
+            }],
+        }
+        record = tenderscout.extract_records(payload, "Find a Tender")[0]
+        self.assertIn("UKD74", record["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "LOCAL",
+        )
+
+    def test_mixed_nuts_delivery_locations_remain_in_review(self):
+        payload = {
+            "releases": [{
+                "id": "notice-2",
+                "tender": {
+                    "title": "Regional cleaning framework",
+                    "items": [
+                        {
+                            "id": "local",
+                            "deliveryLocation": {
+                                "description": "Wirral",
+                                "gazetteer": {
+                                    "scheme": "NUTS",
+                                    "identifiers": ["UKD74"],
+                                },
+                            },
+                        },
+                        {
+                            "id": "outside",
+                            "deliveryLocation": {
+                                "description": "Cheshire West",
+                                "gazetteer": {
+                                    "scheme": "NUTS",
+                                    "identifiers": ["UKD63"],
+                                },
+                            },
+                        },
+                    ],
+                },
+            }],
+        }
+        record = tenderscout.extract_records(payload, "Find a Tender")[0]
+        self.assertIn("UKD74", record["location_text"])
+        self.assertIn("UKD63", record["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
     def test_confirmed_liverpool_location_is_local(self):
         record = {"location_text": "Liverpool"}
         geo_class, reason = tenderscout.classify_geography(record, "North West")
@@ -335,6 +400,199 @@ class GeographyClassifierTests(unittest.TestCase):
                 geo_class, reason = tenderscout.classify_geography(record, "North West")
                 self.assertEqual(geo_class, "OUT_OF_AREA")
                 self.assertIn("outside", reason.lower())
+
+    def test_explicit_out_of_area_delivery_sites_are_excluded_from_review(self):
+        cases = [
+            {
+                "title": "Repairs and maintenance framework",
+                "description": "Works to council properties within the boundaries of Stoke-on-Trent.",
+            },
+            {
+                "title": "Foul water drainage",
+                "description": "The provision of foul water drainage at Samlesbury Enterprise Zone.",
+            },
+            {
+                "title": "Scaffolding hire",
+                "description": "The works are to Falkirk Council housing properties.",
+            },
+            {
+                "title": "Solar PV feasibility",
+                "description": "Site assessments at the Lusaka estate.",
+            },
+            {
+                "title": "Communal facilities",
+                "description": "The service will be delivered at Darent Valley Hospital.",
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
+    def test_explicit_named_project_and_facility_locations_are_excluded(self):
+        cases = [
+            {
+                "title": "Market and food court construction",
+                "description": "Project Title: Gloucester Greyfriars Project. Location: Eastgate Shopping Centre.",
+            },
+            {
+                "title": "Social housing design team",
+                "description": "The scheme is for delivery of seven dwellings at Cashel Cross Garrison.",
+            },
+            {
+                "title": "Museum exhibition fit-out",
+                "description": "Fit-out services at the National Science and Media Museum (NSMM), Bradford.",
+            },
+            {
+                "title": "Security guard services",
+                "description": "The contract will operate across HMG Juba residential compounds.",
+            },
+            {
+                "title": "Catering services",
+                "description": "Catering services will be provided at Walton Hall, Milton Keynes.",
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
+    def test_delivery_site_mention_after_buyer_name_is_detected(self):
+        cases = [
+            {
+                "title": "Stoke-on-Trent City Council repairs framework",
+                "description": (
+                    "Works to council owned properties within the boundaries "
+                    "of Stoke-on-Trent."
+                ),
+            },
+            {
+                "title": "Solar PV study for British High Commission Lusaka",
+                "description": (
+                    "Site assessments at the British High Commission Lusaka estate."
+                ),
+            },
+            {
+                "title": "Falkirk Council scaffolding framework",
+                "description": (
+                    "The works are to Falkirk Council housing properties."
+                ),
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
+    def test_explicit_anglesey_project_site_is_out_of_area(self):
+        record = {
+            "location_text": "UK, United Kingdom",
+            "title": "Gwyndod Archaeology Investigation and Mitigation",
+            "description": (
+                "Archaeological investigation and mitigation services to support "
+                "development of the Gwyndod project in Anglesey. The requirement "
+                "covers the main site areas and associated development areas."
+            ),
+        }
+        region, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(region, "OUT_OF_AREA")
+        self.assertIn("anglesey", reason.lower())
+
+    def test_structured_singapore_location_is_out_of_area(self):
+        record = {"location_text": "SG, Singapore"}
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "OUT_OF_AREA",
+        )
+
+    def test_explicit_regional_and_multi_site_scopes_are_excluded(self):
+        cases = [
+            {
+                "title": "Non Invasive Ventilation community framework",
+                "description": (
+                    "This Framework Agreement is being established on behalf of "
+                    "Health and Social Care (HSC) in Northern Ireland. The aim is "
+                    "to develop a regional managed service for patients."
+                ),
+            },
+            {
+                "title": "Helipad design and construction",
+                "description": (
+                    "Upgrade the existing helipad at Darent Valley Hospital "
+                    "following detailed site surveys."
+                ),
+            },
+            {
+                "title": "Ozone and ultraviolet monitoring services",
+                "description": (
+                    "Daily observations across the United Kingdom's three "
+                    "ozone monitoring sites in Manchester, Reading and Lerwick."
+                ),
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
+    def test_historical_facility_mention_is_not_delivery_evidence(self):
+        record = {
+            "location_text": "",
+            "title": "Framework for property maintenance",
+            "description": "The supplier previously worked at Falkirk.",
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_transport_for_wales_brand_alone_stays_in_review(self):
+        record = {
+            "location_text": "UK, United Kingdom",
+            "title": "Control of Contractors Portal",
+            "description": (
+                "Transport for Wales has a requirement for a software solution "
+                "to support a portal across its station network."
+            ),
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_general_mention_of_out_of_area_place_does_not_exclude(self):
+        record = {
+            "location_text": "",
+            "title": "Framework for property maintenance",
+            "description": "The supplier has previously completed work in Falkirk.",
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_mixed_local_and_out_of_area_prose_remains_in_review(self):
+        record = {
+            "location_text": "",
+            "title": "Regional maintenance contract",
+            "description": "Works at Falkirk and Liverpool sites.",
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
 
     def test_missing_location_is_review(self):
         record = {"location_text": "", "title": "Cleaning contract", "description": "Routine cleaning at facilities"}
@@ -992,3 +1250,51 @@ class BearingsDiscoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class NoticeUrlExtractionTests(unittest.TestCase):
+    def test_prefers_latest_official_tender_notice_document(self):
+        payload = {
+            "releases": [{
+                "id": "103222-2026",
+                "ocid": "ocds-test-amended-notice",
+                "tag": ["tenderUpdate"],
+                "tender": {
+                    "title": "Audio visual system",
+                    "status": "active",
+                    "tenderPeriod": {"endDate": "2026-11-18T10:00:00Z"},
+                    "documents": [
+                        {
+                            "id": "096833-2026",
+                            "documentType": "tenderNotice",
+                            "datePublished": "2026-10-14T10:20:12Z",
+                            "url": "https://www.find-tender.service.gov.uk/Notice/096833-2026",
+                        },
+                        {
+                            "id": "103222-2026",
+                            "documentType": "tenderNotice",
+                            "datePublished": "2026-10-30T13:26:50Z",
+                            "url": "https://www.find-tender.service.gov.uk/Notice/103222-2026",
+                        },
+                    ],
+                },
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(
+            rows[0]["notice_url"],
+            "https://www.find-tender.service.gov.uk/Notice/103222-2026",
+        )
+
+    def test_mann_island_description_is_review_not_automatically_local(self):
+        record = {
+            "title": "Audio visual, digital signage and visitor management system",
+            "description": (
+                "New meeting room audio-visual equipment across the Authority's estate, "
+                "including the larger ground floor auditoriums at Mann Island HQ."
+            ),
+            "location_text": "UKD, United Kingdom",
+        }
+        region, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(region, "REVIEW")
+        self.assertIn("Mann Island", reason)
