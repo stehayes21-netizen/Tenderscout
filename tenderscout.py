@@ -727,7 +727,8 @@ def _start_stats(stats):
     stats = stats if stats is not None else {}
     stats.update({"pages": 0, "records": 0, "last_batch": 0, "more": False,
                   "error": "", "stopped": "", "windows": 0, "full_end": False,
-                  "truncated_windows": 0, "last_page_had_cursor": False})
+                  "truncated_windows": 0, "last_page_had_cursor": False,
+                  "pagination_supported": False})
     return stats
 
 
@@ -787,6 +788,7 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
     """Read one search page by page, following the feed's own next-page links."""
     results = []
     cursor = None
+    stats["pagination_supported"] = True
     for _ in range(max_pages):
         if max_seconds and time.monotonic() - started > max_seconds:
             print("[WARN] Stopped early: the time limit for this source was reached", file=sys.stderr)
@@ -860,15 +862,10 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        # Allow up to three pages per hosted window. This preserves the newer
-        # daily slices and gives busy weekly windows more room before the source
-        # time budget becomes the hard stop.
-        # The source time budget remains the hard stop; CLI audits use their
-        # requested page limit for every window.
-        if max_seconds:
-            window_page_limit = min(max_pages, 6)
-        else:
-            window_page_limit = max_pages
+        # Follow the official cursor through each window. The overall source
+        # time budget is the safety stop; an arbitrary six-page window cap was
+        # cutting off busy periods even when time remained.
+        window_page_limit = max_pages
         results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
                                      started, max_seconds, stats))
         if stats["error"]:
@@ -915,57 +912,84 @@ def fetch_bearings(max_seconds=None, stats=None):
     stats = _start_stats(stats)
     started = time.monotonic()
     results = []
-    params = {"area": "lcr,cheshire", "kind": "tender", "limit": "200", "sort": "newest"}
-    url = "https://getbearings.co.uk/api/v1/opportunities?" + urllib.parse.urlencode(params)
-    try:
-        payload = get_json(url)
-    except Exception as exc:
-        stats["error"] = str(exc)[:320]
-        print(f"[WARN] Bearings fetch failed: {exc}", file=sys.stderr)
-        return results
-    data = payload.get("data", []) if isinstance(payload, dict) else []
-    if not isinstance(data, list):
-        stats["error"] = "Unexpected Bearings API response shape"
-        return results
-    for item in data:
-        if max_seconds and time.monotonic() - started > max_seconds:
+    limit = 200
+    offset = 0
+    total_available = None
+    stats["pagination_supported"] = True
+    while True:
+        if max_seconds and time.monotonic() - started >= max_seconds:
             stats["stopped"] = "time limit"
             break
-        if not isinstance(item, dict) or str(item.get("kind", "")).lower() != "tender":
-            continue
-        title = as_text(item.get("title")).strip()
-        provider_url = as_text(item.get("url")).strip()
-        if not title or not provider_url.startswith("https://"):
-            continue
-        bearings_url = as_text(item.get("bearings_url")).strip()
-        description_parts = [as_text(item.get("summary")).strip(), as_text(item.get("conditions")).strip()]
-        where = as_text(item.get("where")).strip()
-        if where:
-            description_parts.append("Eligibility/location wording from Bearings (not verified delivery site): " + where)
-        if bearings_url.startswith("https://"):
-            description_parts.append("Source credit: Bearings — " + bearings_url)
-        results.append({
-            "source": "Bearings (discovery; verify provider notice)",
-            "opportunity_stage": "Other notice",
-            "location_text": "",
-            "published_date": as_text(item.get("first_seen") or ""),
-            "title": title,
-            "buyer": as_text(item.get("provider") or ""),
-            "description": " ".join(part for part in description_parts if part),
-            "contact_name": "", "contact_email": "", "contact_phone": "",
-            "eligibility_text": as_text(item.get("conditions") or ""),
-            "estimated_value_gbp": "",
-            "contract_start_date": "", "contract_end_date": "",
-            "deadline": as_text(item.get("closes") or ""),
-            "status": "Bearings discovery listing — verify provider notice",
-            "notice_url": provider_url,
-            "ocid": as_text(item.get("id") or provider_url),
-            "_raw": item,
-        })
-    stats.update({"pages": 1 if data else 0, "records": len(results), "last_batch": len(results),
-                  "windows": 1, "more": False, "full_end": len(data) >= 200})
+        params = {
+            "area": "lcr,cheshire", "kind": "tender", "limit": str(limit),
+            "offset": str(offset), "sort": "newest",
+        }
+        url = "https://getbearings.co.uk/api/v1/opportunities?" + urllib.parse.urlencode(params)
+        try:
+            payload = get_json(url)
+        except Exception as exc:
+            stats["error"] = str(exc)[:320]
+            print(f"[WARN] Bearings fetch failed: {exc}", file=sys.stderr)
+            break
+        if not isinstance(payload, dict) or not isinstance(payload.get("data", []), list):
+            stats["error"] = "Unexpected Bearings API response shape"
+            break
+        data = payload.get("data", [])
+        meta = payload.get("meta", {})
+        if isinstance(meta, dict):
+            try:
+                total_available = int(meta["total"])
+            except (KeyError, TypeError, ValueError):
+                pass
+        stats["pages"] = stats.get("pages", 0) + 1
+        stats["last_batch"] = len(data)
+        for item in data:
+            if not isinstance(item, dict) or str(item.get("kind", "")).lower() != "tender":
+                continue
+            title = as_text(item.get("title")).strip()
+            provider_url = as_text(item.get("url")).strip()
+            if not title or not provider_url.startswith("https://"):
+                continue
+            bearings_url = as_text(item.get("bearings_url")).strip()
+            description_parts = [as_text(item.get("summary")).strip(), as_text(item.get("conditions")).strip()]
+            where = as_text(item.get("where")).strip()
+            if where:
+                description_parts.append("Eligibility/location wording from Bearings (not verified delivery site): " + where)
+            if bearings_url.startswith("https://"):
+                description_parts.append("Source credit: Bearings — " + bearings_url)
+            results.append({
+                "source": "Bearings (discovery; verify provider notice)",
+                "opportunity_stage": "Other notice",
+                "location_text": "",
+                "published_date": as_text(item.get("first_seen") or ""),
+                "title": title,
+                "buyer": as_text(item.get("provider") or ""),
+                "description": " ".join(part for part in description_parts if part),
+                "contact_name": "", "contact_email": "", "contact_phone": "",
+                "eligibility_text": as_text(item.get("conditions") or ""),
+                "estimated_value_gbp": "",
+                "contract_start_date": "", "contract_end_date": "",
+                "deadline": as_text(item.get("closes") or ""),
+                "status": "Bearings discovery listing — verify provider notice",
+                "notice_url": provider_url,
+                "ocid": as_text(item.get("id") or provider_url),
+                "_raw": item,
+            })
+        offset += len(data)
+        if not data or (total_available is not None and offset >= total_available):
+            break
+        if total_available is None and len(data) < limit:
+            break
+        if total_available is None and len(data) == limit:
+            stats["error"] = "Bearings response omitted meta.total; stopped rather than assume pagination was complete"
+            break
+        # Bearings documents a 60-requests/minute limit; keep a safe margin.
+        time.sleep(1.05)
+    stats.update({
+        "records": len(results), "windows": 1, "more": False,
+        "total_available": total_available,
+    })
     return results
-
 
 def fetch_standstill_northwest(max_seconds=None, stats=None):
     """Fetch free Standstill RSS discovery feeds, retaining source attribution.
@@ -1115,7 +1139,7 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
         "last_batch": len(output),
         "windows": len(feed_counts),
         "more": False,
-        "full_end": any(value >= 50 for value in feed_counts.values()),
+        "known_feed_cap": 50,
         "feed_counts": feed_counts,
         "partial_errors": "; ".join(errors)[:320] if feed_counts else "",
         "error": ("; ".join(errors)[:320] if errors and not feed_counts else ""),
