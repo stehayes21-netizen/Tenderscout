@@ -782,7 +782,13 @@ class RefreshSummaryTests(AppTestCase):
         )
         db.commit()
         db.close()
-        stop = threading.Event()
+        class OneCycleEvent:
+            def __init__(self):
+                self.calls = 0
+            def wait(self, seconds):
+                self.calls += 1
+                return self.calls > 1
+        stop = OneCycleEvent()
         self.app_module._refresh_heartbeat("heartbeat-owner", stop)
         db = self.app_module.connect_db()
         state = db.execute("SELECT heartbeat_at FROM refresh_state WHERE id = 1").fetchone()
