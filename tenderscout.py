@@ -268,6 +268,8 @@ LOCAL_PLACE_TERMS = [
     # Warrington
     "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
     "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
+    # Named Liverpool city-centre site; supporting evidence only, not a postcode substitute.
+    "mann island",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -605,13 +607,29 @@ def extract_records(payload, source):
             contract_start_date = as_text(first(contract_period, "startDate", "start_date", "start"))
             contract_end_date = as_text(first(contract_period, "endDate", "end_date", "end"))
             notice_url = ""
+            # A procurement process can publish an original notice and later
+            # amended/replacement notices. Prefer the newest official tender
+            # notice document, rather than whichever URL happens to appear first.
+            official_notice_docs = []
             for doc in (tender.get("documents") or []) + (rel.get("documents") or []):
-                if isinstance(doc, dict):
-                    url = first(doc, "url", "uri")
-                    if url and ("find-tender.service.gov.uk/Notice/" in str(url)
-                                or "contractsfinder.service.gov.uk" in str(url)):
-                        notice_url = str(url)
-                        break
+                if not isinstance(doc, dict):
+                    continue
+                url = first(doc, "url", "uri")
+                doc_type = as_text(first(doc, "documentType", "document_type")).strip().lower()
+                if url and (
+                    "find-tender.service.gov.uk/Notice/" in str(url)
+                    or "contractsfinder.service.gov.uk" in str(url)
+                ):
+                    if not doc_type or "notice" in doc_type:
+                        official_notice_docs.append(doc)
+            if official_notice_docs:
+                def notice_doc_sort_key(doc):
+                    return (
+                        as_text(first(doc, "datePublished", "date_published", "date")).strip(),
+                        as_text(first(doc, "id")).strip(),
+                    )
+                latest_notice_doc = max(official_notice_docs, key=notice_doc_sort_key)
+                notice_url = str(first(latest_notice_doc, "url", "uri"))
             if not notice_url:
                 release_id = as_text(first(rel, "id"))
                 if source == "Find a Tender" and re.fullmatch(r"\d{6}-\d{4}", release_id):
@@ -1400,6 +1418,13 @@ def classify_geography(record, region):
         return "OUT_OF_AREA", (
             "Structured delivery/site location outside preferred area: "
             + ", ".join(strong_out[:3])
+        )
+    if weak and prose_local_sites:
+        return "REVIEW", (
+            "Potential target-area site named in notice text, but broader or "
+            "ambiguous delivery geography needs checking: "
+            + ", ".join(dict.fromkeys(prose_local_sites[:3]))
+            + "; verify the full site list"
         )
     if weak:
         return "REVIEW", (
