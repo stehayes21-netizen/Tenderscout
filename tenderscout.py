@@ -634,6 +634,7 @@ def extract_records(payload, source):
             # its tag contains the word "tender".
             notice_statuses = [
                 as_text(first(tender, "status")),
+                as_text(first(tender, "awardStatus")),
                 as_text(first(rel, "status")),
             ]
             raw_awards = rel.get("awards") or []
@@ -644,22 +645,29 @@ def extract_records(payload, source):
                     as_text(first(award, "status"))
                     for award in raw_awards if isinstance(award, dict)
                 )
-            status_text = " ".join(notice_statuses).lower()
+            status_values = {value.strip().lower() for value in notice_statuses if value.strip()}
+            status_text = " ".join(status_values)
             is_cancelled = (
                 any("cancel" in value or "termination" in value for value in tag_values)
                 or "cancel" in status_text
                 or "terminated" in status_text
             )
+            is_closed = bool(status_values.intersection({
+                "unsuccessful", "withdrawn", "complete", "completed"
+            }))
             is_planning = any(
-                "planning" in value or "pipeline" in value or "early market" in value
+                value in {"planning", "planningupdate"}
+                or "pipeline" in value or "early market" in value
                 for value in tag_values
             )
+            # OCDS defines tenderUpdate and tenderAmendment as releases about
+            # an existing tender, not awards or contract lifecycle notices.
             is_tender_notice = any(
-                value in {"tender", "tendernotice", "tender_notice"}
+                value in {"tender", "tenderupdate", "tenderamendment"}
                 for value in tag_values
             )
 
-            if is_cancelled:
+            if is_cancelled or is_closed:
                 opportunity_stage = "Other notice"
             elif is_planning:
                 opportunity_stage = "Planning / upcoming"
