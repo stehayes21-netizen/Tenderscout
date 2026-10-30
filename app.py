@@ -1061,23 +1061,32 @@ def _start_refresh_thread(refresh_token):
 def api_refresh():
     """Claim the shared database lease, then start one background refresh."""
     started = datetime.now(timezone.utc).isoformat()
-    stale_before = (datetime.now(timezone.utc) - timedelta(
-        seconds=REFRESH_STALE_AFTER_SECONDS
-    )).isoformat()
     refresh_token = uuid.uuid4().hex
     db = None
     try:
         db = connect_db()
-        # Conditional UPDATE is the cross-process lock. The database serialises
-        # competing updates to this single row; only one request can claim it.
-        # A lease older than the safety window can be reclaimed after a crash.
+        # Read the current lease, then claim it with a compare-and-swap UPDATE.
+        # Comparing every ownership field makes the claim atomic across workers.
+        current_row = db.execute(
+            "SELECT status, started_at, refresh_token FROM refresh_state WHERE id = 1"
+        ).fetchone()
+        current = dict(current_row) if current_row else {}
+        if current.get("status") == "running" and not _refresh_state_is_stale(current):
+            return {"status": "running", "message": "A refresh is already running."}, 202
+
         cursor = db.execute(
             """UPDATE refresh_state
                SET status = 'running', started_at = ?, finished_at = NULL,
                    summary = '', error = '', refresh_token = ?
                WHERE id = 1
-                 AND (status != 'running' OR started_at IS NULL OR started_at < ?)""",
-            (started, refresh_token, stale_before),
+                 AND status = ?
+                 AND (started_at = ? OR (started_at IS NULL AND ? IS NULL))
+                 AND (refresh_token = ? OR (refresh_token IS NULL AND ? IS NULL))""",
+            (
+                started, refresh_token, current.get("status"),
+                current.get("started_at"), current.get("started_at"),
+                current.get("refresh_token"), current.get("refresh_token"),
+            ),
         )
         db.commit()
         if cursor.rowcount != 1:
