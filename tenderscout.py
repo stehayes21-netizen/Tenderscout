@@ -1362,7 +1362,7 @@ def score_record(record, services, region, min_value, max_value):
     exclude_hits = keyword_hits(fulltext, EXCLUDE_TERMS)
     matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
     detailed_category = classify_trade_category(
-        fulltext,
+        record.get("description", ""),
         title=record.get("title", ""),
         trade_context=record.get("trade_context", ""),
     )
