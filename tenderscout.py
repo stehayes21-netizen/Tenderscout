@@ -1473,8 +1473,10 @@ def dedupe(records):
         else:
             ocid = row.get("ocid")
             key = ("ocid", ocid) if ocid else (
-                "title", row.get("title", "").lower(), row.get("buyer", "").lower(),
-                row.get("published_date", ""),
+                ("url", notice_url) if notice_url else (
+                    "title", row.get("title", "").lower(), row.get("buyer", "").lower(),
+                    row.get("published_date", ""),
+                )
             )
 
         # Discovery feeds often repeat an official notice under a different URL
