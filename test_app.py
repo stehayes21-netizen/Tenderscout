@@ -756,6 +756,54 @@ class RefreshSummaryTests(AppTestCase):
         self.assertEqual(state["status"], "running")
         self.assertEqual(state["refresh_token"], "active-process-token")
 
+    def test_recent_heartbeat_prevents_reclaim_even_when_started_at_is_old(self):
+        db = self.app_module.connect_db()
+        started = (self.app_module.datetime.now(self.app_module.timezone.utc)
+                   - timedelta(minutes=25)).isoformat()
+        heartbeat = self.app_module.datetime.now(self.app_module.timezone.utc).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, heartbeat_at = ?, refresh_token = ? WHERE id = 1",
+            (started, heartbeat, "still-active-token"),
+        )
+        db.commit()
+        db.close()
+
+        with patch.object(self.app_module, "_start_refresh_thread") as start_thread:
+            response = self.client.post("/api/refresh")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json["status"], "running")
+        start_thread.assert_not_called()
+
+    def test_heartbeat_renews_only_the_current_running_owner(self):
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', refresh_token = ?, heartbeat_at = NULL WHERE id = 1",
+            ("heartbeat-owner",),
+        )
+        db.commit()
+        db.close()
+        stop = threading.Event()
+        self.app_module._refresh_heartbeat("heartbeat-owner", stop)
+        db = self.app_module.connect_db()
+        state = db.execute("SELECT heartbeat_at FROM refresh_state WHERE id = 1").fetchone()
+        db.close()
+        self.assertIsNotNone(state["heartbeat_at"])
+
+    def test_legacy_refresh_route_respects_an_existing_database_lease(self):
+        db = self.app_module.connect_db()
+        started = self.app_module.datetime.now(self.app_module.timezone.utc).isoformat()
+        db.execute(
+            "UPDATE refresh_state SET status = 'running', started_at = ?, heartbeat_at = ?, refresh_token = ? WHERE id = 1",
+            (started, started, "active-api-refresh"),
+        )
+        db.commit()
+        db.close()
+        with patch.object(self.app_module, "refresh_or_error") as run_refresh:
+            response = self.client.post("/refresh")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("refresh_started=1", response.headers["Location"])
+        run_refresh.assert_not_called()
+
     def test_stale_database_lease_can_be_reclaimed_after_process_crash(self):
         db = self.app_module.connect_db()
         started = (self.app_module.datetime.now(self.app_module.timezone.utc)
@@ -845,6 +893,7 @@ class RefreshSummaryTests(AppTestCase):
         db.close()
 
         self.assertIn("refresh_token", columns)
+        self.assertIn("heartbeat_at", columns)
         self.assertEqual(state["status"], "failed")
         self.assertEqual(state["summary"], "previous result")
         self.assertIsNone(state["refresh_token"])
