@@ -342,7 +342,7 @@ def dashboard():
     # location-review notices that mention one of the target areas. They are
     # labelled as unverified below; the full review view remains available.
     condition = (
-        "region_match = 'REVIEW' AND opportunity_stage IN ('Open for bids', 'Planning / upcoming')" if review_view
+        "region_match = 'REVIEW' AND opportunity_stage = 'Open for bids'" if review_view
         else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
     )
     params = []
@@ -377,7 +377,7 @@ def dashboard():
         # Main and review boards show actionable live bids only. Planning notices
         # have their own pipeline view; awards, updates and expired bids stay out
         # of the working lists but remain stored for audit/export.
-        allowed_stages = {"Open for bids"} if not review_view else {"Open for bids", "Planning / upcoming"}
+        allowed_stages = {"Open for bids"}
         decorated = [
             item for item in decorated
             if (item[0]["opportunity_stage"] or "Other notice") in allowed_stages
