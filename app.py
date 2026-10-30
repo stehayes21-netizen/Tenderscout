@@ -770,6 +770,49 @@ def set_stage(tender_id):
     return redirect(dashboard_url(view, service if service in SERVICE_FILTERS else ""))
 
 
+def remove_cross_source_duplicates(db):
+    """Delete legacy discovery-feed copies when the same official notice is stored."""
+    rows = db.execute(
+        "SELECT id, title, buyer, source, pipeline_status FROM tenders"
+    ).fetchall()
+    grouped = {}
+    for row in rows:
+        title = " ".join(str(row["title"] or "").casefold().split())
+        buyer = " ".join(str(row["buyer"] or "").casefold().split())
+        if title and buyer:
+            grouped.setdefault((title, buyer), []).append(row)
+
+    removed = 0
+    for group in grouped.values():
+        official = [
+            row for row in group
+            if any(name in str(row["source"] or "") for name in ("Find a Tender", "Contracts Finder"))
+        ]
+        discovery = [
+            row for row in group
+            if any(name in str(row["source"] or "") for name in ("Bearings", "Standstill"))
+        ]
+        if not official or not discovery:
+            continue
+        keeper = max(official, key=lambda row: int(row["id"]))
+        # Preserve any manually changed pipeline state before removing the
+        # redundant discovery copy.
+        if str(keeper["pipeline_status"] or "Reviewing") == "Reviewing":
+            chosen = next(
+                (row for row in discovery if str(row["pipeline_status"] or "Reviewing") != "Reviewing"),
+                None,
+            )
+            if chosen:
+                db.execute(
+                    "UPDATE tenders SET pipeline_status = ? WHERE id = ?",
+                    (chosen["pipeline_status"], keeper["id"]),
+                )
+        for row in discovery:
+            db.execute("DELETE FROM tenders WHERE id = ?", (row["id"],))
+            removed += 1
+    return removed
+
+
 def sample_line(record):
     """A one-line description of a tender, for reading in the service logs."""
     def clip(value, size):
@@ -904,6 +947,7 @@ def run_refresh():
                 ),
             )
             stats["local" if region_match == "LOCAL" else "review"] += 1
+        stats["legacy_duplicates_removed"] = remove_cross_source_duplicates(db)
         db.commit()
     finally:
         db.close()
