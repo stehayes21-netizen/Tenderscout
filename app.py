@@ -1112,9 +1112,9 @@ def _claim_refresh_lease():
             """UPDATE refresh_state SET status = 'running', started_at = ?, heartbeat_at = ?,
                    finished_at = NULL, summary = '', error = '', refresh_token = ?
                WHERE id = 1 AND status = ?
-                 AND (started_at = ? OR (started_at IS NULL AND ? IS NULL))
-                 AND (refresh_token = ? OR (refresh_token IS NULL AND ? IS NULL))
-                 AND (heartbeat_at = ? OR (heartbeat_at IS NULL AND ? IS NULL))""",
+                 AND (started_at = ? OR (started_at IS NULL AND CAST(? AS TEXT) IS NULL))
+                 AND (refresh_token = ? OR (refresh_token IS NULL AND CAST(? AS TEXT) IS NULL))
+                 AND (heartbeat_at = ? OR (heartbeat_at IS NULL AND CAST(? AS TEXT) IS NULL))""",
             (started, started, token, current.get("status"), current.get("started_at"),
              current.get("started_at"), current.get("refresh_token"), current.get("refresh_token"),
              current.get("heartbeat_at"), current.get("heartbeat_at")),
