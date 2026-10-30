@@ -929,7 +929,7 @@ class TradeClassificationEvidenceTests(unittest.TestCase):
             "The school meals service is mentioned in the background.",
             title="Preliminary Market Engagement for Education Software Suite",
         )
-        self.assertEqual(category, "IT and telecommunications")
+        self.assertEqual(category, "IT and telecoms")
 
     def test_incidental_description_keyword_does_not_create_trade_category(self):
         category = tenderscout.classify_trade_category(
