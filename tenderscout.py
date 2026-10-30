@@ -292,7 +292,7 @@ OUT_OF_AREA_TERMS = [
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
     "lancaster", "cumbria", "barrow-in-furness", "northumberland", "chorley",
     "leeds", "sheffield", "nottingham", "london", "birmingham", "bristol",
-    "cardiff", "newcastle", "oxford", "cambridge", "wales", "northern ireland",
+    "cardiff", "newcastle", "oxford", "cambridge", "wales", "anglesey", "northern ireland",
     # Regional labels in procurement feeds are useful when no postcode is supplied.
     # These are outside the configured target area and must not sit in its review queue.
     "east midlands", "west midlands", "east of england", "south east",
