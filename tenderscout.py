@@ -144,18 +144,43 @@ TRADE_KEYWORDS = {
     "Other / unclassified": [],
 }
 
-def classify_trade_category(fulltext):
-    """Return the best detailed category; leave unmatched opportunities unclassified."""
-    text = (fulltext or "").lower()
-    matches = []
+def classify_trade_category(fulltext, title="", trade_context=""):
+    """Classify from strong procurement evidence, not incidental words in long prose.
+
+    Title matches carry the most weight, followed by tender line-item/classification
+    context. General description matches are weak and cannot classify a notice alone.
+    The one-argument form remains supported for older callers and tests.
+    """
+    if not title and not trade_context:
+        title_text = (fulltext or "").lower()
+        context_text = ""
+        description_text = ""
+        legacy_mode = True
+    else:
+        title_text = (title or "").lower()
+        context_text = (trade_context or "").lower()
+        description_text = (fulltext or "").lower()
+        legacy_mode = False
+
+    scores = {}
     for category, terms in TRADE_KEYWORDS.items():
+        score = 0
         for term in terms:
-            if term in text:
-                matches.append((len(term), category))
-    if matches:
-        matches.sort(reverse=True)
-        return matches[0][1]
-    return "Other / unclassified"
+            if term in title_text:
+                score += 6
+            if term in context_text:
+                score += 4
+            if term in description_text:
+                score += 1
+        if legacy_mode and score:
+            score = max(score, 4)
+        if score:
+            scores[category] = score
+
+    if not scores:
+        return "Other / unclassified"
+    category, score = max(scores.items(), key=lambda item: (item[1], item[0]))
+    return category if score >= 4 else "Other / unclassified"
 
 
 CLEANING_TERMS = [
@@ -1336,7 +1361,11 @@ def score_record(record, services, region, min_value, max_value):
     }
     exclude_hits = keyword_hits(fulltext, EXCLUDE_TERMS)
     matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
-    detailed_category = classify_trade_category(fulltext)
+    detailed_category = classify_trade_category(
+        fulltext,
+        title=record.get("title", ""),
+        trade_context=record.get("trade_context", ""),
+    )
     # The default scope now covers the full detailed trade taxonomy. Keep
     # backwards compatibility for callers explicitly selecting a subset of the
     # legacy service groups: those switches must still exclude disabled groups.
