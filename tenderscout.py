@@ -1434,7 +1434,8 @@ def classify_geography(record, region):
     ambiguous = drop_contained(place_hits(location_text, AMBIGUOUS_PLACE_TERMS), named)
     broad = drop_contained(broad_raw, named)
 
-    prose_local_delivery_postcodes = explicit_local_delivery_postcodes(prose)\n    strong_local = pc_local + nuts_local + local_places + prose_local_delivery_postcodes
+    prose_local_delivery_postcodes = explicit_local_delivery_postcodes(prose)
+    strong_local = pc_local + nuts_local + local_places + prose_local_delivery_postcodes
     strong_out = pc_other + nuts_out + out_places
     # Place-level doubt (a shared name, a borderline postcode) means a person
     # should look. Broad region words and codes only describe the wider region, so
