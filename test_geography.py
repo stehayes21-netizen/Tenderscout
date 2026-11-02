@@ -266,6 +266,29 @@ class GeographyClassifierTests(unittest.TestCase):
         self.assertEqual(geo_class, "REVIEW")
         self.assertIn("title/description", reason.lower())
 
+    def test_explicit_local_delivery_postcode_in_notice_prose_is_local(self):
+        record = {
+            "location_text": "",
+            "title": "Vehicle Wash Cleaning Contract",
+            "description": (
+                "The vehicles will need to be washed at Hardshaw Brook Depot "
+                "WA9 1JR. Cleaning will take place in the designated wash bay."
+            ),
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "LOCAL")
+        self.assertIn("WA9", reason)
+
+    def test_unqualified_local_postcode_in_notice_prose_remains_review(self):
+        record = {
+            "location_text": "",
+            "title": "Vehicle Wash Cleaning Contract",
+            "description": "The notice refers to postcode WA9 1JR in background information.",
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("title/description", reason)
+
     def test_review_tenders_appear_in_review_csv_and_not_main_shortlist(self):
         review_record = {
             "source": "Find a Tender",
