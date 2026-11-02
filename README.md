@@ -1,83 +1,102 @@
 # TenderScout
 
-A small dashboard that finds UK public-sector tenders for **commercial cleaning, facilities management, property maintenance and construction** in **Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral, Warrington and Cheshire West and Chester**. Other North West areas remain outside the service area.
+TenderScout identifies public procurement contracts relevant to cleaning, facilities management, property maintenance and construction businesses in **Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral and Warrington**. **Cheshire, including Cheshire West and Chester, is excluded.**
+
+## Current collection
+
+- `tenderscout.py` collects from the official Find a Tender and Contracts Finder feeds, plus Bearings and Standstill UK as secondary discovery sources.
+- Bearings and Standstill regional/business-eligibility labels are not proof of a contract delivery site; records still pass through the normal geography and opportunity checks.
+- The `/sources` page is currently a directory. Listing a council or NHS portal there does **not** mean TenderScout is automatically collecting that portal.
+
+## Approved source coverage
+
+All qualifying procurement opportunities must appear in the **same main opportunity board**, using the same card layout, trade classification, location assessment, deadline/value fields, saved status and exports. Each record must retain its originating portal and contracting authority.
+
+Source groups to support:
+
+1. **National procurement:** Find a Tender and Contracts Finder.
+2. **Local authorities and councils:** The Chest and relevant council-specific portals such as ProContract/Proactis, plus other official council procurement systems serving the target area.
+3. **NHS and healthcare procurement:** Atamis/Health Family eCommercial System and other official NHS procurement portals where the opportunity is a contract.
+4. **Other public and institutional procurement:** relevant universities, colleges, housing providers, fire and rescue services, ambulance services, police, transport bodies and similar organisations where they publish genuine procurement contracts.
+
+The board should have filters by source group and, where useful, by named source or buyer. Source provenance and delivery geography are separate fields: a Liverpool Council buyer does not prove that the delivery site is in Liverpool.
+
+**NHS employment vacancies are excluded.** This is procurement-only.
+
+**Private domestic leads are parked.** Formby Bubble, homeowner jobs, Facebook/Nextdoor enquiries and similar consumer lead channels are not part of the active TenderScout collection scope. Do not mix them into the procurement board.
+
+Only use documented public feeds/APIs, publicly accessible procurement listings where permitted, or sources for which access has been authorised. Do not bypass supplier logins or access controls. Where a portal has no safe supported ingestion route, keep it clearly labelled as a manual source for now rather than pretending it is connected.
+
+## How opportunities are assessed
+
+- Confirmed local delivery/site evidence is classified **LOCAL**.
+- Incomplete, ambiguous or potentially mixed delivery geography is classified **REVIEW**.
+- Confirmed delivery outside the target area is classified **OUT OF AREA**.
+- Buyer headquarters, buyer name, title or a general description mention must not by itself promote a contract to LOCAL.
+- A confirmed outside-area delivery site must not remain in the actionable local review queue.
+- A mixed local and outside delivery scope remains in REVIEW.
+
+| Classification | Meaning |
+| --- | --- |
+| LOCAL | Delivery/site evidence confirms a target-area location |
+| REVIEW | Potentially relevant, but delivery location or multi-site scope needs checking |
+| OUT OF AREA | Delivery/site evidence confirms the contract is outside the target area |
+
+The current target geography is Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral (including Wallasey) and Warrington. Cheshire is not part of the service area.
 
 ## How it works
-- `tenderscout.py` collects notices from the official Find a Tender and Contracts Finder feeds plus free discovery sources: Bearings and seven Standstill RSS feeds (North West region, cleaning, construction, building-installation maintenance, refurbishment, grounds maintenance and waste services). Discovery feeds are attributed and never treated as proof of a delivery location.
+
+- `tenderscout.py` collects notices and discovery listings.
 - `app.py` is the Flask dashboard. **Refresh tenders** runs the collector and saves matches to the database.
-- Confirmed local tenders appear on the main list. Open bids with a plausible target-area clue in their title/description or buyer name can also appear, clearly labelled **POTENTIAL LOCAL — verify delivery site**. This surfaces candidates without treating buyer HQ or text mentions as proof of delivery. The location-review queue excludes generic UK-wide and unrelated notices; those remain in the full audit only.
-- Each tender card starts with a **10-second check** in three scan lines: **JOB** (work required), **WHERE** (delivery location and whether it is verified), and **VALUE / DEADLINE / CONTRACT**. Full eligibility, buyer contact, application instructions and the official notice remain underneath. Missing facts are labelled as not stated rather than guessed.
-- **Pipeline / upcoming** notices are early warnings: they are not necessarily open for bids yet. They stay separate from the live-bid list.
-- The working lists suppress exact duplicates and cross-source copies only when title, buyer and closing date match. Separate official notices are retained. Expired and non-bidding notices are hidden from working lists but retained in the full audit. Live opportunities are sorted by nearest deadline, then score.
-- Discovery listings with an explicit future closing date can enter the live-bid list, but their links are labelled as provider/source listings that must be checked against the official notice. Missing or expired discovery deadlines are not promoted.
-- The dashboard's **Export actionable jobs** download contains only current local/review/pipeline candidates. **Full audit CSV** retains the wider collected records for checking.
-- Collector CSVs are separated by purpose: `tenderscout_results.csv` (confirmed local open bids), `tenderscout_review.csv` (open bids with location needing verification), `tenderscout_pipeline.csv` (planning notices), and `tenderscout_all.csv` (full deduplicated audit).
-
-## Opportunity types and source directory
-
-- `/sources` lists official public procurement portals and community/business discovery channels, including Liverpool City Council's ProContract route and The Chest.
-- `/leads` is a separate private-lead board with trade/status filters, counts, exact location, requested work, contact, original source and one-tap WhatsApp/email sharing. Private leads are stored in their own table and are not mixed into public-sector tenders. This page currently stores captured enquiries; it is not yet connected to a live authorised private-job feed.
-- Community sites such as Facebook and Nextdoor are **not scraped automatically**. HomeGuild reported no open jobs on its public jobs board when checked on 27 October 2026; BuildPair loads requests dynamically and the reviewed pages do not document a public feed/API. Add only genuine enquiries from sources where access and reuse are permitted; supplier portals may require registration and may not offer a public feed.
-- Council portals are listed as sources, not falsely described as connected live feeds. The Standstill UK North West RSS feed is connected as a discovery source; it is broad regional data, may use buyer location when delivery location is missing, and must be verified on the official notice. Automated ingestion from other portals should be added only where an official feed/API or written permission is available.
+- Confirmed local opportunities appear on the main list. Actionable records with a plausible target-area clue but unverified delivery location can appear as **POTENTIAL LOCAL — verify delivery site**.
+- Each card provides a quick view of the work, buyer, location confidence, value, deadline and contract period. Missing facts are shown as not stated rather than guessed.
+- Planning/upcoming notices stay separate from live invitations to bid.
+- Duplicates are suppressed in the working list; the full audit remains available.
+- Always verify eligibility, location, deadline, value and documents on the original procurement notice.
 
 ## Trades
-Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.
 
-## How the area filter works
-The filter confirms geography from structured delivery/site evidence: postcodes, government region codes and place names. Mentions in a title or general description are sent to review, not treated as confirmed delivery locations.
-
-| Result | Meaning |
-| --- | --- |
-| Confirmed | A delivery/site postcode, region code or place is in the target area, with nothing contradicting it |
-| Needs a location check | No location, a vague one (e.g. "Merseyside", "Greater Manchester"), a borderline postcode (CH4), a name shared with other places (Halton, Leigh, Kirkby, Garston), or locations both inside and outside the area |
-| Dropped | Every location is outside the area, e.g. Scotland, Manchester, Preston, Cheshire East |
-
-**Region codes.** The government feeds often give the area as a code. `UKD61` (Warrington), `UKD63` (Cheshire West and Chester), `UKD71` (East Merseyside: Knowsley, St Helens, Halton), `UKD72` (Liverpool), `UKD73` (Sefton) and `UKD74` (Wirral, including Wallasey) count as confirmed. Codes that cover the area plus places outside it (Greater Manchester, Lancashire, the broad North West code) need a postcode or place name to confirm. Any other UK code is outside the area. Warrington and Cheshire West and Chester postcodes are included in the approved scope; CH4 remains a borderline district and stays in review pending site-level confirmation.
-
-**Longer names win.** "Preston Brook" is Halton, not Preston; "Chester-le-Street" is Durham, not Chester; "Cheshire East" is outside the area.
-
-**Title and description.** Place names and postcodes mentioned only in the title or general description are not proof of delivery location. They stay in the review queue until the official delivery/site fields can confirm the area.
-
-Target postcode districts are listed at the top of `tenderscout.py`. Royal Mail postcode districts don't line up exactly with council boundaries, so check them against your own knowledge and edit them if needed.
+TenderScout classifies relevant work across cleaning, facilities management, property maintenance and construction. The detailed trade categories and keyword rules are in `tenderscout.py`; the dashboard can filter by trade.
 
 ## Local run
+
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
+
 Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file.
 
-## Settings (environment variables)
+## Settings
+
 | Name | Purpose |
 | --- | --- |
-| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Required for dashboard access. If either is missing, the dashboard returns HTTP 503 and stays locked; if credentials are wrong, it returns HTTP 401. `/health` stays open for the host. |
-| `DATABASE_URL` | PostgreSQL connection string. Without it the app uses SQLite, which is wiped on every redeploy on Render's free tier. |
-| `TENDERSCOUT_DB` | SQLite file path (local use only) |
-| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE`, `TENDERSCOUT_FTS_SECONDS` | Look-back window (default 60 days), pagination cap, general per-source time limit (default 60 seconds), and Find a Tender time limit (default 150 seconds) |
+| `DASHBOARD_USER`, `DASHBOARD_PASSWORD` | Required for dashboard access. If either is missing, the dashboard stays locked. |
+| `DATABASE_URL` | PostgreSQL connection string. Without it the app uses SQLite. |
+| `TENDERSCOUT_DB` | SQLite file path for local use. |
+| `TENDERSCOUT_DAYS`, `TENDERSCOUT_PAGES`, `TENDERSCOUT_SECONDS_PER_SOURCE`, `TENDERSCOUT_FTS_SECONDS` | Collection look-back, pagination and source time limits. |
 
-## Hosting on Render
-- Start command: `gunicorn app:app` (`gunicorn.conf.py` raises the timeout to 120 seconds so a refresh isn't cut off).
-- Health check: `/health`.
+## Hosting and scheduled refresh
+
+- Render start command: `gunicorn app:app`; health check: `/health`.
 - Render deploys automatically when `main` changes.
-- The free web service sleeps when idle, so the first visit can be slow.
+- The GitHub Actions workflow runs tests and scheduled/manual collection. Hosted refresh requires the repository variable `TENDERSCOUT_APP_URL` and secrets `TENDERSCOUT_APP_USER` / `TENDERSCOUT_APP_PASSWORD`.
 
-## Scheduled refresh
-`.github/workflows/main.yml` runs the tests on every push. On a schedule (every 6 hours) and on manual runs it also saves a CSV of matches and can refresh the live site. To enable the refresh, set the repository variable `TENDERSCOUT_APP_URL` and the secrets `TENDERSCOUT_APP_USER` and `TENDERSCOUT_APP_PASSWORD`.
+## Pages and exports
 
-## Pages
-- `/` confirmed tenders plus clearly labelled target-area candidates · `/?view=review` live bids needing a location check · `/?view=pipeline` planning/upcoming notices · `/export.csv` actionable export · `/export.csv?view=all` full audit · add `trade=...` or `service=...` to filter
-- Each tender shows its deadline (expired tenders are hidden from the working list) and has a **Stage** dropdown: Reviewing, Interested, Bidding, Submitted, Won, Lost, Not for us
-- `POST /refresh` fetch new tenders and return to the dashboard with a summary; `POST /api/refresh` does the same but replies in plain text for scheduled jobs
-- `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)
-- `/export.csv` download public-sector tender records
-- `/sources` council procurement and community source directory
-- `/leads` manually capture and view private customer enquiries separately
-- `/health` readiness check
+- `/` main opportunity board; add `trade=...` or `service=...` to filter.
+- `/?view=review` location-review queue.
+- `/?view=pipeline` planning/upcoming notices.
+- `/export.csv` actionable export.
+- `/export.csv?view=all` full audit export.
+- `/sources` procurement source directory.
+- `/health` readiness check.
+- The legacy private-lead area remains parked and is not part of active collection or the procurement roadmap.
 
 ## Tests
+
 ```bash
 python -m unittest discover -v
 ```
-The tests are offline and use mocked feeds. A refresh that gets no records back from its sources is reported as a failure, never as "no tenders".
 
-Always open the official notice and check location, deadline, value, eligibility and documents before acting.
+Tests are offline and use mocked feeds. A refresh that gets no records back from its sources is reported as a failure, never as "no tenders".
