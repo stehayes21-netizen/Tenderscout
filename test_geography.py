@@ -533,8 +533,10 @@ class PostcodeCoverageTests(unittest.TestCase):
             with self.subTest(region=region):
                 self.assertEqual(self.classify(region), "OUT_OF_AREA")
 
-    def test_borderline_postcode_is_sent_for_review(self):
-        self.assertEqual(self.classify("CH4 1AA"), "REVIEW")
+    def test_cheshire_west_postcodes_are_out_of_area(self):
+        for postcode in ("CH1 1AA", "CH4 1AA", "CH64 1AA", "CH65 1AA", "CH66 1AA", "CW9 1AA", "WA6 7AA"):
+            with self.subTest(postcode=postcode):
+                self.assertEqual(self.classify(postcode), "OUT_OF_AREA")
 
 
 class RegionCodeAndCommunityTests(unittest.TestCase):
@@ -547,9 +549,12 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
                 self.assertEqual(self.classify(code), "LOCAL")
 
     def test_all_approved_region_codes_are_local(self):
-        for code in ("UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"):
+        for code in ("UKD61", "UKD71", "UKD72", "UKD73", "UKD74"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "LOCAL")
+
+    def test_cheshire_west_region_code_is_out_of_area(self):
+        self.assertEqual(self.classify("UKD63"), "OUT_OF_AREA")
 
     def test_codes_covering_the_area_and_more_need_checking(self):
         for code in ("UKD", "UKD3", "UKD36", "UKD47", "UKD6", "UKD7"):
