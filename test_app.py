@@ -301,16 +301,21 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(r.get_json(), {"status": "ok", "database": "sqlite"})
 
 
-    def test_source_directory_lists_council_and_community_sources(self):
+    def test_source_directory_lists_procurement_sources_only(self):
         r = self.client.get("/sources")
         self.assertEqual(r.status_code, 200)
-        self.assertIn(b"ProContract", r.data)
-        self.assertIn(b"The Chest", r.data)
-        self.assertIn(b"HomeGuild", r.data)
-        self.assertIn(b"BuildPair", r.data)
-        self.assertIn(b"Formby Bubble", r.data)
-        self.assertNotIn(b"Wirral Council", r.data)
-        self.assertIn(b"does not automatically scrape Facebook", r.data)
+        for source in (
+            b"Find a Tender", b"Contracts Finder", b"The Chest",
+            b"Proactis ProContract", b"Atamis", b"St Helens Council",
+            b"Knowsley Council", b"Halton Borough Council",
+            b"Warrington Borough Council", b"Wirral Council",
+        ):
+            with self.subTest(source=source):
+                self.assertIn(source, r.data)
+        self.assertIn(b"NHS procurement contracts", r.data)
+        self.assertNotIn(b"Formby Bubble Approved Trader List", r.data)
+        self.assertNotIn(b"HomeGuild", r.data)
+        self.assertNotIn(b"BuildPair", r.data)
 
     def test_buildconnect_rss_imports_only_target_area_public_projects(self):
         feed = b"""<?xml version="1.0" encoding="UTF-8"?>
