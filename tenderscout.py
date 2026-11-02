@@ -1287,22 +1287,22 @@ def explicit_out_of_area_delivery_sites(text, terms):
             before = text[max(0, match.start() - 120):match.start()]
             after = text[match.end():match.end() + 100]
             before_cue = re.search(
-                r"\\b(?:within|across|throughout|delivery in|services in|works in|"
+                r"\b(?:within|across|throughout|delivery in|services in|works in|"
                 r"properties in|site in|sites in|project in|located in|delivered at|"
-                r"provided at|carried out at)\\s+"
-                r"(?:(?:the\\s+)?(?:boundaries of|area of|city of|town of|borough of|county of)\\s+)*$"
-                r"|\\b(?:project title|project location|site location|delivery location|location)\\s*:\\s*$"
-                r"|\\bat\\b.{0,100},\\s*$",
+                r"provided at|carried out at)\s+"
+                r"(?:(?:the\s+)?(?:boundaries of|area of|city of|town of|borough of|county of)\s+)*$"
+                r"|\b(?:project title|project location|site location|delivery location|location)\s*:\s*$"
+                r"|\bat\b.{0,100},\s*$",
                 before,
             )
             after_cue = re.match(
-                r"\\s*(?:enterprise zone|council housing properties|housing properties|"
+                r"\s*(?:enterprise zone|council housing properties|housing properties|"
                 r"properties|premises|estate|campus|hospital|schools|facilities|site|"
-                r"project|works|residential compounds|garrison)\\b",
+                r"project|works|residential compounds|garrison)\b",
                 after,
             )
             facility_at_cue = (
-                re.search(r"\\bat\\s+$", before) is not None
+                re.search(r"\bat\s+$", before) is not None
                 and any(word in term.split() for word in (
                     "hospital", "garrison", "airport", "prison", "university",
                     "school", "campus", "estate",
@@ -1311,7 +1311,7 @@ def explicit_out_of_area_delivery_sites(text, terms):
             hsc_region_cue = (
                 "northern ireland" in term
                 and re.search(
-                    r"\\b(?:hsc|health and social care)(?:\\s+\\([^)]*\\))?\\s+in\\s+$",
+                    r"\b(?:hsc|health and social care)(?:\s+\([^)]*\))?\s+in\s+$",
                     before,
                 ) is not None
             )
