@@ -565,6 +565,21 @@ def add_location_values(obj, location_parts, in_location=False):
         if isinstance(description, str) and description.strip():
             location_parts.append(description.strip())
 
+        # Preserve OCDS NUTS delivery identifiers as structured site evidence.
+        gazetteer = obj.get("gazetteer")
+        if isinstance(gazetteer, dict):
+            scheme = as_text(gazetteer.get("scheme")).strip().upper()
+            identifiers = gazetteer.get("identifiers") or []
+            if scheme == "NUTS":
+                if isinstance(identifiers, (str, int)):
+                    identifiers = [identifiers]
+                if isinstance(identifiers, list):
+                    location_parts.extend(
+                        " ".join(str(identifier).split()).upper()
+                        for identifier in identifiers
+                        if str(identifier).strip()
+                    )
+
     for key in EXPLICIT_LOCATION_KEYS:
         if key in obj:
             # A location becomes trusted context only through a known delivery,
@@ -647,13 +662,26 @@ def extract_records(payload, source):
             contract_start_date = as_text(first(contract_period, "startDate", "start_date", "start"))
             contract_end_date = as_text(first(contract_period, "endDate", "end_date", "end"))
             notice_url = ""
+            official_notice_docs = []
             for doc in (tender.get("documents") or []) + (rel.get("documents") or []):
-                if isinstance(doc, dict):
-                    url = first(doc, "url", "uri")
-                    if url and ("find-tender.service.gov.uk/Notice/" in str(url)
-                                or "contractsfinder.service.gov.uk" in str(url)):
-                        notice_url = str(url)
-                        break
+                if not isinstance(doc, dict):
+                    continue
+                url = first(doc, "url", "uri")
+                doc_type = as_text(first(doc, "documentType", "document_type")).strip().lower()
+                if url and (
+                    "find-tender.service.gov.uk/Notice/" in str(url)
+                    or "contractsfinder.service.gov.uk" in str(url)
+                ):
+                    if not doc_type or "notice" in doc_type:
+                        official_notice_docs.append(doc)
+            if official_notice_docs:
+                def notice_doc_sort_key(doc):
+                    return (
+                        as_text(first(doc, "datePublished", "date_published", "date")).strip(),
+                        as_text(first(doc, "id")).strip(),
+                    )
+                latest_notice_doc = max(official_notice_docs, key=notice_doc_sort_key)
+                notice_url = str(first(latest_notice_doc, "url", "uri"))
             if not notice_url:
                 release_id = as_text(first(rel, "id"))
                 if source == "Find a Tender" and re.fullmatch(r"\d{6}-\d{4}", release_id):
@@ -1250,6 +1278,49 @@ def drop_contained(hits, longer_hits):
     return kept
 
 
+def explicit_out_of_area_delivery_sites(text, terms):
+    """Return out-of-area place names only when nearby wording signals a delivery/site."""
+    hits = []
+    for term in place_hits(text, terms):
+        pattern = r"(?<![a-z])" + re.escape(term) + r"(?![a-z])"
+        for match in re.finditer(pattern, text):
+            before = text[max(0, match.start() - 120):match.start()]
+            after = text[match.end():match.end() + 100]
+            before_cue = re.search(
+                r"\\b(?:within|across|throughout|delivery in|services in|works in|"
+                r"properties in|site in|sites in|project in|located in|delivered at|"
+                r"provided at|carried out at)\\s+"
+                r"(?:(?:the\\s+)?(?:boundaries of|area of|city of|town of|borough of|county of)\\s+)*$"
+                r"|\\b(?:project title|project location|site location|delivery location|location)\\s*:\\s*$"
+                r"|\\bat\\b.{0,100},\\s*$",
+                before,
+            )
+            after_cue = re.match(
+                r"\\s*(?:enterprise zone|council housing properties|housing properties|"
+                r"properties|premises|estate|campus|hospital|schools|facilities|site|"
+                r"project|works|residential compounds|garrison)\\b",
+                after,
+            )
+            facility_at_cue = (
+                re.search(r"\\bat\\s+$", before) is not None
+                and any(word in term.split() for word in (
+                    "hospital", "garrison", "airport", "prison", "university",
+                    "school", "campus", "estate",
+                ))
+            )
+            hsc_region_cue = (
+                "northern ireland" in term
+                and re.search(
+                    r"\\b(?:hsc|health and social care)(?:\\s+\\([^)]*\\))?\\s+in\\s+$",
+                    before,
+                ) is not None
+            )
+            if before_cue or after_cue or facility_at_cue or hsc_region_cue:
+                hits.append(term)
+                break
+    return hits
+
+
 def postcode_districts(text, include_bare=False):
     """Return (full-postcode districts, bare target/review districts) found in text."""
     upper = text.upper()
@@ -1342,6 +1413,16 @@ def classify_geography(record, region):
     # Description text must never promote a notice to LOCAL, but it must stop us
     # incorrectly discarding a mixed-area opportunity as OUT_OF_AREA.
     prose_local_sites = place_hits(prose, PROSE_TARGET_AREA_TERMS)
+    prose_full_postcodes, _ = postcode_districts(prose)
+    prose_out_sites = (
+        [] if prose_full_postcodes
+        else explicit_out_of_area_delivery_sites(prose, OUT_OF_AREA_TERMS)
+    )
+    if prose_out_sites and not prose_local_sites:
+        return "OUT_OF_AREA", (
+            "Explicit out-of-area delivery/site wording in notice: "
+            + ", ".join(dict.fromkeys(prose_out_sites[:5]))
+        )
     if strong_out and prose_local_sites:
         return "REVIEW", (
             "Structured delivery location includes non-target areas, while the "
