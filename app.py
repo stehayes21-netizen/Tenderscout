@@ -377,10 +377,10 @@ def dashboard():
     db.close()
 
     decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
-    if not pipeline_view:
-        # Main and review boards show actionable live bids only. Planning notices
-        # have their own pipeline view; awards, updates and expired bids stay out
-        # of the working lists but remain stored for audit/export.
+    if not pipeline_view and not review_view:
+        # The main board shows actionable live bids only. The review board may
+        # also contain planning notices; the pipeline has its own dedicated view.
+        # Awards, updates and expired bids stay out of working lists but remain stored for audit/export.
         allowed_stages = {"Open for bids"}
         decorated = [
             item for item in decorated
