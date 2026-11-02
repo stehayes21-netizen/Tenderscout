@@ -543,6 +543,29 @@ class RefreshTests(AppTestCase):
         review = self.client.get("/?view=review").data
         self.assertNotIn(b"https://example.com/unk", review)
 
+    def test_review_queue_excludes_other_notices_but_keeps_planning_opportunities(self):
+        self.refresh_with([
+            feed_record("review-award", "North West England", title="Award notice for cleaning"),
+            feed_record("review-planning", "North West England", title="Upcoming cleaning framework"),
+        ])
+        db = self.app_module.connect_db()
+        db.execute(
+            "UPDATE tenders SET opportunity_stage = 'Other notice' WHERE notice_url = ?",
+            ("https://example.com/review-award",),
+        )
+        db.execute(
+            "UPDATE tenders SET opportunity_stage = 'Planning / upcoming' WHERE notice_url = ?",
+            ("https://example.com/review-planning",),
+        )
+        db.commit()
+        db.close()
+
+        review_page = self.client.get("/?view=review").data.decode()
+        self.assertNotIn("Award notice for cleaning", review_page)
+        self.assertIn("Upcoming cleaning framework", review_page)
+        export = self.client.get("/export.csv").data.decode()
+        self.assertIn("Award notice for cleaning", export)
+
     def test_job_board_card_shows_description_and_public_buyer_contact(self):
         record = feed_record("contact-card", "Liverpool L2 2DH")
         record.update({
