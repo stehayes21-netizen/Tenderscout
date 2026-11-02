@@ -1184,3 +1184,99 @@ class TradeClassificationEvidenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class DeliverySiteSafeguardTests(unittest.TestCase):
+    def test_explicit_out_of_area_delivery_sites_are_excluded(self):
+        cases = [
+            {"title": "Repairs framework", "description": "Works to council properties within the boundaries of Stoke-on-Trent."},
+            {"title": "Drainage services", "description": "Provision of drainage at Samlesbury Enterprise Zone."},
+            {"title": "Scaffolding", "description": "Works are to Falkirk Council housing properties."},
+            {"title": "Communal facilities", "description": "Service delivered at Darent Valley Hospital."},
+            {"title": "Catering", "description": "Catering services provided at Walton Hall, Milton Keynes."},
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record["location_text"] = ""
+                self.assertEqual(
+                    tenderscout.classify_geography(record, "Target area")[0],
+                    "OUT_OF_AREA",
+                )
+
+    def test_historical_out_of_area_mention_is_not_delivery_evidence(self):
+        record = {
+            "location_text": "",
+            "title": "Property maintenance framework",
+            "description": "The supplier previously completed work in Falkirk.",
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_mixed_local_and_out_of_area_sites_remain_in_review(self):
+        record = {
+            "location_text": "",
+            "title": "Regional maintenance contract",
+            "description": "Works at Falkirk and Liverpool sites.",
+        }
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "REVIEW",
+        )
+
+    def test_nuts_gazetteer_identifier_is_extracted_from_delivery_location(self):
+        payload = {
+            "releases": [{
+                "id": "notice-1",
+                "tender": {
+                    "title": "Window cleaning services",
+                    "items": [{
+                        "id": "item-1",
+                        "deliveryLocation": {
+                            "description": "Wirral",
+                            "gazetteer": {"scheme": "NUTS", "identifiers": ["UKD74"]},
+                        },
+                    }],
+                },
+            }],
+        }
+        record = tenderscout.extract_records(payload, "Find a Tender")[0]
+        self.assertIn("UKD74", record["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(record, "Target area")[0],
+            "LOCAL",
+        )
+
+    def test_latest_official_notice_document_is_selected(self):
+        payload = {
+            "releases": [{
+                "id": "103222-2026",
+                "ocid": "ocds-test-amended-notice",
+                "tag": ["tenderUpdate"],
+                "tender": {
+                    "title": "Audio visual system",
+                    "status": "active",
+                    "tenderPeriod": {"endDate": "2026-11-18T10:00:00Z"},
+                    "documents": [
+                        {
+                            "id": "096833-2026",
+                            "documentType": "tenderNotice",
+                            "datePublished": "2026-10-14T10:20:12Z",
+                            "url": "https://www.find-tender.service.gov.uk/Notice/096833-2026",
+                        },
+                        {
+                            "id": "103222-2026",
+                            "documentType": "tenderNotice",
+                            "datePublished": "2026-10-30T13:26:50Z",
+                            "url": "https://www.find-tender.service.gov.uk/Notice/103222-2026",
+                        },
+                    ],
+                },
+            }],
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(
+            rows[0]["notice_url"],
+            "https://www.find-tender.service.gov.uk/Notice/103222-2026",
+        )
