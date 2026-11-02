@@ -720,7 +720,13 @@ def extract_records(payload, source):
             if isinstance(raw_tags, str):
                 raw_tags = [raw_tags]
             tag_text = " ".join(as_text(tag) for tag in raw_tags).lower()
-            if "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
+            # OCDS UK12 procurement termination notices use cancellation tags.
+            # They must never be promoted to an open tender merely because the
+            # release still contains a tender object or tender-period metadata.
+            cancellation_markers = ("cancellation", "cancelled", "canceled", "termination", "withdrawal")
+            if any(marker in tag_text for marker in cancellation_markers):
+                opportunity_stage = "Cancelled"
+            elif "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
                 opportunity_stage = "Planning / upcoming"
             elif "tender" in tag_text:
                 opportunity_stage = "Open for bids"
@@ -1844,9 +1850,18 @@ def main():
         else:
             deadline_counts["future"] += 1
     print("Raw deadline health (all notices): " + ", ".join(f"{key}={count}" for key, count in deadline_counts.items()))
-    print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
+    exported_geo_counts = {}
+    for row in all_rows:
+        geo = row.get("region_match") or "NOT SCORED (no trade match)"
+        exported_geo_counts[geo] = exported_geo_counts.get(geo, 0) + 1
+    print("Exported all-CSV geography fields: " + ", ".join(
+        f"{key}={count}" for key, count in sorted(exported_geo_counts.items())
+    ))
+    print("Scored geography decisions (trade-matched records only): " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
+    cancelled_count = sum(1 for row in all_rows if row.get("opportunity_stage") == "Cancelled")
+    print(f"Cancelled notices retained for audit only: {cancelled_count}")
     print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
     print(f"Confirmed local open bids: {len(filtered)}")
     print(f"Location review (open bids only): {len(review_rows)}")
