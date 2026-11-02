@@ -1149,6 +1149,29 @@ class DataQualityRegressionTests(unittest.TestCase):
             "description": "Delivery across the United Kingdom",
         }))
 
+    def test_generic_north_west_portal_text_does_not_rescue_known_out_of_area_notice(self):
+        record = {
+            "title": "Concrete wheeled sports facility at Wilmslow SK9 4AA",
+            "buyer": "Cheshire East Council",
+            "description": (
+                "Construction at The Carrs Park. Listing portal: The Chest "
+                "(North West councils e-tendering portal)."
+            ),
+        }
+        self.assertFalse(tenderscout.has_target_area_clue(record))
+
+    def test_generic_north_west_clue_still_surfaces_unlocated_opportunity(self):
+        self.assertTrue(tenderscout.has_target_area_clue({
+            "title": "Grounds maintenance framework",
+            "description": "Region: North West England; delivery sites not stated.",
+        }))
+
+    def test_mixed_local_and_out_of_area_scope_stays_reviewable(self):
+        self.assertTrue(tenderscout.has_target_area_clue({
+            "title": "Facilities services across Liverpool and Blackpool",
+            "description": "The Chest (North West councils e-tendering portal).",
+        }))
+
     def test_catering_title_is_not_mislabelled_as_construction(self):
         record = {
             "title": "Provision of Catering Services",
