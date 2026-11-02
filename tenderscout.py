@@ -1353,7 +1353,16 @@ def has_target_area_clue(record):
     # boilerplate (for example, "The Chest, a North West councils portal")
     # from making unrelated contracts look locally relevant.
     out_districts = districts - LOCAL_POSTCODE_DISTRICTS - REVIEW_POSTCODE_DISTRICTS
-    # The Chest provider label is generic portal metadata, not evidence that\n    # the contract itself is delivered in the North West. Strip it before\n    # evaluating broad regional clues; explicit notice wording remains intact.\n    clue_text = re.sub(\n        r"listing portal/provider:\\s*the chest\\s*\\(north west councils e-tendering portal(?:,\\s*via proactis procontract)?\\)",\n        "", text, flags=re.IGNORECASE,\n    )\n    broad_hits = place_hits(clue_text, ("merseyside", "north west"))\n    broad_only = broad_hits and not out_hits and not out_districts\n    return bool(local_hits or local_districts or broad_only)
+    # The Chest provider label is generic portal metadata, not evidence that
+    # the contract itself is delivered in the North West. Strip it before
+    # evaluating broad regional clues; explicit notice wording remains intact.
+    clue_text = re.sub(
+        r"listing portal/provider:\s*the chest\s*\(north west councils e-tendering portal(?:,\s*via proactis procontract)?\)",
+        "", text, flags=re.IGNORECASE,
+    )
+    broad_hits = place_hits(clue_text, ("merseyside", "north west"))
+    broad_only = broad_hits and not out_hits and not out_districts
+    return bool(local_hits or local_districts or broad_only)
 
 
 def classify_geography(record, region):
