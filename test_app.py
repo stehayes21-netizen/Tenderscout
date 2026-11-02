@@ -569,7 +569,9 @@ class RefreshTests(AppTestCase):
         self.assertNotIn("Award notice for cleaning", review_page)
         self.assertIn("Upcoming cleaning framework", review_page)
         export = self.client.get("/export.csv").data.decode()
-        self.assertIn("Award notice for cleaning", export)
+        self.assertNotIn("Award notice for cleaning", export)
+        audit_export = self.client.get("/export.csv?view=all").data.decode()
+        self.assertIn("Award notice for cleaning", audit_export)
 
     def test_job_board_card_shows_description_and_public_buyer_contact(self):
         record = feed_record("contact-card", "Liverpool L2 2DH")
