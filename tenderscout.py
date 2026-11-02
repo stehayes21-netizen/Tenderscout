@@ -1371,6 +1371,29 @@ def has_target_area_clue(record):
     return bool(local_hits or local_districts or broad_only)
 
 
+def explicit_local_delivery_postcodes(prose):
+    """Find local full postcodes only when prose explicitly ties them to service delivery.
+
+    A postcode in a general notice description is not enough. Require an action
+    (washed, cleaned, delivered, performed, etc.) followed by a site preposition
+    and location text in the same sentence.
+    """
+    districts = set()
+    delivery_action = re.compile(
+        r"\\b(?:washed|cleaned|delivered|performed|undertaken|carried out|"
+        r"completed|provided|supplied|take place)\\b"
+        r"[^.!?]{0,120}\\b(?:at|within|to)\\b[^.!?]{1,100}$",
+        re.IGNORECASE,
+    )
+    for match in FULL_POSTCODE_RE.finditer(str(prose or "")):
+        prefix = str(prose or "")[:match.start()]
+        sentence_prefix = re.split(r"[.!?]", prefix)[-1]
+        if delivery_action.search(sentence_prefix):
+            full, _ = postcode_districts(match.group(0))
+            districts.update(full & LOCAL_POSTCODE_DISTRICTS)
+    return sorted(districts)
+
+
 def classify_geography(record, region):
     """Classify a tender as LOCAL, OUT_OF_AREA or REVIEW from delivery/site evidence.
 
@@ -1411,7 +1434,7 @@ def classify_geography(record, region):
     ambiguous = drop_contained(place_hits(location_text, AMBIGUOUS_PLACE_TERMS), named)
     broad = drop_contained(broad_raw, named)
 
-    strong_local = pc_local + nuts_local + local_places
+    prose_local_delivery_postcodes = explicit_local_delivery_postcodes(prose)\n    strong_local = pc_local + nuts_local + local_places + prose_local_delivery_postcodes
     strong_out = pc_other + nuts_out + out_places
     # Place-level doubt (a shared name, a borderline postcode) means a person
     # should look. Broad region words and codes only describe the wider region, so
@@ -1475,7 +1498,7 @@ def classify_geography(record, region):
         )
     if strong_local:
         return "LOCAL", (
-            "Structured delivery/site location: " + ", ".join(strong_local[:3])
+            "Confirmed delivery/site evidence: " + ", ".join(strong_local[:3])
         )
     if strong_out and weak_place:
         return "REVIEW", (
