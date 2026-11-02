@@ -1345,7 +1345,14 @@ def has_target_area_clue(record):
     out_hits = place_hits(text, OUT_OF_AREA_TERMS)
     local_hits = drop_contained(local_hits, out_hits)
     full, bare = postcode_districts(text, include_bare=True)
-    return bool(local_hits or ((full | bare) & LOCAL_POSTCODE_DISTRICTS))
+    # Broad Merseyside/North West scope is potentially relevant but never
+    # confirms a local delivery site; retain it for manual review.
+    broad_hits = place_hits(text, ("merseyside", "north west"))
+    return bool(
+        local_hits
+        or ((full | bare) & LOCAL_POSTCODE_DISTRICTS)
+        or broad_hits
+    )
 
 
 def classify_geography(record, region):
