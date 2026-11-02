@@ -35,9 +35,10 @@ _schema_ready = False
 LAST_FEEDS = {}  # what each government feed returned on the latest refresh
 _EMPTY_BOARD_REFRESH_ATTEMPTED = False
 # Refresh ownership is coordinated by an atomic database lease, not process memory.
-# A refresh without a heartbeat for 15 minutes is presumed interrupted.
-# Active collectors renew the lease every 30 seconds.
-REFRESH_STALE_AFTER_SECONDS = 15 * 60
+# A refresh without a heartbeat for 20 minutes is presumed interrupted.
+# Active collectors renew the lease every 30 seconds. This accommodates the
+# rate-limited 15-minute Find a Tender collection budget plus result persistence.
+REFRESH_STALE_AFTER_SECONDS = 20 * 60
 
 
 def env_int(name, default):
@@ -246,11 +247,16 @@ def count_by_region(db):
     """Count stored opportunities without treating unverified locations as confirmed."""
     counts = {"main": 0, "review": 0, "confirmed_local": 0, "manual": 0}
     for row in db.execute(
-        "SELECT region_match, COUNT(*) AS n FROM tenders GROUP BY region_match"
+        "SELECT region_match, opportunity_stage, COUNT(*) AS n "
+        "FROM tenders GROUP BY region_match, opportunity_stage"
     ).fetchall():
         region = row["region_match"]
         if region == "REVIEW":
-            counts["review"] += row["n"]
+            # Only actionable opportunities need a location check. Awards,
+            # cancellations and other lifecycle notices remain stored/exportable
+            # but should not inflate the user's review workload.
+            if row["opportunity_stage"] in {"Open for bids", "Planning / upcoming"}:
+                counts["review"] += row["n"]
         else:
             counts["main"] += row["n"]
         if region == "LOCAL":
@@ -261,19 +267,8 @@ def count_by_region(db):
 
 
 def has_target_area_clue(row):
-    """True only when a review record names a target-area clue worth surfacing.
-
-    This does not promote a record to LOCAL. It lets the main board surface
-    potentially relevant notices while preserving the explicit location-check
-    badge. Records with no target-area evidence remain in the full review queue.
-    """
-    # Buyer names can justify a manual look, but never establish delivery geography.
-    text = " ".join(str(row[field] or "") for field in ("location_text", "title", "description", "buyer")).lower()
-    local_hits = collector.place_hits(text, collector.LOCAL_PLACE_TERMS)
-    out_hits = collector.place_hits(text, collector.OUT_OF_AREA_TERMS)
-    local_hits = collector.drop_contained(local_hits, out_hits)
-    full, bare = collector.postcode_districts(text, include_bare=True)
-    return bool(local_hits or ((full | bare) & collector.LOCAL_POSTCODE_DISTRICTS))
+    """A plausible local clue is a reason to review, never proof of delivery."""
+    return collector.has_target_area_clue(row)
 
 
 def deadline_info(deadline):
@@ -341,8 +336,8 @@ def dashboard():
     # location-review notices that mention one of the target areas. They are
     # labelled as unverified below; the full review view remains available.
     condition = (
-        "region_match = 'REVIEW'" if review_view
-        else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
+        "region_match = 'REVIEW' AND opportunity_stage IN ('Open for bids', 'Planning / upcoming')"
+        if review_view else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
     )
     params = []
     if pipeline_view:
@@ -360,26 +355,45 @@ def dashboard():
         "ORDER BY score DESC, published_date DESC",
         params,
     ).fetchall()
+    # Suppress cross-source discovery copies in the display too, including
+    # older duplicates already stored before the collector's dedupe fix.
+    rows = collector.dedupe([dict(row) for row in rows])
     counts = count_by_region(db)
-    if not review_view:
-        rows = [
-            row for row in rows
-            if row["region_match"] != "REVIEW" or has_target_area_clue(row)
-        ]
+    # The review count and page include only live open bids with a plausible
+    # target-area clue. Generic UK-wide or unrelated notices stay in the audit,
+    # not in the working review queue.
+    review_candidates = db.execute(
+        "SELECT * FROM tenders WHERE region_match = 'REVIEW' AND opportunity_stage = 'Open for bids'"
+    ).fetchall()
+    review_candidates = collector.dedupe([dict(row) for row in review_candidates])
+    counts["review"] = sum(
+        1 for row in review_candidates
+        if has_target_area_clue(row) and not deadline_info(row["deadline"])[2]
+    )
+    rows = [
+        row for row in rows
+        if row["region_match"] != "REVIEW" or has_target_area_clue(row)
+    ]
     db.close()
 
     decorated = [(row, *deadline_info(row["deadline"])) for row in rows]
-    if not review_view and not pipeline_view:
-        # The main jobs board is for actionable bids, not expired tenders or
-        # award/contract-update notices. Keep the underlying records for review
-        # and CSV export; planning notices have their own pipeline view.
+    if not pipeline_view and not review_view:
+        # The main board shows actionable live bids only. The review board may
+        # also contain planning notices; the pipeline has its own dedicated view.
+        # Awards, updates and expired bids stay out of working lists but remain stored for audit/export.
+        allowed_stages = {"Open for bids"}
         decorated = [
             item for item in decorated
-            if (item[0]["opportunity_stage"] or "Other notice") == "Open for bids"
+            if (item[0]["opportunity_stage"] or "Other notice") in allowed_stages
             and not item[3]
         ]
-    # Open tenders first; soon-to-close opportunities remain visible at the top.
-    decorated.sort(key=lambda item: item[3])
+    # Sort live bids by nearest deadline, then score; undated notices sit last.
+    decorated.sort(key=lambda item: (
+        collector.parse_date(item[0]["deadline"]) is None,
+        collector.parse_date(item[0]["deadline"]) or datetime.max.replace(tzinfo=timezone.utc),
+        -int(item[0]["score"] or 0),
+        str(item[0]["title"] or "").casefold(),
+    ))
 
     cards = ""
     for row, deadline_label, deadline_class, _closed in decorated:
@@ -392,7 +406,7 @@ def dashboard():
         location_text = row["location_text"] or "Delivery location not supplied — open the official notice";
         location_display = location_text;
         if location_text.strip().upper() in {"UK, UNITED KINGDOM", "UNITED KINGDOM", "UKD63"}:
-            location_display = ("Cheshire West and Chester region (UKD63); full site postcode not supplied" if location_text.strip().upper() == "UKD63" else "UK-wide location only; exact site postcode not supplied")
+            location_display = ("Outside TenderScout coverage (UKD63)" if location_text.strip().upper() == "UKD63" else "UK-wide location only; exact site postcode not supplied")
         stage_text = row["opportunity_stage"] or "Other notice"
         region_badge = (
             "POTENTIAL LOCAL — verify delivery site" if row["region_match"] == "REVIEW"
@@ -430,11 +444,13 @@ def dashboard():
         )
         value_label = format_money(row["estimated_value_gbp"])
         duration_label = contract_length(row["contract_start_date"], row["contract_end_date"])
-        notice_label = (
-            "Open source listing — verify official notice"
-            if "Standstill UK" in str(row["source"] or "")
-            else "View official notice"
-        )
+        source_name = str(row["source"] or "")
+        if "Bearings" in source_name:
+            notice_label = "Open provider listing — verify official notice"
+        elif "Standstill UK" in source_name:
+            notice_label = "Open source listing — verify official notice"
+        else:
+            notice_label = "View official notice"
         notice = (
             f'<a href="{link}" target="_blank" rel="noopener">{notice_label}</a>'
             if link.startswith("https://") else ""
@@ -736,13 +752,13 @@ def dashboard():
     @media(max-width:520px){{body{{padding:12px}}header{{padding:17px}}.card{{padding:14px}}.trade-browser{{padding:12px}}.board-facts{{grid-template-columns:1fr 1fr;gap:.4rem}}.board-facts p{{padding:.55rem}}.board-facts span{{font-size:.88rem}}}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
-    <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
-    <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral, Warrington and Cheshire West and Chester. Other North West areas are excluded.</p>
+    <p><a style="color:white" href="/">Opportunity board</a> · <a style="color:white" href="/sources">Procurement sources</a></p>
+    <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral and Warrington. Cheshire is excluded.</p>
     <form id="refresh-form" method="post" action="/refresh">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
     <p id="refresh-status" class="note" role="status" aria-live="polite" hidden></p></header>
     {banner}
-    <p>{heading} · {switch} · <a href="/export.csv">Export CSV</a></p>
+    <p>{heading} · {switch} · <a href="/export.csv">Export actionable jobs</a> · <a href="/export.csv?view=all">Full audit CSV</a></p>
     {filter_form}
     <p class="note">Always verify eligibility, location, deadline and contract details
     on the official notice.</p>
@@ -766,6 +782,52 @@ def set_stage(tender_id):
     return redirect(dashboard_url(view, service if service in SERVICE_FILTERS else ""))
 
 
+def remove_cross_source_duplicates(db):
+    """Delete legacy discovery-feed copies when the same official notice is stored."""
+    rows = db.execute(
+        "SELECT id, title, buyer, source, pipeline_status, deadline FROM tenders"
+    ).fetchall()
+    grouped = {}
+    for row in rows:
+        title = " ".join(str(row["title"] or "").casefold().split())
+        buyer = " ".join(str(row["buyer"] or "").casefold().split())
+        deadline = collector.parse_date(row["deadline"])
+        # Same title/buyer may recur; only remove a legacy shadow if its
+        # closing date also matches the official record.
+        if title and buyer and deadline:
+            grouped.setdefault((title, buyer, deadline.date().isoformat()), []).append(row)
+
+    removed = 0
+    for group in grouped.values():
+        official = [
+            row for row in group
+            if any(name in str(row["source"] or "") for name in ("Find a Tender", "Contracts Finder"))
+        ]
+        discovery = [
+            row for row in group
+            if any(name in str(row["source"] or "") for name in ("Bearings", "Standstill"))
+        ]
+        if not official or not discovery:
+            continue
+        keeper = max(official, key=lambda row: int(row["id"]))
+        # Preserve any manually changed pipeline state before removing the
+        # redundant discovery copy.
+        if str(keeper["pipeline_status"] or "Reviewing") == "Reviewing":
+            chosen = next(
+                (row for row in discovery if str(row["pipeline_status"] or "Reviewing") != "Reviewing"),
+                None,
+            )
+            if chosen:
+                db.execute(
+                    "UPDATE tenders SET pipeline_status = ? WHERE id = ?",
+                    (chosen["pipeline_status"], keeper["id"]),
+                )
+        for row in discovery:
+            db.execute("DELETE FROM tenders WHERE id = ?", (row["id"],))
+            removed += 1
+    return removed
+
+
 def sample_line(record):
     """A one-line description of a tender, for reading in the service logs."""
     def clip(value, size):
@@ -785,10 +847,9 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
-    # Find a Tender rate-limits pagination. A 60-day lookback has ten daily
-    # windows plus weekly history; allow enough time to traverse them without
-    # falsely reporting incomplete coverage before the source can finish.
-    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 720)
+    # Find a Tender rate-limits pagination. Allow up to 15 minutes for the
+    # 60-day cursor walk; the CI poll and stale-refresh lease are sized above it.
+    fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 900)
     fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
     # Run independent free sources concurrently. Bearings and Standstill are
     # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
@@ -901,6 +962,7 @@ def run_refresh():
                 ),
             )
             stats["local" if region_match == "LOCAL" else "review"] += 1
+        stats["legacy_duplicates_removed"] = remove_cross_source_duplicates(db)
         db.commit()
     finally:
         db.close()
@@ -956,8 +1018,10 @@ def feed_notes():
             text += ". Stopped early (time limit), so there may be more"
         elif st.get("more"):
             text += ". More pages were available but not read"
-        elif st.get("full_end") or st.get("last_batch", 0) >= 100:
+        elif st.get("pagination_supported") and st.get("full_end"):
             text += ". The last page was full but no next-page link came back, so results may be cut off"
+        elif st.get("known_feed_cap"):
+            text += f". Publisher limits this RSS feed to its {st['known_feed_cap']} newest items"
         lines.append(safe(text))
     if not lines:
         return ""
@@ -1005,7 +1069,10 @@ def refresh_feed_issues():
             reasons.append("more pages available")
         if feed.get("truncated_windows"):
             reasons.append("one or more search windows truncated")
-        if feed.get("full_end") or feed.get("last_batch", 0) >= 100:
+        # A full page is only evidence of possible truncation for a source
+        # that explicitly supports cursor/offset pagination. Fixed-size RSS
+        # feeds are intentionally capped by their publisher.
+        if feed.get("pagination_supported") and feed.get("full_end"):
             reasons.append("possible page truncation")
         if reasons:
             issues.append(f"{name}: {', '.join(reasons)}")
@@ -1275,11 +1342,40 @@ def export_database_backup():
 
 @app.route("/export.csv")
 def export_csv():
+    """Export the clean working list by default; retain a separate full audit export."""
+    full_audit = request.args.get("view") == "all"
     db = connect_db()
-    rows = db.execute(
-        f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders ORDER BY saved_at DESC"
-    ).fetchall()
+    if full_audit:
+        rows = db.execute(
+            f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders ORDER BY saved_at DESC"
+        ).fetchall()
+    else:
+        rows = db.execute(
+            f"SELECT {', '.join(EXPORT_FIELDS)} FROM tenders "
+            "WHERE region_match IN ('LOCAL', 'REVIEW', 'MANUAL') "
+            "AND opportunity_stage IN ('Open for bids', 'Planning / upcoming')"
+        ).fetchall()
     db.close()
+    rows = collector.dedupe([dict(row) for row in rows])
+    if not full_audit:
+        rows = [
+            row for row in rows
+            if not deadline_info(row["deadline"])[2]
+            and (row["region_match"] != "REVIEW" or has_target_area_clue(row))
+        ]
+        stage_order = {"Open for bids": 2, "Planning / upcoming": 1}
+        rows.sort(key=lambda row: (
+            -stage_order.get(row["opportunity_stage"], 0),
+            -int(row.get("score") or 0),
+            collector.parse_date(row.get("deadline")) is None,
+            collector.parse_date(row.get("deadline")) or datetime.max.replace(tzinfo=timezone.utc),
+            str(row.get("title") or "").casefold(),
+        ))
+    else:
+        rows.sort(key=lambda row: (
+            str(row.get("published_date") or ""),
+            str(row.get("title") or "").casefold(),
+        ), reverse=True)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -1290,7 +1386,7 @@ def export_csv():
     return Response(
         output.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=tenderscout_export.csv"},
+        headers={"Content-Disposition": "attachment; filename=" + ("tenderscout_full_audit.csv" if full_audit else "tenderscout_actionable.csv")},
     )
 
 
@@ -1379,31 +1475,41 @@ def update_private_lead_status(lead_id):
 
 @app.route("/sources")
 def sources():
-    """Directory of official procurement portals and public community channels."""
-    items = [
-        ("Public-sector tenders", [
-            ("Find a Tender", "https://www.find-tender.service.gov.uk/Search", "UK government procurement notices"),
-            ("Contracts Finder", "https://www.contractsfinder.service.gov.uk/Search", "UK public-sector opportunities"),
-            ("Liverpool City Council — ProContract", "https://procontract.due-north.com/", "Liverpool Council says most of its opportunities are advertised through ProContract; some routes use other approved portals"),
-            ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
-            ("Bearings — Liverpool City Region tenders", "https://getbearings.co.uk/rss", "Free North West opportunity aggregator with RSS feeds and an open API; use as a discovery source and verify every tender on the buyer's official notice"),
-            ("Standstill UK — North West tenders", "https://standstill.uk/region/north-west/", "Free daily RSS discovery feed now included in TenderScout; regional label is not proof of the delivery site, and every item must be verified on the official notice"),
-            ("Merseyside Fire & Rescue procurement", "https://www.merseyfire.gov.uk/about/supplying-goods-and-services-to-mfra/", "Confirms openly advertised opportunities are on The Chest and national notices on Find a Tender / Contracts Finder"),
-            ("Sefton Council tenders and contracts", "https://www.sefton.gov.uk/business/tenders-contracts", "Confirms Sefton opportunities use The Chest and points suppliers to national notice sources"),
+    """Directory of procurement sources, with a clear distinction between live feeds and portal references."""
+    groups = [
+        ("Connected national procurement feeds", [
+            ("Find a Tender", "https://www.find-tender.service.gov.uk/Search", "Connected official UK procurement feed."),
+            ("Contracts Finder", "https://www.contractsfinder.service.gov.uk/Search", "Connected official public-sector procurement feed."),
         ]),
-        ("Community and private-lead channels", [
-            ("HomeGuild — Liverpool homeowner jobs", "https://www.homeguild.co.uk/jobs/", "Public job-board page; current jobs may be empty and contact details are reserved for registered tradespeople"),
-            ("BuildPair — latest job requests", "https://www.buildpair.co.uk/jobs", "Public job-board page; review the source's terms before any automated reuse"),
-            ("Formby Bubble Approved Trader List", "https://www.formbybubble.com/bubbleapprovedtraderlist", "Local trader directory; use as a contact/discovery source, not proof of a live job"),
-            ("Grafters Network Liverpool", "https://www.grafterssupergroups.co.uk/events/liverpoolflagship/", "Local business networking"),
-            ("Liverpool Business Forum", "https://liverpoolbusinessforum.co.uk/about-lbf/", "Local business contacts and networking"),
-            ("Facebook — Liverpool community groups", "https://www.facebook.com/search/groups/?q=Liverpool%20community", "Open group search; check each group's rules and use permitted/manual submissions"),
-            ("Facebook — Formby community groups", "https://www.facebook.com/search/groups/?q=Formby%20community", "Open group search; check each group's rules and use permitted/manual submissions"),
-            ("Nextdoor", "https://nextdoor.co.uk/", "Neighbourhood recommendations and requests; use authorised access only"),
+        ("Connected discovery feeds — verify the original notice", [
+            ("Bearings API", "https://getbearings.co.uk/api", "Connected discovery source. Regional eligibility is not proof of delivery location."),
+            ("Standstill UK — North West", "https://standstill.uk/region/north-west/", "Connected RSS discovery source. The original buyer notice must be checked."),
+        ]),
+        ("Council and local-authority portals — directory only for now", [
+            ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal. Direct automated collection is not yet enabled."),
+            ("Liverpool City Council — tender opportunities", "https://liverpool.gov.uk/currenttenders", "The Council directs suppliers to Proactis ProContract for most opportunities."),
+            ("Proactis ProContract", "https://procontract.due-north.com/", "Council procurement portal reference. A supported public feed/API route still needs validating."),
+            ("Sefton Council — tenders and contracts", "https://www.sefton.gov.uk/business/tenders-contracts", "Sefton advertises through The Chest and links to national notices."),
+            ("St Helens Council — become a supplier", "https://sthelens.gov.uk/article/4014/Become-a-supplier", "Official guidance confirms The Chest is its e-procurement portal."),
+            ("Knowsley Council — contracts and tenders", "https://www.knowsley.gov.uk/council-and-elections/accounts-budgets-and-spending/contracts-and-tenders", "Official guidance confirms Due North's The Chest is used for opportunities."),
+            ("Halton Borough Council — doing business with us", "https://www.halton.gov.uk/business-employer-support-funding/doing-business-us", "Official guidance confirms The Chest and Find a Tender are used."),
+            ("Warrington Borough Council — business and procurement", "https://www.warrington.gov.uk/business-and-procurement", "Official supplier guidance directs bidders to The Chest."),
+            ("Wirral Council — tenders and contracts", "https://www.wirral.gov.uk/business/tenders-and-contracts", "Official supplier guidance directs bidders to The Chest."),
+            ("Liverpool City Region Combined Authority — procurement", "https://www.liverpoolcityregion-ca.gov.uk/procurement", "Uses The Chest for eSourcing and Find a Tender for published notices."),
+            ("Merseyside Fire & Rescue — procurement", "https://www.merseyfire.gov.uk/about/supplying-goods-and-services-to-mfra/", "Official supplier guidance; opportunities are advertised through The Chest and national notice services."),
+        ]),
+        ("NHS and healthcare procurement — directory only for now", [
+            ("NHS England — supplying to the NHS", "https://www.england.nhs.uk/nhs-commercial/supplying-to-the-nhs/", "Official guidance identifies Atamis as well as Find a Tender and Contracts Finder for contract opportunities. Employment vacancies are excluded."),
+            ("Health Family Atamis supplier portal", "https://health-family.force.com/s/Welcome", "NHS eCommercial procurement portal used by most NHS organisations. Published opportunities are available to suppliers; any automated collection route must be validated before connection."),
+            ("NHS Cheshire and Merseyside ICB — procurement", "https://www.cheshireandmerseyside.nhs.uk/about/how-we-work/procurement-and-contracting/", "The ICB has confirmed its procurement support uses Atamis; its opportunities are also published on Find a Tender and Contracts Finder."),
+        ]),
+        ("Other public and institutional procurement — to be assessed", [
+            ("NHS trusts and ambulance services", "https://www.england.nhs.uk/nhs-commercial/nhs-england-procurement/", "Include relevant contract opportunities from official procurement channels, not staff vacancies."),
+            ("Local universities, colleges and housing providers", "https://www.gov.uk/find-tender", "Add relevant buyer portals only after confirming the opportunity is a genuine procurement contract and access is permitted."),
         ]),
     ]
     sections = ""
-    for heading, entries in items:
+    for heading, entries in groups:
         cards = "".join(
             f'<li><a href="{safe(url)}" target="_blank" rel="noopener">{safe(name)}</a> — {safe(note)}</li>'
             for name, url, note in entries
@@ -1411,7 +1517,7 @@ def sources():
         sections += f"<h2>{safe(heading)}</h2><ul>{cards}</ul>"
     return Response(
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>Tender Scout sources</title><style>'
+        '<title>Tender Scout procurement sources</title><style>'
         'body{font:16px Arial;max-width:960px;margin:0 auto;padding:16px;color:#18251e;background:#f3f6f4;line-height:1.5}'
         'header{background:#143d2a;color:white;border-radius:14px;padding:20px;margin-bottom:16px}'
         'header a{color:white}main{background:white;border-radius:14px;padding:18px}'
@@ -1419,13 +1525,12 @@ def sources():
         'li{margin:10px 0;padding:14px;background:#f5f8f6;border:1px solid #e0e8e2;border-radius:10px}'
         'a{color:#08783c;font-weight:600}p{line-height:1.5}.note{font-size:14px;color:#53645a}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
-        '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
-        '<h1>Council & community sources</h1><p>Use this directory to find official tender notices and permitted customer enquiry sources.</p></header><main>'
-        '<p class="note">Public contracts and private customer leads are different opportunity types. Council portals may require supplier registration and may not expose an open feed.</p>'
+        '<header><nav><a href="/">Opportunity board</a> · <a href="/sources">Procurement sources</a></nav>'
+        '<h1>Procurement sources</h1><p>All qualifying contracts are intended for the same TenderScout opportunity board, regardless of the portal where they are published.</p></header><main>'
+        '<p class="note"><b>Important:</b> "Directory only" means the portal is listed for reference but is not yet being automatically collected. TenderScout will only connect a portal where a documented public feed/API or permitted public listing is available. It will not bypass logins or access controls. Every record must retain its original source and pass the normal delivery-location checks.</p>'
         + sections +
-        '<p><b>Important:</b> Tender Scout does not automatically scrape Facebook, Nextdoor or gated supplier portals. '
-        'Add a private lead only when you have permission to use the information and a legitimate source link.</p>'
-        '<p><a href="/">Back to public tenders</a> · <a href="/leads">Open private leads</a></p></main></body></html>',
+        '<p><b>Scope:</b> procurement contracts only. NHS staff vacancies, domestic jobs, Formby Bubble and other private consumer-lead sources are parked and are not part of this board.</p>'
+        '<p><a href="/">Back to the opportunity board</a></p></main></body></html>',
         mimetype="text/html",
     )
 

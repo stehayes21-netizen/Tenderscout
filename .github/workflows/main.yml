@@ -20,8 +20,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # Six-page windows need extra time for the official feed's rate limit; hosted refresh can take another 6 minutes.
-    timeout-minutes: 25
+    # Allow the full cursor walk, hosted refresh, and its status polling.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -93,12 +93,12 @@ jobs:
           curl --fail --show-error --silent --max-time 90 \
             -X POST -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh"
 
-          # The hosted collector now has a 12-minute Find a Tender budget. Poll for
-          # up to 14 minutes so a complete rate-limited refresh can finish.
-          for attempt in $(seq 1 84); do
+          # The hosted collector has a 15-minute Find a Tender budget. Poll for
+          # up to 19 minutes so collection and result persistence can finish.
+          for attempt in $(seq 1 114); do
             if ! state_json=$(curl --fail --show-error --silent --max-time 30 \
               -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/refresh/status"); then
-              echo "Could not read refresh status (attempt $attempt/84); retrying status check."
+              echo "Could not read refresh status (attempt $attempt/114); retrying status check."
               sleep 10
               continue
             fi
@@ -124,5 +124,5 @@ jobs:
             fi
             sleep 10
           done
-          echo "TenderScout refresh was still running after fourteen minutes."
+          echo "TenderScout refresh was still running after nineteen minutes."
           exit 1
