@@ -1166,6 +1166,15 @@ class DataQualityRegressionTests(unittest.TestCase):
             "description": "Region: North West England; delivery sites not stated.",
         }))
 
+    def test_generic_chest_portal_wording_alone_does_not_surface_candidate(self):
+        self.assertFalse(tenderscout.has_target_area_clue({
+            "title": "Dado Panel Asbestos Removal",
+            "description": (
+                "Listing portal/provider: The Chest "
+                "(North West councils e-tendering portal, via Proactis ProContract)"
+            ),
+        }))
+
     def test_mixed_local_and_out_of_area_scope_stays_reviewable(self):
         self.assertTrue(tenderscout.has_target_area_clue({
             "title": "Facilities services across Liverpool and Blackpool",
