@@ -1319,3 +1319,49 @@ class DeliverySiteSafeguardTests(unittest.TestCase):
             rows[0]["notice_url"],
             "https://www.find-tender.service.gov.uk/Notice/103222-2026",
         )
+
+
+class CancellationNoticeTests(unittest.TestCase):
+    def test_ocds_cancellation_tag_is_never_promoted_to_open_tender(self):
+        payload = {
+            "releases": [{
+                "id": "102556-2026",
+                "ocid": "ocds-cancelled-process",
+                "date": "2026-10-29T12:05:23Z",
+                "tag": ["tenderCancellation"],
+                "tender": {
+                    "title": "Invitation to Tender - Window Cleaning Wirral 2026",
+                    "description": "Window cleaning services across Wirral healthcare sites.",
+                    "tenderPeriod": {"endDate": "2026-11-30T17:00:00Z"},
+                },
+                "buyer": {"name": "Wirral Community Health and Care NHS Foundation Trust"},
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["opportunity_stage"], "Cancelled")
+        self.assertFalse(tenderscout.shortlist_eligible_stage(rows[0]))
+
+    def test_cancellation_notice_does_not_delete_distinct_live_official_notice(self):
+        live = {
+            "source": "Find a Tender",
+            "ocid": "ocds-live-process",
+            "notice_url": "https://www.find-tender.service.gov.uk/Notice/098300-2026",
+            "title": "Invitation to Tender Window Cleaning Services - Wirral",
+            "buyer": "Wirral Community Health and Care NHS Foundation Trust",
+            "deadline": "2026-11-20T17:00:00Z",
+            "opportunity_stage": "Open for bids",
+        }
+        cancelled = {
+            "source": "Find a Tender",
+            "ocid": "ocds-cancelled-process",
+            "notice_url": "https://www.find-tender.service.gov.uk/Notice/102556-2026",
+            "title": "Invitation to Tender - Window Cleaning Wirral 2026",
+            "buyer": "Wirral Community Health and Care NHS Foundation Trust",
+            "deadline": "2026-11-30T17:00:00Z",
+            "opportunity_stage": "Cancelled",
+        }
+        rows = tenderscout.dedupe([live, cancelled])
+        self.assertEqual(len(rows), 2)
+        self.assertIn("Open for bids", [row["opportunity_stage"] for row in rows])
+        self.assertIn("Cancelled", [row["opportunity_stage"] for row in rows])
