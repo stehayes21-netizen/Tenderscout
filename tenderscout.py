@@ -83,7 +83,7 @@ TRADE_KEYWORDS = {
     "End-of-tenancy cleaning": ["end of tenancy", "end-of-tenancy", "void cleaning"],
     "Waste removal and clearance": ["waste removal", "rubbish clearance", "house clearance"],
     "Pest control": ["pest control", "vermin control", "rodent control"],
-    "Grounds maintenance and gardening": ["grounds maintenance", "garden maintenance", "grass cutting"],
+    "Grounds maintenance and gardening": ["grounds maintenance", "garden maintenance", "grass cutting", "artificial grass pitch", "artificial turf maintenance", "synthetic turf maintenance", "sports pitch maintenance", "sports field maintenance", "agp maintenance"],
     "Landscaping": ["landscaping", "landscape works"],
     "Tree surgery": ["tree surgery", "arboriculture", "arboricultural", "tree works", "tree maintenance", "tree planting", "tree pruning", "tree felling"],
     "Facilities management": ["facilities management", "facility management", "hard fm", "soft fm"],
@@ -362,6 +362,7 @@ def nuts_codes(text):
 
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
+    "raw_geography_match", "raw_geography_reason",
     "service_match", "region_match", "geography_reason", "estimated_value_gbp",
     "contract_start_date", "contract_end_date",
     "deadline", "status", "opportunity_stage", "score", "score_reasons", "notice_url", "ocid",
@@ -720,7 +721,13 @@ def extract_records(payload, source):
             if isinstance(raw_tags, str):
                 raw_tags = [raw_tags]
             tag_text = " ".join(as_text(tag) for tag in raw_tags).lower()
-            if "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
+            # OCDS UK12 procurement termination notices use cancellation tags.
+            # They must never be promoted to an open tender merely because the
+            # release still contains a tender object or tender-period metadata.
+            cancellation_markers = ("cancellation", "cancelled", "canceled", "termination", "withdrawal")
+            if any(marker in tag_text for marker in cancellation_markers):
+                opportunity_stage = "Cancelled"
+            elif "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
                 opportunity_stage = "Planning / upcoming"
             elif "tender" in tag_text:
                 opportunity_stage = "Open for bids"
@@ -1345,14 +1352,49 @@ def has_target_area_clue(record):
     out_hits = place_hits(text, OUT_OF_AREA_TERMS)
     local_hits = drop_contained(local_hits, out_hits)
     full, bare = postcode_districts(text, include_bare=True)
-    # Broad Merseyside/North West scope is potentially relevant but never
-    # confirms a local delivery site; retain it for manual review.
-    broad_hits = place_hits(text, ("merseyside", "north west"))
-    return bool(
-        local_hits
-        or ((full | bare) & LOCAL_POSTCODE_DISTRICTS)
-        or broad_hits
+    districts = full | bare
+    local_districts = districts & LOCAL_POSTCODE_DISTRICTS
+    # A generic North West/Merseyside reference can surface an otherwise
+    # unlocated opportunity for review, but it must not rescue a record that
+    # already names only an out-of-area place/postcode. This prevents portal
+    # boilerplate (for example, "The Chest, a North West councils portal")
+    # from making unrelated contracts look locally relevant.
+    out_districts = districts - LOCAL_POSTCODE_DISTRICTS - REVIEW_POSTCODE_DISTRICTS
+    # The Chest provider label is generic portal metadata, not evidence that
+    # the contract itself is delivered in the North West. Strip it before
+    # evaluating broad regional clues; explicit notice wording remains intact.
+    clue_text = re.sub(
+        r"listing portal/provider:\s*the chest\s*\(north west councils e-tendering portal(?:,\s*via proactis procontract)?\)",
+        "", text, flags=re.IGNORECASE,
     )
+    broad_hits = place_hits(clue_text, ("merseyside", "north west"))
+    broad_only = broad_hits and not out_hits and not out_districts
+    return bool(local_hits or local_districts or broad_only)
+
+
+def explicit_local_delivery_postcodes(prose):
+    """Find local full postcodes only when prose explicitly ties them to service delivery.
+
+    A postcode in a general notice description is not enough. Require an action
+    (washed, cleaned, delivered, performed, etc.) followed by a site preposition
+    and location text in the same sentence.
+    """
+    prose_text = str(prose or "")
+    postcode_text = prose_text.upper()
+    districts = set()
+    delivery_action = re.compile(
+        r"\b(?:washed|cleaned|delivered|performed|undertaken|carried out|"
+        r"completed|provided|supplied|take place)\b"
+        r"[^.!?]{0,120}\b(?:at|within|to)\b[^.!?]{1,100}$",
+        re.IGNORECASE,
+    )
+    for match in FULL_POSTCODE_RE.finditer(postcode_text):
+        prefix = postcode_text[:match.start()]
+        sentence_prefix = re.split(r"[.!?]", prefix)[-1]
+        if delivery_action.search(sentence_prefix):
+            full, _ = postcode_districts(match.group(0))
+            districts.update(full & LOCAL_POSTCODE_DISTRICTS)
+    return sorted(districts)
 
 
 def classify_geography(record, region):
@@ -1395,7 +1437,8 @@ def classify_geography(record, region):
     ambiguous = drop_contained(place_hits(location_text, AMBIGUOUS_PLACE_TERMS), named)
     broad = drop_contained(broad_raw, named)
 
-    strong_local = pc_local + nuts_local + local_places
+    prose_local_delivery_postcodes = explicit_local_delivery_postcodes(prose)
+    strong_local = pc_local + nuts_local + local_places + prose_local_delivery_postcodes
     strong_out = pc_other + nuts_out + out_places
     # Place-level doubt (a shared name, a borderline postcode) means a person
     # should look. Broad region words and codes only describe the wider region, so
@@ -1459,7 +1502,7 @@ def classify_geography(record, region):
         )
     if strong_local:
         return "LOCAL", (
-            "Structured delivery/site location: " + ", ".join(strong_local[:3])
+            "Confirmed delivery/site evidence: " + ", ".join(strong_local[:3])
         )
     if strong_out and weak_place:
         return "REVIEW", (
@@ -1495,6 +1538,19 @@ def classify_geography(record, region):
         return "REVIEW", "Structured location is too vague to confirm preferred area"
 
     return "REVIEW", "No usable delivery/site location evidence"
+
+
+def annotate_raw_geography(record, region):
+    """Attach geography evidence to every notice, independent of trade scoring.
+
+    These audit fields must be populated even when score_record later rejects a
+    notice for having no matching trade category. They do not affect shortlist
+    eligibility; region_match remains the scored-record field.
+    """
+    geo_class, geo_reason = classify_geography(record, region)
+    record["raw_geography_match"] = geo_class
+    record["raw_geography_reason"] = geo_reason
+    return geo_class, geo_reason
 
 
 def score_record(record, services, region, min_value, max_value):
@@ -1748,6 +1804,7 @@ def main():
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
+        annotate_raw_geography(row, args.region)
         scored = score_record(row, args.services, args.region, args.min_value, args.max_value)
         if not scored:
             rejected_by_scoring += 1
@@ -1834,9 +1891,19 @@ def main():
         else:
             deadline_counts["future"] += 1
     print("Raw deadline health (all notices): " + ", ".join(f"{key}={count}" for key, count in deadline_counts.items()))
-    print("Scored geography decisions: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
+    raw_geography_counts = {}
+    for row in all_rows:
+        geo = row.get("raw_geography_match") or "MISSING"
+        raw_geography_counts[geo] = raw_geography_counts.get(geo, 0) + 1
+    print("Raw geography decisions (all fetched notices): " + ", ".join(
+        f"{key}={count}" for key, count in sorted(raw_geography_counts.items())
+    ))
+    print(f"Raw geography reconciliation: {sum(raw_geography_counts.values())}/{len(all_rows)} records classified")
+    print("Scored geography decisions (trade-matched records only): " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
+    cancelled_count = sum(1 for row in all_rows if row.get("opportunity_stage") == "Cancelled")
+    print(f"Cancelled notices retained for audit only: {cancelled_count}")
     print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
     print(f"Confirmed local open bids: {len(filtered)}")
     print(f"Location review (open bids only): {len(review_rows)}")

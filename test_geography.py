@@ -266,6 +266,29 @@ class GeographyClassifierTests(unittest.TestCase):
         self.assertEqual(geo_class, "REVIEW")
         self.assertIn("title/description", reason.lower())
 
+    def test_explicit_local_delivery_postcode_in_notice_prose_is_local(self):
+        record = {
+            "location_text": "",
+            "title": "Vehicle Wash Cleaning Contract",
+            "description": (
+                "The vehicles will need to be washed at Hardshaw Brook Depot "
+                "WA9 1JR. Cleaning will take place in the designated wash bay."
+            ),
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "LOCAL")
+        self.assertIn("WA9", reason)
+
+    def test_unqualified_local_postcode_in_notice_prose_remains_review(self):
+        record = {
+            "location_text": "",
+            "title": "Vehicle Wash Cleaning Contract",
+            "description": "The notice refers to postcode WA9 1JR in background information.",
+        }
+        geo_class, reason = tenderscout.classify_geography(record, "Target area")
+        self.assertEqual(geo_class, "REVIEW")
+        self.assertIn("title/description", reason)
+
     def test_review_tenders_appear_in_review_csv_and_not_main_shortlist(self):
         review_record = {
             "source": "Find a Tender",
@@ -742,6 +765,37 @@ class DeliveryLocationExtractionRegressionTests(unittest.TestCase):
             tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
         )
 
+    def test_explicit_wa9_delivery_site_is_extracted_and_classified_local(self):
+        payload = {
+            "releases": [{
+                "id": "2026-wa9-site",
+                "buyer": {
+                    "name": "Example Council",
+                    "address": {"streetAddress": "Buyer HQ", "postalCode": "EH1 1AA", "locality": "Edinburgh"},
+                },
+                "tender": {
+                    "title": "Vehicle washing services",
+                    "items": [{
+                        "deliveryLocation": {
+                            "description": "Vehicles must be washed at Hardshaw Brook Depot",
+                            "address": {
+                                "streetAddress": "Hardshaw Brook Depot",
+                                "postalCode": "WA9 1JR",
+                                "locality": "St Helens",
+                            },
+                        }
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("WA9 1JR", records[0]["location_text"])
+        self.assertIn("Hardshaw Brook Depot", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
+        )
+
     def test_buyer_headquarters_alone_never_confirms_local_delivery(self):
         payload = {
             "releases": [{
@@ -1149,6 +1203,38 @@ class DataQualityRegressionTests(unittest.TestCase):
             "description": "Delivery across the United Kingdom",
         }))
 
+    def test_generic_north_west_portal_text_does_not_rescue_known_out_of_area_notice(self):
+        record = {
+            "title": "Concrete wheeled sports facility at Wilmslow SK9 4AA",
+            "buyer": "Cheshire East Council",
+            "description": (
+                "Construction at The Carrs Park. Listing portal: The Chest "
+                "(North West councils e-tendering portal)."
+            ),
+        }
+        self.assertFalse(tenderscout.has_target_area_clue(record))
+
+    def test_generic_north_west_clue_still_surfaces_unlocated_opportunity(self):
+        self.assertTrue(tenderscout.has_target_area_clue({
+            "title": "Grounds maintenance framework",
+            "description": "Region: North West England; delivery sites not stated.",
+        }))
+
+    def test_generic_chest_portal_wording_alone_does_not_surface_candidate(self):
+        self.assertFalse(tenderscout.has_target_area_clue({
+            "title": "Dado Panel Asbestos Removal",
+            "description": (
+                "Listing portal/provider: The Chest "
+                "(North West councils e-tendering portal, via Proactis ProContract)"
+            ),
+        }))
+
+    def test_mixed_local_and_out_of_area_scope_stays_reviewable(self):
+        self.assertTrue(tenderscout.has_target_area_clue({
+            "title": "Facilities services across Liverpool and Blackpool",
+            "description": "The Chest (North West councils e-tendering portal).",
+        }))
+
     def test_catering_title_is_not_mislabelled_as_construction(self):
         record = {
             "title": "Provision of Catering Services",
@@ -1287,3 +1373,104 @@ class DeliverySiteSafeguardTests(unittest.TestCase):
             rows[0]["notice_url"],
             "https://www.find-tender.service.gov.uk/Notice/103222-2026",
         )
+
+
+class CancellationNoticeTests(unittest.TestCase):
+    def test_ocds_cancellation_tag_is_never_promoted_to_open_tender(self):
+        payload = {
+            "releases": [{
+                "id": "102556-2026",
+                "ocid": "ocds-cancelled-process",
+                "date": "2026-10-29T12:05:23Z",
+                "tag": ["tenderCancellation"],
+                "tender": {
+                    "title": "Invitation to Tender - Window Cleaning Wirral 2026",
+                    "description": "Window cleaning services across Wirral healthcare sites.",
+                    "tenderPeriod": {"endDate": "2026-11-30T17:00:00Z"},
+                },
+                "buyer": {"name": "Wirral Community Health and Care NHS Foundation Trust"},
+            }]
+        }
+        rows = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["opportunity_stage"], "Cancelled")
+        self.assertFalse(tenderscout.shortlist_eligible_stage(rows[0]))
+
+    def test_cancellation_notice_does_not_delete_distinct_live_official_notice(self):
+        live = {
+            "source": "Find a Tender",
+            "ocid": "ocds-live-process",
+            "notice_url": "https://www.find-tender.service.gov.uk/Notice/098300-2026",
+            "title": "Invitation to Tender Window Cleaning Services - Wirral",
+            "buyer": "Wirral Community Health and Care NHS Foundation Trust",
+            "deadline": "2026-11-20T17:00:00Z",
+            "opportunity_stage": "Open for bids",
+        }
+        cancelled = {
+            "source": "Find a Tender",
+            "ocid": "ocds-cancelled-process",
+            "notice_url": "https://www.find-tender.service.gov.uk/Notice/102556-2026",
+            "title": "Invitation to Tender - Window Cleaning Wirral 2026",
+            "buyer": "Wirral Community Health and Care NHS Foundation Trust",
+            "deadline": "2026-11-30T17:00:00Z",
+            "opportunity_stage": "Cancelled",
+        }
+        rows = tenderscout.dedupe([live, cancelled])
+        self.assertEqual(len(rows), 2)
+        self.assertIn("Open for bids", [row["opportunity_stage"] for row in rows])
+        self.assertIn("Cancelled", [row["opportunity_stage"] for row in rows])
+
+
+class RawGeographyAuditExportTests(unittest.TestCase):
+    def test_unmatched_trade_notice_keeps_raw_geography_in_all_csv(self):
+        record = {
+            "source": "Find a Tender",
+            "title": "General administrative support contract",
+            "buyer": "Example Authority",
+            "description": "Administrative support services.",
+            "location_text": "Liverpool L1 1AA",
+        }
+
+        raw_geo, raw_reason = tenderscout.annotate_raw_geography(
+            record, "Target area"
+        )
+        scored = tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        )
+
+        self.assertEqual(raw_geo, "LOCAL")
+        self.assertIn("raw_geography_match", record)
+        self.assertEqual(record["raw_geography_match"], "LOCAL")
+        self.assertEqual(record["raw_geography_reason"], raw_reason)
+        self.assertIsNone(scored)
+        self.assertNotIn("region_match", record)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".csv", newline="", encoding="utf-8",
+            delete=False
+        ) as output:
+            path = output.name
+        try:
+            tenderscout.write_csv(path, [record])
+            with open(path, newline="", encoding="utf-8") as saved:
+                exported = next(csv.DictReader(saved))
+            self.assertEqual(exported["raw_geography_match"], "LOCAL")
+            self.assertTrue(exported["raw_geography_reason"])
+            self.assertEqual(exported["region_match"], "")
+        finally:
+            os.unlink(path)
+
+    def test_raw_geography_audit_fields_do_not_replace_scored_fields(self):
+        record = {
+            "title": "Window cleaning services",
+            "description": "Window cleaning at Liverpool L1 1AA.",
+            "location_text": "Liverpool L1 1AA",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        tenderscout.annotate_raw_geography(record, "Target area")
+        scored = tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        )
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["raw_geography_match"], "LOCAL")
+        self.assertEqual(scored["region_match"], "LOCAL")
