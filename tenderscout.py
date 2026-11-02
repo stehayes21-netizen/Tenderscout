@@ -1380,9 +1380,9 @@ def explicit_local_delivery_postcodes(prose):
     """
     districts = set()
     delivery_action = re.compile(
-        r"\\b(?:washed|cleaned|delivered|performed|undertaken|carried out|"
-        r"completed|provided|supplied|take place)\\b"
-        r"[^.!?]{0,120}\\b(?:at|within|to)\\b[^.!?]{1,100}$",
+        r"\b(?:washed|cleaned|delivered|performed|undertaken|carried out|"
+        r"completed|provided|supplied|take place)\b"
+        r"[^.!?]{0,120}\b(?:at|within|to)\b[^.!?]{1,100}$",
         re.IGNORECASE,
     )
     for match in FULL_POSTCODE_RE.finditer(str(prose or "")):
