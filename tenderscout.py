@@ -1378,6 +1378,8 @@ def explicit_local_delivery_postcodes(prose):
     (washed, cleaned, delivered, performed, etc.) followed by a site preposition
     and location text in the same sentence.
     """
+    prose_text = str(prose or "")
+    postcode_text = prose_text.upper()
     districts = set()
     delivery_action = re.compile(
         r"\b(?:washed|cleaned|delivered|performed|undertaken|carried out|"
@@ -1385,8 +1387,8 @@ def explicit_local_delivery_postcodes(prose):
         r"[^.!?]{0,120}\b(?:at|within|to)\b[^.!?]{1,100}$",
         re.IGNORECASE,
     )
-    for match in FULL_POSTCODE_RE.finditer(str(prose or "")):
-        prefix = str(prose or "")[:match.start()]
+    for match in FULL_POSTCODE_RE.finditer(postcode_text):
+        prefix = postcode_text[:match.start()]
         sentence_prefix = re.split(r"[.!?]", prefix)[-1]
         if delivery_action.search(sentence_prefix):
             full, _ = postcode_districts(match.group(0))
