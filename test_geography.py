@@ -922,6 +922,8 @@ class BearingsDiscoveryTests(unittest.TestCase):
             rows = tenderscout.fetch_bearings(5, stats)
         self.assertEqual(len(rows), 1)
         self.assertIn("kind=tender", mocked.call_args.args[0])
+        self.assertIn("area=lcr", mocked.call_args.args[0])
+        self.assertNotIn("cheshire", mocked.call_args.args[0].lower())
         self.assertEqual(rows[0]["notice_url"], "https://provider.example/notice")
         self.assertEqual(rows[0]["location_text"], "")
         self.assertIn("Source credit: Bearings", rows[0]["description"])
