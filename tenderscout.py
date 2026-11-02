@@ -1345,14 +1345,17 @@ def has_target_area_clue(record):
     out_hits = place_hits(text, OUT_OF_AREA_TERMS)
     local_hits = drop_contained(local_hits, out_hits)
     full, bare = postcode_districts(text, include_bare=True)
-    # Broad Merseyside/North West scope is potentially relevant but never
-    # confirms a local delivery site; retain it for manual review.
+    districts = full | bare
+    local_districts = districts & LOCAL_POSTCODE_DISTRICTS
+    # A generic North West/Merseyside reference can surface an otherwise
+    # unlocated opportunity for review, but it must not rescue a record that
+    # already names only an out-of-area place/postcode. This prevents portal
+    # boilerplate (for example, "The Chest, a North West councils portal")
+    # from making unrelated contracts look locally relevant.
+    out_districts = districts - LOCAL_POSTCODE_DISTRICTS - REVIEW_POSTCODE_DISTRICTS
     broad_hits = place_hits(text, ("merseyside", "north west"))
-    return bool(
-        local_hits
-        or ((full | bare) & LOCAL_POSTCODE_DISTRICTS)
-        or broad_hits
-    )
+    broad_only = broad_hits and not out_hits and not out_districts
+    return bool(local_hits or local_districts or broad_only)
 
 
 def classify_geography(record, region):
