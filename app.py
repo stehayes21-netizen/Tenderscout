@@ -406,7 +406,7 @@ def dashboard():
         location_text = row["location_text"] or "Delivery location not supplied — open the official notice";
         location_display = location_text;
         if location_text.strip().upper() in {"UK, UNITED KINGDOM", "UNITED KINGDOM", "UKD63"}:
-            location_display = ("Cheshire West and Chester region (UKD63); full site postcode not supplied" if location_text.strip().upper() == "UKD63" else "UK-wide location only; exact site postcode not supplied")
+            location_display = ("Outside TenderScout coverage (UKD63)" if location_text.strip().upper() == "UKD63" else "UK-wide location only; exact site postcode not supplied")
         stage_text = row["opportunity_stage"] or "Other notice"
         region_badge = (
             "POTENTIAL LOCAL — verify delivery site" if row["region_match"] == "REVIEW"
@@ -752,8 +752,8 @@ def dashboard():
     @media(max-width:520px){{body{{padding:12px}}header{{padding:17px}}.card{{padding:14px}}.trade-browser{{padding:12px}}.board-facts{{grid-template-columns:1fr 1fr;gap:.4rem}}.board-facts p{{padding:.55rem}}.board-facts span{{font-size:.88rem}}}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
-    <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
-    <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral, Warrington and Cheshire West and Chester. Other North West areas are excluded.</p>
+    <p><a style="color:white" href="/">Opportunity board</a> · <a style="color:white" href="/sources">Procurement sources</a></p>
+    <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral and Warrington. Cheshire is excluded.</p>
     <form id="refresh-form" method="post" action="/refresh">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
     <p id="refresh-status" class="note" role="status" aria-live="polite" hidden></p></header>
@@ -1475,31 +1475,34 @@ def update_private_lead_status(lead_id):
 
 @app.route("/sources")
 def sources():
-    """Directory of official procurement portals and public community channels."""
-    items = [
-        ("Public-sector tenders", [
-            ("Find a Tender", "https://www.find-tender.service.gov.uk/Search", "UK government procurement notices"),
-            ("Contracts Finder", "https://www.contractsfinder.service.gov.uk/Search", "UK public-sector opportunities"),
-            ("Liverpool City Council — ProContract", "https://procontract.due-north.com/", "Liverpool Council says most of its opportunities are advertised through ProContract; some routes use other approved portals"),
-            ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal"),
-            ("Bearings — Liverpool City Region tenders", "https://getbearings.co.uk/rss", "Free North West opportunity aggregator with RSS feeds and an open API; use as a discovery source and verify every tender on the buyer's official notice"),
-            ("Standstill UK — North West tenders", "https://standstill.uk/region/north-west/", "Free daily RSS discovery feed now included in TenderScout; regional label is not proof of the delivery site, and every item must be verified on the official notice"),
-            ("Merseyside Fire & Rescue procurement", "https://www.merseyfire.gov.uk/about/supplying-goods-and-services-to-mfra/", "Confirms openly advertised opportunities are on The Chest and national notices on Find a Tender / Contracts Finder"),
-            ("Sefton Council tenders and contracts", "https://www.sefton.gov.uk/business/tenders-contracts", "Confirms Sefton opportunities use The Chest and points suppliers to national notice sources"),
+    """Directory of procurement sources, with a clear distinction between live feeds and portal references."""
+    groups = [
+        ("Connected national procurement feeds", [
+            ("Find a Tender", "https://www.find-tender.service.gov.uk/Search", "Connected official UK procurement feed."),
+            ("Contracts Finder", "https://www.contractsfinder.service.gov.uk/Search", "Connected official public-sector procurement feed."),
         ]),
-        ("Community and private-lead channels", [
-            ("HomeGuild — Liverpool homeowner jobs", "https://www.homeguild.co.uk/jobs/", "Public job-board page; current jobs may be empty and contact details are reserved for registered tradespeople"),
-            ("BuildPair — latest job requests", "https://www.buildpair.co.uk/jobs", "Public job-board page; review the source's terms before any automated reuse"),
-            ("Formby Bubble Approved Trader List", "https://www.formbybubble.com/bubbleapprovedtraderlist", "Local trader directory; use as a contact/discovery source, not proof of a live job"),
-            ("Grafters Network Liverpool", "https://www.grafterssupergroups.co.uk/events/liverpoolflagship/", "Local business networking"),
-            ("Liverpool Business Forum", "https://liverpoolbusinessforum.co.uk/about-lbf/", "Local business contacts and networking"),
-            ("Facebook — Liverpool community groups", "https://www.facebook.com/search/groups/?q=Liverpool%20community", "Open group search; check each group's rules and use permitted/manual submissions"),
-            ("Facebook — Formby community groups", "https://www.facebook.com/search/groups/?q=Formby%20community", "Open group search; check each group's rules and use permitted/manual submissions"),
-            ("Nextdoor", "https://nextdoor.co.uk/", "Neighbourhood recommendations and requests; use authorised access only"),
+        ("Connected discovery feeds — verify the original notice", [
+            ("Bearings API", "https://getbearings.co.uk/api", "Connected discovery source. Regional eligibility is not proof of delivery location."),
+            ("Standstill UK — North West", "https://standstill.uk/region/north-west/", "Connected RSS discovery source. The original buyer notice must be checked."),
+        ]),
+        ("Council and local-authority portals — directory only for now", [
+            ("The Chest", "https://www.the-chest.org.uk/", "North West local-authority procurement portal. Direct automated collection is not yet enabled."),
+            ("Liverpool City Council — tender opportunities", "https://liverpool.gov.uk/currenttenders", "The Council directs suppliers to Proactis ProContract for most opportunities."),
+            ("Proactis ProContract", "https://procontract.due-north.com/", "Council procurement portal reference. A supported public feed/API route still needs validating."),
+            ("Sefton Council — tenders and contracts", "https://www.sefton.gov.uk/business/tenders-contracts", "Official council guidance on where Sefton advertises its opportunities."),
+            ("Merseyside Fire & Rescue — procurement", "https://www.merseyfire.gov.uk/about/supplying-goods-and-services-to-mfra/", "Official supplier guidance; opportunities are advertised through The Chest and national notice services."),
+        ]),
+        ("NHS and healthcare procurement — directory only for now", [
+            ("NHS England — supplying to the NHS", "https://www.england.nhs.uk/nhs-commercial/supplying-to-the-nhs/", "Official guidance identifies Atamis as well as Find a Tender and Contracts Finder for contract opportunities. Employment vacancies are excluded."),
+            ("Health Family Atamis supplier portal", "https://health-family.force.com/s/Welcome", "NHS eCommercial procurement portal. Public listing access and permitted ingestion need validating before connection."),
+        ]),
+        ("Other public and institutional procurement — to be assessed", [
+            ("NHS trusts and ambulance services", "https://www.england.nhs.uk/nhs-commercial/nhs-england-procurement/", "Include relevant contract opportunities from official procurement channels, not staff vacancies."),
+            ("Local universities, colleges and housing providers", "https://www.gov.uk/find-tender", "Add relevant buyer portals only after confirming the opportunity is a genuine procurement contract and access is permitted."),
         ]),
     ]
     sections = ""
-    for heading, entries in items:
+    for heading, entries in groups:
         cards = "".join(
             f'<li><a href="{safe(url)}" target="_blank" rel="noopener">{safe(name)}</a> — {safe(note)}</li>'
             for name, url, note in entries
@@ -1507,7 +1510,7 @@ def sources():
         sections += f"<h2>{safe(heading)}</h2><ul>{cards}</ul>"
     return Response(
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>Tender Scout sources</title><style>'
+        '<title>Tender Scout procurement sources</title><style>'
         'body{font:16px Arial;max-width:960px;margin:0 auto;padding:16px;color:#18251e;background:#f3f6f4;line-height:1.5}'
         'header{background:#143d2a;color:white;border-radius:14px;padding:20px;margin-bottom:16px}'
         'header a{color:white}main{background:white;border-radius:14px;padding:18px}'
@@ -1515,13 +1518,12 @@ def sources():
         'li{margin:10px 0;padding:14px;background:#f5f8f6;border:1px solid #e0e8e2;border-radius:10px}'
         'a{color:#08783c;font-weight:600}p{line-height:1.5}.note{font-size:14px;color:#53645a}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
-        '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
-        '<h1>Council & community sources</h1><p>Use this directory to find official tender notices and permitted customer enquiry sources.</p></header><main>'
-        '<p class="note">Public contracts and private customer leads are different opportunity types. Council portals may require supplier registration and may not expose an open feed.</p>'
+        '<header><nav><a href="/">Opportunity board</a> · <a href="/sources">Procurement sources</a></nav>'
+        '<h1>Procurement sources</h1><p>All qualifying contracts are intended for the same TenderScout opportunity board, regardless of the portal where they are published.</p></header><main>'
+        '<p class="note"><b>Important:</b> "Directory only" means the portal is listed for reference but is not yet being automatically collected. TenderScout will only connect a portal where a documented public feed/API or permitted public listing is available. It will not bypass logins or access controls. Every record must retain its original source and pass the normal delivery-location checks.</p>'
         + sections +
-        '<p><b>Important:</b> Tender Scout does not automatically scrape Facebook, Nextdoor or gated supplier portals. '
-        'Add a private lead only when you have permission to use the information and a legitimate source link.</p>'
-        '<p><a href="/">Back to public tenders</a> · <a href="/leads">Open private leads</a></p></main></body></html>',
+        '<p><b>Scope:</b> procurement contracts only. NHS staff vacancies, domestic jobs, Formby Bubble and other private consumer-lead sources are parked and are not part of this board.</p>'
+        '<p><a href="/">Back to the opportunity board</a></p></main></body></html>',
         mimetype="text/html",
     )
 
