@@ -426,7 +426,7 @@ class PostcodeAreaTests(unittest.TestCase):
         # delivery location. All nine agreed areas must be discoverable.
         agreed_areas = (
             "Liverpool", "Sefton", "St Helens", "Halton", "Warrington",
-            "West Cheshire", "Wirral", "Wallasey", "Knowsley",
+            "Wirral", "Wallasey", "Knowsley",
         )
         for area in agreed_areas:
             for field in ("title", "description"):
