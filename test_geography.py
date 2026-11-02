@@ -1419,3 +1419,58 @@ class CancellationNoticeTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertIn("Open for bids", [row["opportunity_stage"] for row in rows])
         self.assertIn("Cancelled", [row["opportunity_stage"] for row in rows])
+
+
+class RawGeographyAuditExportTests(unittest.TestCase):
+    def test_unmatched_trade_notice_keeps_raw_geography_in_all_csv(self):
+        record = {
+            "source": "Find a Tender",
+            "title": "General administrative support contract",
+            "buyer": "Example Authority",
+            "description": "Administrative support services.",
+            "location_text": "Liverpool L1 1AA",
+        }
+
+        raw_geo, raw_reason = tenderscout.annotate_raw_geography(
+            record, "Target area"
+        )
+        scored = tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        )
+
+        self.assertEqual(raw_geo, "LOCAL")
+        self.assertIn("raw_geography_match", record)
+        self.assertEqual(record["raw_geography_match"], "LOCAL")
+        self.assertEqual(record["raw_geography_reason"], raw_reason)
+        self.assertIsNone(scored)
+        self.assertNotIn("region_match", record)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".csv", newline="", encoding="utf-8",
+            delete=False
+        ) as output:
+            path = output.name
+        try:
+            tenderscout.write_csv(path, [record])
+            with open(path, newline="", encoding="utf-8") as saved:
+                exported = next(csv.DictReader(saved))
+            self.assertEqual(exported["raw_geography_match"], "LOCAL")
+            self.assertTrue(exported["raw_geography_reason"])
+            self.assertEqual(exported["region_match"], "")
+        finally:
+            os.unlink(path)
+
+    def test_raw_geography_audit_fields_do_not_replace_scored_fields(self):
+        record = {
+            "title": "Window cleaning services",
+            "description": "Window cleaning at Liverpool L1 1AA.",
+            "location_text": "Liverpool L1 1AA",
+            "deadline": "2099-12-31T00:00:00+00:00",
+        }
+        tenderscout.annotate_raw_geography(record, "Target area")
+        scored = tenderscout.score_record(
+            record, tenderscout.SERVICE_ORDER, "Target area", None, None
+        )
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["raw_geography_match"], "LOCAL")
+        self.assertEqual(scored["region_match"], "LOCAL")
