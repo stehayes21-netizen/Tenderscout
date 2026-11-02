@@ -83,7 +83,7 @@ TRADE_KEYWORDS = {
     "End-of-tenancy cleaning": ["end of tenancy", "end-of-tenancy", "void cleaning"],
     "Waste removal and clearance": ["waste removal", "rubbish clearance", "house clearance"],
     "Pest control": ["pest control", "vermin control", "rodent control"],
-    "Grounds maintenance and gardening": ["grounds maintenance", "garden maintenance", "grass cutting"],
+    "Grounds maintenance and gardening": ["grounds maintenance", "garden maintenance", "grass cutting", "artificial grass pitch", "artificial turf maintenance", "synthetic turf maintenance", "sports pitch maintenance", "sports field maintenance", "agp maintenance"],
     "Landscaping": ["landscaping", "landscape works"],
     "Tree surgery": ["tree surgery", "arboriculture", "arboricultural", "tree works", "tree maintenance", "tree planting", "tree pruning", "tree felling"],
     "Facilities management": ["facilities management", "facility management", "hard fm", "soft fm"],
