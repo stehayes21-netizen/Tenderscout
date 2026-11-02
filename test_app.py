@@ -312,7 +312,7 @@ class AppSmokeTest(AppTestCase):
         ):
             with self.subTest(source=source):
                 self.assertIn(source, r.data)
-        self.assertIn(b"NHS procurement contracts", r.data)
+        self.assertIn(b"NHS and healthcare procurement", r.data)
         self.assertNotIn(b"Formby Bubble Approved Trader List", r.data)
         self.assertNotIn(b"HomeGuild", r.data)
         self.assertNotIn(b"BuildPair", r.data)
