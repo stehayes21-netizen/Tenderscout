@@ -980,7 +980,7 @@ def fetch_bearings(max_seconds=None, stats=None):
             stats["stopped"] = "time limit"
             break
         params = {
-            "area": "lcr,cheshire", "kind": "tender", "limit": str(limit),
+            "area": "lcr", "kind": "tender", "limit": str(limit),
             "offset": str(offset), "sort": "newest",
         }
         url = "https://getbearings.co.uk/api/v1/opportunities?" + urllib.parse.urlencode(params)
