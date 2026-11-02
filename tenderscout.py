@@ -362,6 +362,7 @@ def nuts_codes(text):
 
 FIELDS = [
     "source", "published_date", "title", "buyer", "description", "location_text",
+    "raw_geography_match", "raw_geography_reason",
     "service_match", "region_match", "geography_reason", "estimated_value_gbp",
     "contract_start_date", "contract_end_date",
     "deadline", "status", "opportunity_stage", "score", "score_reasons", "notice_url", "ocid",
@@ -1539,6 +1540,19 @@ def classify_geography(record, region):
     return "REVIEW", "No usable delivery/site location evidence"
 
 
+def annotate_raw_geography(record, region):
+    """Attach geography evidence to every notice, independent of trade scoring.
+
+    These audit fields must be populated even when score_record later rejects a
+    notice for having no matching trade category. They do not affect shortlist
+    eligibility; region_match remains the scored-record field.
+    """
+    geo_class, geo_reason = classify_geography(record, region)
+    record["raw_geography_match"] = geo_class
+    record["raw_geography_reason"] = geo_reason
+    return geo_class, geo_reason
+
+
 def score_record(record, services, region, min_value, max_value):
     # Broad service groups must be supported by the notice title or structured
     # procurement line-item context. Long descriptions and buyer names contain
@@ -1790,6 +1804,7 @@ def main():
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
+        annotate_raw_geography(row, args.region)
         scored = score_record(row, args.services, args.region, args.min_value, args.max_value)
         if not scored:
             rejected_by_scoring += 1
@@ -1876,13 +1891,14 @@ def main():
         else:
             deadline_counts["future"] += 1
     print("Raw deadline health (all notices): " + ", ".join(f"{key}={count}" for key, count in deadline_counts.items()))
-    exported_geo_counts = {}
+    raw_geography_counts = {}
     for row in all_rows:
-        geo = row.get("region_match") or "NOT SCORED (no trade match)"
-        exported_geo_counts[geo] = exported_geo_counts.get(geo, 0) + 1
-    print("Exported all-CSV geography fields: " + ", ".join(
-        f"{key}={count}" for key, count in sorted(exported_geo_counts.items())
+        geo = row.get("raw_geography_match") or "MISSING"
+        raw_geography_counts[geo] = raw_geography_counts.get(geo, 0) + 1
+    print("Raw geography decisions (all fetched notices): " + ", ".join(
+        f"{key}={count}" for key, count in sorted(raw_geography_counts.items())
     ))
+    print(f"Raw geography reconciliation: {sum(raw_geography_counts.values())}/{len(all_rows)} records classified")
     print("Scored geography decisions (trade-matched records only): " + ", ".join(f"{key}={count}" for key, count in sorted(scored_geography_counts.items())))
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
