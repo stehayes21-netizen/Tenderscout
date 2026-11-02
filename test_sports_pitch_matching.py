@@ -54,5 +54,20 @@ class SportsPitchTradeMatchingTests(unittest.TestCase):
         self.assertEqual(geography, "OUT_OF_AREA")
 
 
+    def test_artificial_turf_supply_alone_is_not_pitch_maintenance(self):
+        category = tenderscout.classify_trade_category(
+            "Supply of artificial turf for a sports facility.",
+            title="Supply of artificial turf",
+        )
+        self.assertNotEqual(category, "Grounds maintenance and gardening")
+
+    def test_synthetic_turf_installation_alone_is_not_pitch_maintenance(self):
+        category = tenderscout.classify_trade_category(
+            "Installation of synthetic turf at a sports facility.",
+            title="Synthetic turf installation",
+        )
+        self.assertNotEqual(category, "Grounds maintenance and gardening")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
