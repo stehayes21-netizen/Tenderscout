@@ -4,6 +4,22 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      audit_days:
+        description: "Look-back period for the manual Find a Tender audit"
+        required: true
+        default: "60"
+        type: string
+      audit_pages:
+        description: "Maximum pages per date window"
+        required: true
+        default: "25"
+        type: string
+      fts_only:
+        description: "Audit Find a Tender only (recommended for pagination diagnosis)"
+        required: true
+        default: true
+        type: boolean
   schedule:
     # Every 6 hours. Tender notices do not change minute to minute.
     - cron: "17 */6 * * *"
@@ -20,8 +36,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # Allow the full cursor walk, hosted refresh, and its status polling.
-    timeout-minutes: 30
+    # Allow a broad manual Find a Tender cursor walk without touching production.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -41,14 +57,32 @@ jobs:
       - name: Run unit tests
         run: python -m unittest discover -v
 
-      # Pull requests use a bounded live-feed smoke audit so CI does not spend 10+ minutes
-      # walking every recent page. Scheduled/manual audits retain the broader 10-day, six-page run.
-      # Any truncation is reported by the collector; this does not claim complete feed coverage.
+      # Pull requests use a small smoke audit. Manual runs accept a configurable
+      # look-back and page limit; default to a 60-day Find a Tender-only audit.
+      # Manual audits never refresh the deployed production app.
       - name: Collect tenders (CSV for audit)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+        env:
+          AUDIT_DAYS: ${{ inputs.audit_days || '60' }}
+          AUDIT_PAGES: ${{ inputs.audit_pages || '25' }}
+          FTS_ONLY: ${{ inputs.fts_only }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             python tenderscout.py --days 2 --pages 2 --notice-id 098300-2026 --region "Target area" --min-score 3
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if ! [[ "$AUDIT_DAYS" =~ ^[1-9][0-9]{0,2}$ ]] || [ "$AUDIT_DAYS" -gt 365 ]; then
+              echo "audit_days must be an integer from 1 to 365."
+              exit 2
+            fi
+            if ! [[ "$AUDIT_PAGES" =~ ^[1-9][0-9]{0,2}$ ]] || [ "$AUDIT_PAGES" -gt 100 ]; then
+              echo "audit_pages must be an integer from 1 to 100."
+              exit 2
+            fi
+            if [ "$FTS_ONLY" = "true" ]; then
+              python tenderscout.py --days "$AUDIT_DAYS" --pages "$AUDIT_PAGES" --fts-only --notice-id 098300-2026 --region "Target area" --min-score 3
+            else
+              python tenderscout.py --days "$AUDIT_DAYS" --pages "$AUDIT_PAGES" --notice-id 098300-2026 --region "Target area" --min-score 3
+            fi
           else
             python tenderscout.py --days 10 --pages 6 --notice-id 098300-2026 --region "Target area" --min-score 3
           fi
@@ -66,7 +100,7 @@ jobs:
       # TENDERSCOUT_APP_URL (for example https://tenderscout-1qnz.onrender.com)
       # and the secrets TENDERSCOUT_APP_USER / TENDERSCOUT_APP_PASSWORD.
       - name: Refresh hosted app
-        if: ${{ vars.TENDERSCOUT_APP_URL != '' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        if: ${{ vars.TENDERSCOUT_APP_URL != '' && github.event_name == 'schedule' }}
         env:
           APP_URL: ${{ vars.TENDERSCOUT_APP_URL }}
           APP_USER: ${{ secrets.TENDERSCOUT_APP_USER }}
