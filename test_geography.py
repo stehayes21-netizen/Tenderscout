@@ -742,6 +742,37 @@ class DeliveryLocationExtractionRegressionTests(unittest.TestCase):
             tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
         )
 
+    def test_explicit_wa9_delivery_site_is_extracted_and_classified_local(self):
+        payload = {
+            "releases": [{
+                "id": "2026-wa9-site",
+                "buyer": {
+                    "name": "Example Council",
+                    "address": {"streetAddress": "Buyer HQ", "postalCode": "EH1 1AA", "locality": "Edinburgh"},
+                },
+                "tender": {
+                    "title": "Vehicle washing services",
+                    "items": [{
+                        "deliveryLocation": {
+                            "description": "Vehicles must be washed at Hardshaw Brook Depot",
+                            "address": {
+                                "streetAddress": "Hardshaw Brook Depot",
+                                "postalCode": "WA9 1JR",
+                                "locality": "St Helens",
+                            },
+                        }
+                    }],
+                },
+            }]
+        }
+        records = tenderscout.extract_records(payload, "Find a Tender")
+        self.assertEqual(len(records), 1)
+        self.assertIn("WA9 1JR", records[0]["location_text"])
+        self.assertIn("Hardshaw Brook Depot", records[0]["location_text"])
+        self.assertEqual(
+            tenderscout.classify_geography(records[0], "Target area")[0], "LOCAL"
+        )
+
     def test_buyer_headquarters_alone_never_confirms_local_delivery(self):
         payload = {
             "releases": [{
