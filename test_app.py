@@ -1113,6 +1113,7 @@ class SearchWindowTests(unittest.TestCase):
 
 class ConservativeReviewFilteringTests(unittest.TestCase):
     def test_non_property_vehicle_and_medical_equipment_contracts_are_rejected(self):
+        import tenderscout
         cases = [
             ("Vehicle Repairs Service",
              "Police fleet department requires accident and mechanical repair of police vehicles.",
@@ -1141,6 +1142,7 @@ class ConservativeReviewFilteringTests(unittest.TestCase):
                 ))
 
     def test_mixed_property_contract_with_equipment_element_is_not_rejected(self):
+        import tenderscout
         record = {
             "title": "Building maintenance and patient hoist servicing",
             "description": "Building maintenance across hospital premises, including patient hoist servicing.",
