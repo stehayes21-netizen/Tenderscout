@@ -1448,6 +1448,12 @@ def is_confirmed_nonlive_notice(record):
     if shortlist_eligible_stage(record) or is_discovery_listing(record):
         return False
     status = str(record.get("status") or "").casefold()
+    # The official-feed parser uses "Other notice" when the source notice
+    # type is not an open tender/planning notice. If no raw status was supplied,
+    # retain that explicit parsed stage as non-live; a raw "tender" status
+    # remains ambiguous and is kept for manual review.
+    if record.get("opportunity_stage") == "Other notice" and not status:
+        return True
     status_tokens = set(re.findall(r"[a-z]+", status))
     nonlive_statuses = {
         "complete", "awardupdate", "contractupdate", "contractamendment",
