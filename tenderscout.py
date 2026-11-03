@@ -810,15 +810,14 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             stats["error"] = str(exc)[:320]
             return results
         batch = extract_records(payload, source)
-        if not batch:
-            return results
+        # Pagination metadata is authoritative. A full-sized batch is not proof
+        # that another page exists, and an empty batch is not proof of completion
+        # when the feed still supplies a next-page cursor.
         _note_page(stats, batch)
         results.extend(batch)
         cursor = _next_cursor(payload)
         stats["last_page_had_cursor"] = bool(cursor)
         if not cursor:
-            if len(batch) >= 100:
-                stats["full_end"] = True
             return results
         # Find a Tender rate-limits bursty clients. Keep requests below a
         # conservative 10/minute cadence rather than hammering each page/window.
@@ -972,8 +971,27 @@ def fetch_bearings(max_seconds=None, stats=None):
             "ocid": as_text(item.get("id") or provider_url),
             "_raw": item,
         })
-    stats.update({"pages": 1 if data else 0, "records": len(results), "last_batch": len(results),
-                  "windows": 1, "more": False, "full_end": len(data) >= 200})
+    # Bearings currently exposes a fixed 200-item request without a documented
+    # cursor in this collector. Exactly 200 returned items may mean the endpoint
+    # has hit its cap, but the count alone cannot prove that another page exists.
+    # Keep this as a visible coverage warning rather than silently claiming full
+    # coverage or inventing a pagination mechanism.
+    possible_cap = len(data) >= 200
+    stats.update({
+        "pages": 1 if data else 0,
+        "records": len(results),
+        "last_batch": len(results),
+        "windows": 1,
+        "more": possible_cap,
+        "truncated_windows": 1 if possible_cap else 0,
+        "full_end": False,
+    })
+    if possible_cap:
+        print(
+            "[WARN] Bearings returned the 200-item request limit; further results "
+            "may exist, but the API response supplied no confirmed next-page cursor",
+            file=sys.stderr,
+        )
     return results
 
 
