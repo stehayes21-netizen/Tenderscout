@@ -1111,5 +1111,74 @@ class SearchWindowTests(unittest.TestCase):
         self.assertLess(stats["windows"], 9)
 
 
+class ConservativeReviewFilteringTests(unittest.TestCase):
+    def test_non_property_vehicle_and_medical_equipment_contracts_are_rejected(self):
+        import tenderscout
+        cases = [
+            ("Vehicle Repairs Service",
+             "Police fleet department requires accident and mechanical repair of police vehicles.",
+             "Repair and maintenance services of motor vehicles"),
+            ("Patient Hoists, Pool Hoists and Assisted Bathing Equipment",
+             "External supplier to maintain and service patient hoists and assisted bathing equipment.",
+             "Repair and maintenance services of medical equipment"),
+            ("Calibration and Repair of Audiology Equipment",
+             "Calibration and repair of audiology and newborn hearing screening equipment.",
+             "Repair and maintenance services of medical equipment"),
+            ("Bed Management Service",
+             "Repair and maintenance services of medical and surgical equipment.",
+             "Repair and maintenance services of medical equipment"),
+        ]
+        for title, description, trade_context in cases:
+            with self.subTest(title=title):
+                record = {
+                    "title": title, "description": description, "buyer": "",
+                    "trade_context": trade_context, "location_text": "",
+                    "deadline": "2099-12-31T00:00:00+00:00",
+                    "opportunity_stage": "Open for bids",
+                }
+                self.assertIsNone(tenderscout.score_record(
+                    record, tenderscout.DEFAULT_SERVICES,
+                    tenderscout.TARGET_AREA_LABEL, None, None
+                ))
+
+    def test_mixed_property_contract_with_equipment_element_is_not_rejected(self):
+        import tenderscout
+        record = {
+            "title": "Building maintenance and patient hoist servicing",
+            "description": "Building maintenance across hospital premises, including patient hoist servicing.",
+            "buyer": "", "trade_context": "Repair and maintenance services of medical equipment",
+            "location_text": "Liverpool", "deadline": "2099-12-31T00:00:00+00:00",
+            "opportunity_stage": "Open for bids",
+        }
+        scored = tenderscout.score_record(
+            record, tenderscout.DEFAULT_SERVICES,
+            tenderscout.TARGET_AREA_LABEL, None, None
+        )
+        self.assertIsNotNone(scored)
+
+    def test_greater_manchester_and_lancashire_nuts_codes_are_out_of_area(self):
+        import tenderscout
+        import tenderscout
+        for code in (
+            "UKD3", "UKD31", "UKD32", "UKD33", "UKD34", "UKD35",
+            "UKD36", "UKD37", "UKD4", "UKD41", "UKD42", "UKD43",
+            "UKD44", "UKD45", "UKD46", "UKD47",
+        ):
+            with self.subTest(code=code):
+                result, _ = tenderscout.classify_geography(
+                    {"location_text": code}, tenderscout.TARGET_AREA_LABEL
+                )
+                self.assertEqual(result, "OUT_OF_AREA")
+
+    def test_broad_cheshire_and_merseyside_nuts_codes_remain_review(self):
+        import tenderscout
+        for code in ("UKD6", "UKD7"):
+            with self.subTest(code=code):
+                result, _ = tenderscout.classify_geography(
+                    {"location_text": code}, tenderscout.TARGET_AREA_LABEL
+                )
+                self.assertEqual(result, "REVIEW")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

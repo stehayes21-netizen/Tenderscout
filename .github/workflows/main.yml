@@ -45,16 +45,11 @@ jobs:
       # walking every recent page. Scheduled/manual audits retain the broader 10-day, six-page run.
       # Any truncation is reported by the collector; this does not claim complete feed coverage.
       - name: Collect tenders (CSV for audit)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            python tenderscout.py --days 2 --pages 2 --notice-id 098300-2026 --region "Target area" --min-score 3
-          else
-            python tenderscout.py --days 10 --pages 6 --notice-id 098300-2026 --region "Target area" --min-score 3
-          fi
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python tenderscout.py --days 10 --pages 6 --notice-id 098300-2026 --region "Target area" --min-score 3
 
       - name: Save CSV results
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: tenderscout-results
