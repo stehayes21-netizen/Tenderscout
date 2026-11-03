@@ -937,5 +937,63 @@ class BearingsDiscoveryTests(unittest.TestCase):
         self.assertIn("feed offline", stats["error"])
 
 
+class ReviewQueueStageTests(unittest.TestCase):
+    def test_standstill_discovery_listing_remains_in_review(self):
+        record = {
+            "source": "Standstill UK (RSS discovery; verify official notice)",
+            "status": "Standstill UK discovery listing — verify official notice",
+            "opportunity_stage": "Other notice",
+        }
+        self.assertTrue(tenderscout.is_discovery_listing(record))
+        self.assertTrue(tenderscout.review_eligible_stage(record))
+
+    def test_bearings_discovery_listing_remains_in_review(self):
+        record = {
+            "source": "Bearings (discovery; verify provider notice)",
+            "status": "Bearings discovery listing — verify provider notice",
+            "opportunity_stage": "Other notice",
+        }
+        self.assertTrue(tenderscout.is_discovery_listing(record))
+        self.assertTrue(tenderscout.review_eligible_stage(record))
+
+    def test_official_award_notice_is_excluded_from_operational_review(self):
+        record = {
+            "source": "Find a Tender",
+            "status": "complete",
+            "opportunity_stage": "Other notice",
+        }
+        self.assertFalse(tenderscout.is_discovery_listing(record))
+        self.assertTrue(tenderscout.is_confirmed_nonlive_notice(record))
+        self.assertFalse(tenderscout.review_eligible_stage(record))
+
+    def test_plain_award_status_is_excluded_from_operational_review(self):
+        for status in ("award", "awarded", "contract award"):
+            with self.subTest(status=status):
+                record = {
+                    "source": "Find a Tender",
+                    "status": status,
+                    "opportunity_stage": "Other notice",
+                }
+                self.assertTrue(tenderscout.is_confirmed_nonlive_notice(record))
+                self.assertFalse(tenderscout.review_eligible_stage(record))
+
+    def test_ambiguous_other_notice_is_retained_for_manual_review(self):
+        record = {
+            "source": "Find a Tender",
+            "status": "tender",
+            "opportunity_stage": "Other notice",
+        }
+        self.assertFalse(tenderscout.is_confirmed_nonlive_notice(record))
+        self.assertTrue(tenderscout.review_eligible_stage(record))
+
+    def test_open_and_planned_opportunities_remain_review_eligible(self):
+        for stage in ("Open for bids", "Planning / upcoming"):
+            with self.subTest(stage=stage):
+                self.assertTrue(tenderscout.review_eligible_stage({
+                    "source": "Find a Tender",
+                    "opportunity_stage": stage,
+                }))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
