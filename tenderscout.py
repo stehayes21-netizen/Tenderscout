@@ -1384,17 +1384,20 @@ def score_record(record, services, region, min_value, max_value):
     else:
         reasons.append("value not published")
 
+    confirmed_nonlive = is_confirmed_nonlive_notice(record)
+    record["_confirmed_nonlive_notice"] = confirmed_nonlive
     if is_discovery_listing(record):
         # Third-party discovery feeds can contain potential opportunities even
         # when they lack the structured stage fields of official tender feeds.
         # Keep them visibly unverified rather than treating them as awards.
         deadline_status = "Discovery listing — verify official notice"
         reasons.append("discovery listing requires verification against the official notice")
-    elif not shortlist_eligible_stage(record):
-        # Award, contract and other official non-tender notices are historical,
-        # not live opportunities, and should not enter the operational review queue.
+    elif confirmed_nonlive:
         deadline_status = "Not a live bid — other notice"
-        reasons.append("notice is not an open tender or planned opportunity")
+        reasons.append("source notice status confirms an award, completion, cancellation or withdrawal")
+    elif not shortlist_eligible_stage(record):
+        deadline_status = "Notice stage unclear — manual verification required"
+        reasons.append("notice stage is not explicit; verify the official notice")
     else:
         deadline_dt = parse_date(record.get("deadline"))
         if deadline_dt:
@@ -1438,9 +1441,22 @@ def is_discovery_listing(record):
     )
 
 
+def is_confirmed_nonlive_notice(record):
+    """Return true only when source status explicitly signals a non-live notice."""
+    if shortlist_eligible_stage(record) or is_discovery_listing(record):
+        return False
+    status = str(record.get("status") or "").casefold()
+    status_tokens = set(re.findall(r"[a-z]+", status))
+    nonlive_statuses = {
+        "complete", "awardupdate", "contractupdate", "contractamendment",
+        "implementation", "contracttermination", "cancelled", "withdrawn",
+    }
+    return bool(status_tokens & nonlive_statuses)
+
+
 def review_eligible_stage(record):
-    """Keep live/planned tenders and unverified discovery leads in location review."""
-    return shortlist_eligible_stage(record) or is_discovery_listing(record)
+    """Keep live/planned, discovery and ambiguous-stage records in location review."""
+    return not bool(record.get("_confirmed_nonlive_notice"))
 
 
 def dedupe(records):
