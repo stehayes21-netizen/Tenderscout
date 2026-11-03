@@ -1384,11 +1384,20 @@ def score_record(record, services, region, min_value, max_value):
     else:
         reasons.append("value not published")
 
-    if not shortlist_eligible_stage(record):
-        # Award, contract and other non-tender notices must not look like live
-        # opportunities merely because their deadline field is empty.
+    confirmed_nonlive = is_confirmed_nonlive_notice(record)
+    record["_confirmed_nonlive_notice"] = confirmed_nonlive
+    if is_discovery_listing(record):
+        # Third-party discovery feeds can contain potential opportunities even
+        # when they lack the structured stage fields of official tender feeds.
+        # Keep them visibly unverified rather than treating them as awards.
+        deadline_status = "Discovery listing — verify official notice"
+        reasons.append("discovery listing requires verification against the official notice")
+    elif confirmed_nonlive:
         deadline_status = "Not a live bid — other notice"
-        reasons.append("notice is not an open tender or planned opportunity")
+        reasons.append("source notice status confirms an award, completion, cancellation or withdrawal")
+    elif not shortlist_eligible_stage(record):
+        deadline_status = "Notice stage unclear — manual verification required"
+        reasons.append("notice stage is not explicit; verify the official notice")
     else:
         deadline_dt = parse_date(record.get("deadline"))
         if deadline_dt:
@@ -1420,6 +1429,38 @@ def shortlist_eligible_stage(record):
     stage = record.get("opportunity_stage") or "Other notice"
     return stage in {"Open for bids", "Planning / upcoming"}
 
+
+
+
+def is_discovery_listing(record):
+    """Identify aggregator listings that need official-notice verification."""
+    source = str(record.get("source") or "").casefold()
+    status = str(record.get("status") or "").casefold()
+    return (
+        "standstill" in source
+        or "bearings" in source
+        or "discovery listing" in status
+    )
+
+
+def is_confirmed_nonlive_notice(record):
+    """Return true only when source status explicitly signals a non-live notice."""
+    if shortlist_eligible_stage(record) or is_discovery_listing(record):
+        return False
+    status = str(record.get("status") or "").casefold()
+    status_tokens = set(re.findall(r"[a-z]+", status))
+    nonlive_statuses = {
+        "complete", "awardupdate", "contractupdate", "contractamendment",
+        "implementation", "contracttermination", "cancelled", "withdrawn",
+    }
+    return bool(status_tokens & nonlive_statuses)
+
+
+def review_eligible_stage(record):
+    """Keep live/planned, discovery and ambiguous-stage records in location review."""
+    if "_confirmed_nonlive_notice" in record:
+        return not bool(record.get("_confirmed_nonlive_notice"))
+    return not is_confirmed_nonlive_notice(record)
 
 def dedupe(records):
     """Deduplicate procurement processes and cross-source copies of the same notice."""
@@ -1511,6 +1552,7 @@ def main():
     review_rows = []
     rejected_by_scoring = 0
     excluded_by_stage = 0
+    excluded_from_review_by_stage = 0
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
@@ -1523,7 +1565,10 @@ def main():
         trade = scored.get("trade_category") or scored.get("service_match") or "NO TRADE MATCH"
         scored_trade_counts[trade] = scored_trade_counts.get(trade, 0) + 1
         if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
-            review_rows.append(scored)
+            if review_eligible_stage(scored):
+                review_rows.append(scored)
+            else:
+                excluded_from_review_by_stage += 1
             continue
         if geo == "LOCAL" and scored["score"] >= args.min_score:
             if shortlist_eligible_stage(scored):
@@ -1586,6 +1631,7 @@ def main():
     print("Scored trade categories: " + ", ".join(f"{key}={count}" for key, count in sorted(scored_trade_counts.items(), key=lambda item: (-item[1], item[0]))[:12]))
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
     print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
+    print(f"Excluded from location review as non-live notices: {excluded_from_review_by_stage}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
