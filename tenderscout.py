@@ -182,9 +182,18 @@ MAINTENANCE_TERMS = [
     "painting and decorating", "decoration services", "external decoration",
     "gas servicing", "gas safety", "boiler servicing", "heating maintenance",
     "electrical maintenance", "electrical testing", "fixed wire testing",
-    "fire alarm", "emergency lighting", "roofing", "roof repair", "plumbing",
-    "joinery", "handyman", "damp proofing", "window repairs", "door repairs",
-    "lift maintenance", "legionella", "fire safety works",
+    "fire alarm", "fire alarms", "emergency lighting", "roofing", "roof repair",
+    "roof replacement", "roofline", "fascias", "soffits", "guttering", "plumbing",
+    "plumber", "drainage", "drain clearance", "sewer repair", "electrical installation",
+    "electrical repairs", "electrician", "mechanical and electrical", "mechanical & electrical",
+    "m&e services", "electrical testing", "fixed wire testing", "eicr", "joinery",
+    "carpentry", "carpenter", "handyman", "damp proofing", "waterproofing",
+    "window repairs", "door repairs", "glazing", "double glazing", "bricklaying",
+    "masonry", "repointing", "plastering", "rendering", "tiling", "tiler",
+    "flooring", "floor coverings", "kitchen installation", "bathroom installation",
+    "insulation", "scaffolding", "driveway", "patio installation", "block paving",
+    "fencing", "gate installation", "lift maintenance", "legionella", "water hygiene",
+    "fire safety works", "gas safety", "gas servicing", "boiler servicing",
 ]
 CONSTRUCTION_TERMS = [
     "construction", "refurbishment", "refurbish", "building works",
@@ -201,6 +210,8 @@ EXCLUDE_TERMS = [
 
 # Order matters: a tender that matches several trades gets the first label.
 SERVICE_ORDER = ["cleaning", "fm", "maintenance", "construction"]
+# Default to core services and specific property trades; broad construction is opt-in.
+DEFAULT_SERVICES = ["cleaning", "fm", "maintenance"]
 SERVICE_LABELS = {
     "cleaning": "Cleaning",
     "fm": "Facilities management",
@@ -210,7 +221,7 @@ SERVICE_LABELS = {
 
 # --- Target area ------------------------------------------------------------
 # Approved service area: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral,
-# Warrington and Cheshire West and Chester. Other North West areas remain excluded.
+# Other North West areas remain excluded.
 # Postcode districts are the main evidence. Any uncertain or mixed location goes
 # to REVIEW; never loosen these rules merely to increase the number of matches.
 TARGET_AREA_LABEL = "Target area"
@@ -224,19 +235,18 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA9", "WA10", "WA11", "WA12",
     # Halton
     "WA7", "WA8",
-    # Warrington (postcode districts can cross borough edges; verify exact site where needed)
-    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
-    # Cheshire West and Chester (CH4 remains borderline and requires review)
-    "CH1", "CH2", "CH3", "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
     # Wirral
     *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
-# CH4 is a boundary district and needs a site-level check.
+# Borderline district remains REVIEW until a site-level location is available.
 REVIEW_POSTCODE_DISTRICTS = {"CH4"}
 EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(5, 41)),
+    *(f"CH{n}" for n in range(1, 41)),
+    "CH64", "CH65", "CH66",
+    *(f"CW{n}" for n in range(6, 10)),
+    *(f"WA{n}" for n in range(1, 7)), "WA13",
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
 }
@@ -261,16 +271,10 @@ LOCAL_PLACE_TERMS = [
     # Knowsley
     "knowsley", "huyton", "prescot", "halewood", "stockbridge village",
     "tarbock", "roby", "cronton",
-    # Wirral
+    # Wirral, including Wallasey
     "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
     "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
     "tranmere", "moreton", "upton",
-    # Warrington
-    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
-    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
-    # Cheshire West and Chester
-    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
-    "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -287,6 +291,11 @@ OUT_OF_AREA_TERMS = [
     "ashton-in-makerfield", "ince-in-makerfield", "shevington", "aspull", "pemberton",
     "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton", "up holland",
     "macclesfield", "knutsford", "altrincham",
+    # Excluded neighbouring areas: do not expand beyond the approved boroughs.
+    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
+    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
+    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
+    "northwich", "winsford", "frodsham", "helsby", "tarporley",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
     "lancaster", "cumbria", "barrow-in-furness", "northumberland", "chorley",
@@ -315,7 +324,7 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 # places
 # require a postcode or place name; every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
+LOCAL_NUTS = {"UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
@@ -1189,7 +1198,9 @@ def classify_geography(record, region):
     pc_review = sorted(d for d in districts if d in REVIEW_POSTCODE_DISTRICTS)
     pc_other = sorted(d for d in (full | bare) if d not in LOCAL_POSTCODE_DISTRICTS
                       and d not in REVIEW_POSTCODE_DISTRICTS)
-    pc_other = sorted(set(pc_other) | (districts & EXCLUDED_POSTCODE_DISTRICTS))
+    # Preserve explicit REVIEW exceptions (notably CH4) even when the
+    # wider postcode family is otherwise excluded.
+    pc_other = sorted((set(pc_other) | (districts & EXCLUDED_POSTCODE_DISTRICTS)) - set(pc_review))
 
     nuts = nuts_codes(location_text)
     nuts_local = sorted(c for c in nuts if c in LOCAL_NUTS)
@@ -1425,7 +1436,7 @@ def main():
     parser.add_argument(
         "--region", choices=[TARGET_AREA_LABEL, "North West", "UK wide"], default=TARGET_AREA_LABEL,
         help="'Target area' = Liverpool, Sefton, St Helens, Halton, Wirral (including Wallasey), Knowsley and agreed wider North West districts; 'North West' is an alias")
-    parser.add_argument("--services", nargs="+", choices=SERVICE_ORDER, default=SERVICE_ORDER)
+    parser.add_argument("--services", nargs="+", choices=SERVICE_ORDER, default=DEFAULT_SERVICES, help="Default: cleaning, facilities management and specific property trades; add construction explicitly when required")
     parser.add_argument("--min-value", type=float, default=None, help="Minimum estimated GBP value")
     parser.add_argument("--max-value", type=float, default=None, help="Maximum estimated GBP value")
     parser.add_argument("--min-score", type=int, default=3, help="Minimum relevance score (default 3)")

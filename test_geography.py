@@ -382,12 +382,12 @@ class PostcodeAreaTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.classify(text), "LOCAL")
 
-    def test_newly_approved_warrington_and_west_cheshire_places_are_local(self):
+    def test_warrington_and_cheshire_west_places_are_excluded(self):
         for text in ("Warrington WA1 1AA", "Lymm WA13 0AA",
                      "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
                      "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA"):
             with self.subTest(text=text):
-                self.assertEqual(self.classify(text), "LOCAL")
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_wider_north_west_places_outside_approved_scope_stay_out(self):
         for text in ("Wigan WN1 1AA", "Leigh WN7 1AA",
@@ -478,13 +478,13 @@ class PostcodeCoverageTests(unittest.TestCase):
         # Representative postcode districts from all approved areas.
         for postcode in (
             "L1 1AA", "L20 1AA", "PR8 1AA", "WA9 1AA", "WA7 1AA", "L32 1AA",
-            "WA1 1AA", "WA5 1AA", "CH1 1AA", "CH2 1AA", "CW8 1AA",
+            "CH41 1AA", "CH45 1AA",
         ):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "LOCAL")
 
     def test_postcodes_outside_the_service_area_are_not_local(self):
-        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA", "WN1 1AA", "L39 1AA", "CH5 1AA"):
+        for postcode in ("M1 1AA", "E1 1AA", "LS1 1AA", "WN1 1AA", "L39 1AA", "CH1 1AA", "CH5 1AA", "CH65 1AA", "CW8 1AA", "WA1 1AA", "WA6 1AA", "WA13 1AA"):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "OUT_OF_AREA")
 
@@ -515,7 +515,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
                 self.assertEqual(self.classify(code), "LOCAL")
 
     def test_all_approved_region_codes_are_local(self):
-        for code in ("UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"):
+        for code in ("UKD71", "UKD72", "UKD73", "UKD74"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "LOCAL")
 
@@ -533,7 +533,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
         self.assertEqual(self.classify("Greater Manchester, Bolton"), "OUT_OF_AREA")
 
     def test_region_codes_for_other_areas_are_out_of_area(self):
-        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD62", "UKD41", "UKC11"):
+        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD61", "UKD63", "UKD62", "UKD41", "UKC11"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "OUT_OF_AREA")
 
@@ -544,11 +544,16 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
 
     def test_local_neighbourhoods_are_recognised(self):
         for place in ("Wavertree", "Aigburth", "Ainsdale",
-                      "Rainford", "Newton-le-Willows", "Daresbury", "Widnes",
-                      "Warrington", "Chester", "Ellesmere Port", "Northwich",
-                      "Winsford", "Frodsham", "Neston", "Helsby"):
+                      "Rainford", "Newton-le-Willows", "Daresbury", "Widnes"):
             with self.subTest(place=place):
                 self.assertEqual(self.classify(place), "LOCAL")
+
+    def test_warrington_and_cheshire_west_places_are_not_local(self):
+        for place in ("Warrington", "Lymm", "Chester", "Ellesmere Port",
+                      "Northwich", "Winsford", "Frodsham", "Neston", "Helsby",
+                      "Cheshire West and Chester"):
+            with self.subTest(place=place):
+                self.assertEqual(self.classify(place), "OUT_OF_AREA")
 
     def test_names_shared_with_other_places_need_checking(self):
         for place in ("Woolton Hill", "Garston", "Halton", "Walton", "Sutton", "Leigh", "Kirkby", "Whiston", "Orrell"):
@@ -574,7 +579,7 @@ class OverlapAndTradeTests(unittest.TestCase):
 
     def test_longer_names_win_over_the_shorter_name_inside_them(self):
         self.assertEqual(self.classify("Preston Brook, Runcorn"), "LOCAL")
-        self.assertEqual(self.classify("Cheshire West and Chester"), "LOCAL")
+        self.assertEqual(self.classify("Cheshire West and Chester"), "OUT_OF_AREA")
         self.assertEqual(self.classify("Cheshire East"), "OUT_OF_AREA")
         self.assertEqual(self.classify("Preston"), "OUT_OF_AREA")
 
@@ -585,18 +590,20 @@ class OverlapAndTradeTests(unittest.TestCase):
             "deadline": "2099-12-31T00:00:00+00:00",
         }
         return tenderscout.score_record(
-            record, services or tenderscout.SERVICE_ORDER, "Target area", None, None)
+            record, services if services is not None else tenderscout.DEFAULT_SERVICES, "Target area", None, None)
 
-    def test_each_trade_is_recognised_and_labelled(self):
+    def test_core_services_and_property_trades_are_recognised(self):
         cases = {
             "Commercial cleaning of council offices": "Cleaning",
             "Soft FM and caretaking services": "Facilities management",
             "Responsive repairs and void works for housing stock": "Property maintenance",
             "Painting and decorating framework": "Property maintenance",
             "Roof repair programme": "Property maintenance",
-            "School refurbishment and extension works": "Construction",
-            "Demolition and groundworks": "Construction",
-            "New build housing development": "Construction",
+            "Plumbing repairs framework": "Property maintenance",
+            "Electrical installation and testing": "Property maintenance",
+            "Drainage and sewer repairs": "Property maintenance",
+            "Tiling and flooring repairs": "Property maintenance",
+            "Driveway and patio repairs": "Property maintenance",
         }
         for title, label in cases.items():
             with self.subTest(title=title):
@@ -604,30 +611,20 @@ class OverlapAndTradeTests(unittest.TestCase):
                 self.assertIsNotNone(result)
                 self.assertEqual(result["service_match"], label)
 
-    def test_unrelated_tenders_are_ignored(self):
-        for title in ("Supply of laptops", "Software licences",
-                      "Legal advice framework"):
+    def test_irrelevant_and_broad_construction_tenders_are_ignored_by_default(self):
+        for title in (
+            "Supply of laptops", "Software licences", "Legal advice framework",
+            "Catering services", "IT and telecoms support",
+            "School refurbishment and extension works",
+            "Demolition and new build housing development",
+            "Provision of Project Management & Cost Consultant Services",
+        ):
             with self.subTest(title=title):
                 self.assertIsNone(self.score(title))
 
-    def test_all_trades_are_in_scope_by_default(self):
-        for title, expected in (
-            ("Catering services", "Catering and food services"),
-            ("Roofing and roof repairs", "Roofing and roof repairs"),
-            ("IT and telecoms support", "IT and telecoms"),
-            ("Arboricultural services - tree planting and maintenance", "Tree surgery"),
-            ("RA360690 - Boiler Inspection", "Heating and boilers"),
-            ("Provision of Mechanical and Electrical Services", "Electrical installation and repairs"),
-            ("PA Unadopted Highways hard surface repairs", "Roads and paving"),
-            ("Provision of Project Management & Cost Consultant Services", "Construction project management"),
-        ):
-            with self.subTest(title=title):
-                result = self.score(title)
-                self.assertIsNotNone(result)
-                self.assertEqual(result["trade_category"], expected)
-
-    def test_a_trade_can_be_switched_off(self):
-        self.assertIsNone(self.score("Building refurbishment", services=["cleaning", "fm"]))
+    def test_default_services_are_narrow_and_construction_is_opt_in(self):
+        self.assertEqual(tenderscout.DEFAULT_SERVICES, ["cleaning", "fm", "maintenance"])
+        self.assertIsNone(self.score("Building refurbishment"))
         self.assertIsNotNone(self.score("Building refurbishment", services=["construction"]))
 
     def test_cleaning_wins_when_a_tender_matches_several_trades(self):
