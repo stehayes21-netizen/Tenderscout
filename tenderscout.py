@@ -1536,17 +1536,12 @@ def review_eligible_stage(record):
 def _dedupe_title_key(value):
     """Normalise a descriptive title, removing discovery-feed closing-date suffixes."""
     title = str(value or "").casefold().strip()
-    title = re.sub(r"\\s*[—–-]\\s*closes?\\b.*$", "", title)
+    title = re.sub(r"\s*[—–-]\s*closes?\b.*$", "", title)
     return " ".join(re.findall(r"[a-z0-9]+", title))
 
 
 def _dedupe_buyer_key(value):
     return " ".join(re.findall(r"[a-z0-9]+", str(value or "").casefold()))
-
-
-def _dedupe_source_is_discovery(value):
-    source = str(value or "").casefold()
-    return "standstill" in source or "bearings" in source
 
 
 def _dedupe_record_rank(row):
@@ -1570,6 +1565,7 @@ def dedupe(records):
     """
     by_key = {}
     notice_key = {}
+    ocid_key = {}
     title_groups = {}
     for row in records:
         notice_url = str(row.get("notice_url") or "").strip()
@@ -1581,11 +1577,11 @@ def dedupe(records):
         key = None
         if notice_url and notice_url in notice_key:
             key = notice_key[notice_url]
-        elif ocid and ("ocid", ocid) in by_key:
-            key = ("ocid", ocid)
+        elif ocid and ("ocid", ocid) in ocid_key:
+            key = ocid_key[("ocid", ocid)]
         elif title_key and len(title_key.split()) >= 5:
-            # Only bridge discovery copies to a different source. A missing buyer
-            # is acceptable on RSS records; two conflicting named buyers are not.
+            # Only bridge copies from different sources. A missing buyer is
+            # acceptable on discovery listings; conflicting named buyers are not.
             for existing_key in title_groups.get(title_key, []):
                 current = by_key[existing_key]
                 current_source = str(current.get("source") or "").strip().casefold()
@@ -1602,7 +1598,7 @@ def dedupe(records):
         if notice_url:
             notice_key[notice_url] = key
         if ocid:
-            by_key.setdefault(("ocid", ocid), row)
+            ocid_key[("ocid", ocid)] = key
         if title_key and len(title_key.split()) >= 5:
             title_groups.setdefault(title_key, [])
             if key not in title_groups[title_key]:
@@ -1612,7 +1608,7 @@ def dedupe(records):
         if current is None:
             by_key[key] = row
         elif _dedupe_record_rank(row) > _dedupe_record_rank(current):
-            # Retain useful fields supplied only by the lower-ranked discovery copy.
+            # Prefer official records while retaining useful discovery-only fields.
             winner = dict(row)
             for field, value in current.items():
                 if not winner.get(field) and value:
@@ -1626,7 +1622,6 @@ def dedupe(records):
             by_key[key] = winner
 
     return list(by_key.values())
-
 
 def write_csv(path, rows):
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
