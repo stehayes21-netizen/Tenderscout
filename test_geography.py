@@ -387,7 +387,7 @@ class PostcodeAreaTests(unittest.TestCase):
                      "Chester CH1 1AA", "Ellesmere Port CH65 4AA",
                      "Neston CH64 3RD", "Northwich CW9 5AA", "Frodsham WA6 7AA"):
             with self.subTest(text=text):
-                self.assertEqual(self.classify(text), "LOCAL")
+                self.assertEqual(self.classify(text), "OUT_OF_AREA")
 
     def test_wider_north_west_places_outside_approved_scope_stay_out(self):
         for text in ("Wigan WN1 1AA", "Leigh WN7 1AA",
@@ -478,7 +478,7 @@ class PostcodeCoverageTests(unittest.TestCase):
         # Representative postcode districts from all approved areas.
         for postcode in (
             "L1 1AA", "L20 1AA", "PR8 1AA", "WA9 1AA", "WA7 1AA", "L32 1AA",
-            "WA1 1AA", "WA5 1AA", "CH1 1AA", "CH2 1AA", "CW8 1AA",
+            "CH41 1AA", "CH45 1AA",
         ):
             with self.subTest(postcode=postcode):
                 self.assertEqual(self.classify(postcode), "LOCAL")
@@ -515,7 +515,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
                 self.assertEqual(self.classify(code), "LOCAL")
 
     def test_all_approved_region_codes_are_local(self):
-        for code in ("UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"):
+        for code in ("UKD71", "UKD72", "UKD73", "UKD74"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "LOCAL")
 
@@ -533,7 +533,7 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
         self.assertEqual(self.classify("Greater Manchester, Bolton"), "OUT_OF_AREA")
 
     def test_region_codes_for_other_areas_are_out_of_area(self):
-        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD62", "UKD41", "UKC11"):
+        for code in ("UKM50", "UKM", "UKL12", "UKN06", "UKI31", "UKD33", "UKD61", "UKD63", "UKD62", "UKD41", "UKC11"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "OUT_OF_AREA")
 
