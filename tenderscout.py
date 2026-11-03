@@ -1467,11 +1467,11 @@ def standstill_region_is_outside_north_west(record):
     if "standstill" not in source:
         return False
     description = str(record.get("description") or "")
-    match = re.search(r"(?:^|[·|;])\\s*Region:\\s*(.*?)(?:\\s+·\\s+|$)", description, re.IGNORECASE)
+    match = re.search(r"(?:^|[·|;])\s*Region:\s*(.*?)(?:\s+·\s+|$)", description, re.IGNORECASE)
     if not match:
         return False
     raw_regions = match.group(1).strip()
-    regions = {re.sub(r"\\s+", " ", value.strip().casefold()) for value in raw_regions.split(",") if value.strip()}
+    regions = {re.sub(r"\s+", " ", value.strip().casefold()) for value in raw_regions.split(",") if value.strip()}
     if not regions:
         return False
     broad_regions = {"uk", "uk wide", "uk-wide", "united kingdom", "great britain"}
