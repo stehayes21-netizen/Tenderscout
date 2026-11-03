@@ -632,6 +632,46 @@ class OverlapAndTradeTests(unittest.TestCase):
         self.assertEqual(result["service_match"], "Cleaning")
 
 
+class TradeEvidencePriorityTests(unittest.TestCase):
+    def test_wuth_minor_works_is_not_mislabelled_from_generic_cleaning_cpv(self):
+        record = {
+            "title": "WUTH-ITT-C484988 Minor, Small & Medium Works",
+            "description": (
+                "Framework for minor, small and medium works. Lots include electrical, "
+                "flooring, minor/reactive works and planned works across healthcare sites."
+            ),
+            "trade_context": (
+                "CPV 90000000 Sewage, refuse, cleaning and environmental services"
+            ),
+            "buyer": "WIRRAL UNIVERSITY TEACHING HOSPITAL NHS FOUNDATION TRUST",
+            "location_text": "UKD6, United Kingdom, UKD7",
+            "deadline": "2099-12-08T12:00:00+00:00",
+            "opportunity_stage": "Open for bids",
+        }
+        scored = tenderscout.score_record(
+            record, tenderscout.DEFAULT_SERVICES, "Target area", None, None
+        )
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["service_match"], "Property maintenance")
+        self.assertEqual(scored["region_match"], "REVIEW")
+
+    def test_award_or_other_notice_is_not_reported_as_missing_bid_deadline(self):
+        record = {
+            "title": "Management of Legionella bacteria in Sefton schools",
+            "description": "Water hygiene management contract.",
+            "buyer": "Sefton Council",
+            "location_text": "UKD73, United Kingdom",
+            "deadline": "",
+            "opportunity_stage": "Other notice",
+        }
+        scored = tenderscout.score_record(
+            record, tenderscout.DEFAULT_SERVICES, "Target area", None, None
+        )
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["status"], "Not a live bid — other notice")
+        self.assertFalse(tenderscout.shortlist_eligible_stage(scored))
+
+
 class ContractMetadataExtractionTests(unittest.TestCase):
     def test_value_and_contract_period_are_extracted_for_plain_english_summary(self):
         payload = {

@@ -1311,19 +1311,35 @@ def classify_geography(record, region):
 
 
 def score_record(record, services, region, min_value, max_value):
-    fulltext = " ".join([
+    primary_text = " ".join([
         record.get("title", ""), record.get("description", ""),
+    ]).lower()
+    secondary_text = " ".join([
         record.get("trade_context", ""), record.get("buyer", ""),
     ]).lower()
-    trade_hits = {
-        "cleaning": keyword_hits(fulltext, CLEANING_TERMS),
-        "fm": keyword_hits(fulltext, FM_TERMS),
-        "maintenance": keyword_hits(fulltext, MAINTENANCE_TERMS),
-        "construction": keyword_hits(fulltext, CONSTRUCTION_TERMS),
+    fulltext = " ".join([primary_text, secondary_text])
+    primary_trade_hits = {
+        "cleaning": keyword_hits(primary_text, CLEANING_TERMS),
+        "fm": keyword_hits(primary_text, FM_TERMS),
+        "maintenance": keyword_hits(primary_text, MAINTENANCE_TERMS),
+        "construction": keyword_hits(primary_text, CONSTRUCTION_TERMS),
     }
+    secondary_trade_hits = {
+        "cleaning": keyword_hits(secondary_text, CLEANING_TERMS),
+        "fm": keyword_hits(secondary_text, FM_TERMS),
+        "maintenance": keyword_hits(secondary_text, MAINTENANCE_TERMS),
+        "construction": keyword_hits(secondary_text, CONSTRUCTION_TERMS),
+    }
+    # Specific tender wording takes precedence over generic CPV/item labels.
+    # Only fall back to secondary metadata when the title and description have
+    # no service evidence at all.
+    primary_matched = [t for t in SERVICE_ORDER if t in services and primary_trade_hits[t]]
+    trade_hits = primary_trade_hits if primary_matched else secondary_trade_hits
     exclude_hits = keyword_hits(fulltext, EXCLUDE_TERMS)
     matched = [t for t in SERVICE_ORDER if t in services and trade_hits[t]]
-    detailed_category = classify_trade_category(fulltext)
+    detailed_category = classify_trade_category(primary_text)
+    if detailed_category == "Other / unclassified":
+        detailed_category = classify_trade_category(secondary_text)
     # The default scope now covers the full detailed trade taxonomy. Keep
     # backwards compatibility for callers explicitly selecting a subset of the
     # legacy service groups: those switches must still exclude disabled groups.
@@ -1368,16 +1384,22 @@ def score_record(record, services, region, min_value, max_value):
     else:
         reasons.append("value not published")
 
-    deadline_dt = parse_date(record.get("deadline"))
-    if deadline_dt:
-        if deadline_dt < datetime.now(timezone.utc):
-            return None
-        score += 2
-        reasons.append("deadline appears to be in the future")
-        deadline_status = "Future date in feed — verify official notice"
+    if not shortlist_eligible_stage(record):
+        # Award, contract and other non-tender notices must not look like live
+        # opportunities merely because their deadline field is empty.
+        deadline_status = "Not a live bid — other notice"
+        reasons.append("notice is not an open tender or planned opportunity")
     else:
-        deadline_status = "Deadline missing — manual check required"
-        reasons.append("deadline missing or unparsed")
+        deadline_dt = parse_date(record.get("deadline"))
+        if deadline_dt:
+            if deadline_dt < datetime.now(timezone.utc):
+                return None
+            score += 2
+            reasons.append("deadline appears to be in the future")
+            deadline_status = "Future date in feed — verify official notice"
+        else:
+            deadline_status = "Deadline missing — manual check required"
+            reasons.append("deadline missing or unparsed")
 
     if exclude_hits:
         score -= 1
