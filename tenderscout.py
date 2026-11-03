@@ -1456,7 +1456,8 @@ def is_confirmed_nonlive_notice(record):
         return True
     status_tokens = set(re.findall(r"[a-z]+", status))
     nonlive_statuses = {
-        "complete", "awardupdate", "contractupdate", "contractamendment",
+        "complete", "award", "awarded", "contractaward", "contractawarded",
+        "awardupdate", "contractupdate", "contractamendment",
         "implementation", "contracttermination", "cancelled", "withdrawn",
     }
     return bool(status_tokens & nonlive_statuses)
