@@ -959,11 +959,21 @@ class ReviewQueueStageTests(unittest.TestCase):
     def test_official_award_notice_is_excluded_from_operational_review(self):
         record = {
             "source": "Find a Tender",
-            "status": "Not a live bid — other notice",
+            "status": "complete",
             "opportunity_stage": "Other notice",
         }
         self.assertFalse(tenderscout.is_discovery_listing(record))
+        self.assertTrue(tenderscout.is_confirmed_nonlive_notice(record))
         self.assertFalse(tenderscout.review_eligible_stage(record))
+
+    def test_ambiguous_other_notice_is_retained_for_manual_review(self):
+        record = {
+            "source": "Find a Tender",
+            "status": "tender",
+            "opportunity_stage": "Other notice",
+        }
+        self.assertFalse(tenderscout.is_confirmed_nonlive_notice(record))
+        self.assertTrue(tenderscout.review_eligible_stage(record))
 
     def test_open_and_planned_opportunities_remain_review_eligible(self):
         for stage in ("Open for bids", "Planning / upcoming"):
