@@ -182,9 +182,18 @@ MAINTENANCE_TERMS = [
     "painting and decorating", "decoration services", "external decoration",
     "gas servicing", "gas safety", "boiler servicing", "heating maintenance",
     "electrical maintenance", "electrical testing", "fixed wire testing",
-    "fire alarm", "emergency lighting", "roofing", "roof repair", "plumbing",
-    "joinery", "handyman", "damp proofing", "window repairs", "door repairs",
-    "lift maintenance", "legionella", "fire safety works",
+    "fire alarm", "fire alarms", "emergency lighting", "roofing", "roof repair",
+    "roof replacement", "roofline", "fascias", "soffits", "guttering", "plumbing",
+    "plumber", "drainage", "drain clearance", "sewer repair", "electrical installation",
+    "electrical repairs", "electrician", "mechanical and electrical", "mechanical & electrical",
+    "m&e services", "electrical testing", "fixed wire testing", "eicr", "joinery",
+    "carpentry", "carpenter", "handyman", "damp proofing", "waterproofing",
+    "window repairs", "door repairs", "glazing", "double glazing", "bricklaying",
+    "masonry", "repointing", "plastering", "rendering", "tiling", "tiler",
+    "flooring", "floor coverings", "kitchen installation", "bathroom installation",
+    "insulation", "scaffolding", "driveway", "patio installation", "block paving",
+    "fencing", "gate installation", "lift maintenance", "legionella", "water hygiene",
+    "fire safety works", "gas safety", "gas servicing", "boiler servicing",
 ]
 CONSTRUCTION_TERMS = [
     "construction", "refurbishment", "refurbish", "building works",
@@ -201,6 +210,8 @@ EXCLUDE_TERMS = [
 
 # Order matters: a tender that matches several trades gets the first label.
 SERVICE_ORDER = ["cleaning", "fm", "maintenance", "construction"]
+# Default to core services and specific property trades; broad construction is opt-in.
+DEFAULT_SERVICES = ["cleaning", "fm", "maintenance"]
 SERVICE_LABELS = {
     "cleaning": "Cleaning",
     "fm": "Facilities management",
@@ -1425,7 +1436,7 @@ def main():
     parser.add_argument(
         "--region", choices=[TARGET_AREA_LABEL, "North West", "UK wide"], default=TARGET_AREA_LABEL,
         help="'Target area' = Liverpool, Sefton, St Helens, Halton, Wirral (including Wallasey), Knowsley and agreed wider North West districts; 'North West' is an alias")
-    parser.add_argument("--services", nargs="+", choices=SERVICE_ORDER, default=SERVICE_ORDER)
+    parser.add_argument("--services", nargs="+", choices=SERVICE_ORDER, default=DEFAULT_SERVICES, help="Default: cleaning, facilities management and specific property trades; add construction explicitly when required")
     parser.add_argument("--min-value", type=float, default=None, help="Minimum estimated GBP value")
     parser.add_argument("--max-value", type=float, default=None, help="Maximum estimated GBP value")
     parser.add_argument("--min-score", type=int, default=3, help="Minimum relevance score (default 3)")
