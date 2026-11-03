@@ -280,6 +280,11 @@ OUT_OF_AREA_TERMS = [
     "ashton-in-makerfield", "ince-in-makerfield", "shevington", "aspull", "pemberton",
     "west lancashire", "ormskirk", "skelmersdale", "burscough", "aughton", "up holland",
     "macclesfield", "knutsford", "altrincham",
+    # Excluded neighbouring areas: do not expand beyond the approved boroughs.
+    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
+    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
+    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
+    "northwich", "winsford", "frodsham", "helsby", "tarporley",
     "manchester", "salford", "bolton", "bury", "rochdale", "oldham",
     "stockport", "tameside", "trafford", "blackburn", "blackpool", "preston",
     "lancaster", "cumbria", "barrow-in-furness", "northumberland", "chorley",
