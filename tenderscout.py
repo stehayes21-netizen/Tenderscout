@@ -1533,28 +1533,95 @@ def review_eligible_stage(record):
         return not bool(record.get("_confirmed_nonlive_notice"))
     return not is_confirmed_nonlive_notice(record)
 
+def _dedupe_title_key(value):
+    """Normalise a descriptive title, removing discovery-feed closing-date suffixes."""
+    title = str(value or "").casefold().strip()
+    title = re.sub(r"\s*[—–-]\s*closes?\b.*$", "", title)
+    return " ".join(re.findall(r"[a-z0-9]+", title))
+
+
+def _dedupe_buyer_key(value):
+    return " ".join(re.findall(r"[a-z0-9]+", str(value or "").casefold()))
+
+
+def _dedupe_record_rank(row):
+    source = str(row.get("source") or "").casefold()
+    source_rank = 3 if "find a tender" in source else 2 if "contracts finder" in source else 1
+    stage_rank = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}.get(
+        row.get("opportunity_stage"), 0
+    )
+    completeness = sum(bool(row.get(field)) for field in (
+        "buyer", "description", "location_text", "estimated_value_gbp", "deadline", "notice_url"
+    ))
+    return source_rank, stage_rank, completeness
+
+
 def dedupe(records):
-    """Deduplicate procurement processes and cross-source copies of the same notice."""
-    priority = {"Open for bids": 3, "Planning / upcoming": 2, "Other notice": 1}
+    """Deduplicate exact IDs/URLs and conservative cross-source title matches.
+
+    Title matching is deliberately limited to descriptive titles shared by different
+    sources. Generic titles, same-source notices and conflicting named buyers are
+    kept separate to avoid merging unrelated procurement processes.
+    """
     by_key = {}
     notice_key = {}
+    ocid_key = {}
+    title_groups = {}
     for row in records:
         notice_url = str(row.get("notice_url") or "").strip()
+        ocid = str(row.get("ocid") or "").strip()
+        source = str(row.get("source") or "").strip().casefold()
+        title_key = _dedupe_title_key(row.get("title"))
+        buyer_key = _dedupe_buyer_key(row.get("buyer"))
+
+        key = None
         if notice_url and notice_url in notice_key:
             key = notice_key[notice_url]
-        else:
-            ocid = row.get("ocid")
+        elif ocid and ("ocid", ocid) in ocid_key:
+            key = ocid_key[("ocid", ocid)]
+        elif title_key and len(title_key.split()) >= 5:
+            # Only bridge copies from different sources. A missing buyer is
+            # acceptable on discovery listings; conflicting named buyers are not.
+            for existing_key in title_groups.get(title_key, []):
+                current = by_key[existing_key]
+                current_source = str(current.get("source") or "").strip().casefold()
+                current_buyer = _dedupe_buyer_key(current.get("buyer"))
+                if current_source != source and (not buyer_key or not current_buyer or buyer_key == current_buyer):
+                    key = existing_key
+                    break
+
+        if key is None:
             key = ("ocid", ocid) if ocid else (
-                "title", row.get("title", "").lower(), row.get("buyer", "").lower(),
-                row.get("published_date", ""),
+                "record", source, title_key, buyer_key, str(row.get("published_date") or "")
             )
+
         if notice_url:
             notice_key[notice_url] = key
-        current = by_key.get(key)
-        if current is None or priority.get(row.get("opportunity_stage"), 0) > priority.get(current.get("opportunity_stage"), 0):
-            by_key[key] = row
-    return list(by_key.values())
+        if ocid:
+            ocid_key[("ocid", ocid)] = key
+        if title_key and len(title_key.split()) >= 5:
+            title_groups.setdefault(title_key, [])
+            if key not in title_groups[title_key]:
+                title_groups[title_key].append(key)
 
+        current = by_key.get(key)
+        if current is None:
+            by_key[key] = row
+        elif _dedupe_record_rank(row) > _dedupe_record_rank(current):
+            # Prefer official records while retaining useful discovery-only fields.
+            winner = dict(row)
+            for field, value in current.items():
+                if not winner.get(field) and value:
+                    winner[field] = value
+            by_key[key] = winner
+        else:
+            winner = dict(current)
+            for field, value in row.items():
+                if not winner.get(field) and value:
+                    winner[field] = value
+            by_key[key] = winner
+
+    return list(by_key.values())
 
 def write_csv(path, rows):
     with open(path, "w", newline="", encoding="utf-8-sig") as f:

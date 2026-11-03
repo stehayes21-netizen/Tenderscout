@@ -1180,5 +1180,71 @@ class ConservativeReviewFilteringTests(unittest.TestCase):
                 self.assertEqual(result, "REVIEW")
 
 
+
+class CrossSourceDedupeTests(unittest.TestCase):
+    def test_discovery_suffixes_and_missing_buyers_dedupe_to_official_notice(self):
+        import tenderscout
+        records = [
+            {
+                "source": "Standstill UK (RSS discovery; verify official notice)",
+                "title": "Re Roofing of Council Owned Properties 2026/27 Program — closes 4 Dec 2026",
+                "buyer": "", "notice_url": "https://standstill.uk/o/fts-079426/",
+                "ocid": "https://standstill.uk/o/fts-079426/",
+                "opportunity_stage": "Other notice", "description": "Roofing works",
+            },
+            {
+                "source": "Bearings (discovery; verify provider notice)",
+                "title": "Re Roofing of Council Owned Properties 2026/27 Program",
+                "buyer": "Lancaster City Council", "notice_url": "https://www.find-tender.service.gov.uk/Notice/102929-2026",
+                "ocid": "opp-2ea0d7f11812", "opportunity_stage": "Other notice",
+                "description": "Council roofing programme",
+            },
+        ]
+        result = tenderscout.dedupe(records)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["source"], "Bearings (discovery; verify provider notice)")
+        self.assertEqual(result[0]["buyer"], "Lancaster City Council")
+
+    def test_distinct_named_buyers_are_not_merged(self):
+        import tenderscout
+        base = {
+            "title": "Regional Grounds Maintenance Services Contract",
+            "published_date": "2026-11-03",
+            "opportunity_stage": "Open for bids",
+        }
+        records = [
+            dict(base, source="Standstill UK", buyer="Liverpool City Council", notice_url="https://a.example/1", ocid="a"),
+            dict(base, source="Bearings", buyer="Sefton Council", notice_url="https://b.example/2", ocid="b"),
+        ]
+        self.assertEqual(len(tenderscout.dedupe(records)), 2)
+
+    def test_generic_titles_and_same_source_not_merged(self):
+        import tenderscout
+        records = [
+            {"source": "Standstill UK", "title": "Grounds Maintenance Services", "buyer": "", "ocid": "a"},
+            {"source": "Standstill UK", "title": "Grounds Maintenance Services", "buyer": "", "ocid": "b"},
+        ]
+        self.assertEqual(len(tenderscout.dedupe(records)), 2)
+
+    def test_cross_source_match_prefers_official_feed_and_keeps_missing_fields(self):
+        import tenderscout
+        records = [
+            {
+                "source": "Bearings discovery", "title": "Structural Repairs and Planned Maintenance to Blackpool Tower Winter 2026/7 and Summer 2027 — closes 20 Nov 2026",
+                "buyer": "", "notice_url": "https://discovery.example/1", "ocid": "disc-1",
+                "opportunity_stage": "Other notice", "estimated_value_gbp": "4000000",
+            },
+            {
+                "source": "Find a Tender", "title": "Structural Repairs and Planned Maintenance to Blackpool Tower Winter 2026/7 and Summer 2027",
+                "buyer": "Blackpool Council", "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
+                "ocid": "official-1", "opportunity_stage": "Open for bids",
+            },
+        ]
+        result = tenderscout.dedupe(records)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["source"], "Find a Tender")
+        self.assertEqual(result[0]["estimated_value_gbp"], "4000000")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
