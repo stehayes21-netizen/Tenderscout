@@ -210,7 +210,7 @@ SERVICE_LABELS = {
 
 # --- Target area ------------------------------------------------------------
 # Approved service area: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral,
-# Warrington and Cheshire West and Chester. Other North West areas remain excluded.
+# Other North West areas remain excluded.
 # Postcode districts are the main evidence. Any uncertain or mixed location goes
 # to REVIEW; never loosen these rules merely to increase the number of matches.
 TARGET_AREA_LABEL = "Target area"
@@ -1187,7 +1187,7 @@ def classify_geography(record, region):
     pc_review = sorted(d for d in districts if d in REVIEW_POSTCODE_DISTRICTS)
     pc_other = sorted(d for d in (full | bare) if d not in LOCAL_POSTCODE_DISTRICTS
                       and d not in REVIEW_POSTCODE_DISTRICTS)
-    pc_other = sorted(set(pc_other) | (districts & EXCLUDED_POSTCODE_DISTRICTS))
+    # Preserve explicit REVIEW exceptions (notably CH4) even when the\n    # wider postcode family is otherwise excluded.\n    pc_other = sorted((set(pc_other) | (districts & EXCLUDED_POSTCODE_DISTRICTS)) - set(pc_review))
 
     nuts = nuts_codes(location_text)
     nuts_local = sorted(c for c in nuts if c in LOCAL_NUTS)
