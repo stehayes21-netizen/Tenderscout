@@ -966,6 +966,17 @@ class ReviewQueueStageTests(unittest.TestCase):
         self.assertTrue(tenderscout.is_confirmed_nonlive_notice(record))
         self.assertFalse(tenderscout.review_eligible_stage(record))
 
+    def test_plain_award_status_is_excluded_from_operational_review(self):
+        for status in ("award", "awarded", "contract award"):
+            with self.subTest(status=status):
+                record = {
+                    "source": "Find a Tender",
+                    "status": status,
+                    "opportunity_stage": "Other notice",
+                }
+                self.assertTrue(tenderscout.is_confirmed_nonlive_notice(record))
+                self.assertFalse(tenderscout.review_eligible_stage(record))
+
     def test_ambiguous_other_notice_is_retained_for_manual_review(self):
         record = {
             "source": "Find a Tender",
