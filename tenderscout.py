@@ -326,8 +326,9 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
 LOCAL_NUTS = {"UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
-    "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
-    "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
+    # Broad North West and cross-boundary codes remain REVIEW. Greater Manchester
+    # (UKD3*) and Lancashire (UKD4*) are wholly outside the approved target boroughs.
+    "UKD", "UKD6", "UKD7",
 }
 
 
@@ -1310,6 +1311,39 @@ def classify_geography(record, region):
     return "REVIEW", "No usable delivery/site location evidence"
 
 
+NON_PROPERTY_MAINTENANCE_TERMS = (
+    # These are maintenance/repair contracts, but not property or facilities work.
+    "vehicle repair", "vehicle repairs", "vehicle maintenance", "motor vehicle",
+    "police vehicle", "police vehicles", "fleet department", "fleet maintenance",
+    "patient hoist", "patient hoists", "pool hoist", "pool hoists",
+    "assisted bathing equipment", "audiology", "hearing screening equipment",
+    "medical equipment", "medical and surgical equipment",
+)
+PROPERTY_DELIVERY_TERMS = (
+    "building maintenance", "property maintenance", "building repairs",
+    "property repairs", "grounds maintenance", "roofing", "roof repair",
+    "roof replacement", "heating maintenance", "boiler servicing",
+    "electrical maintenance", "emergency lighting", "plumbing",
+    "drainage maintenance", "guttering", "painting and decorating",
+    "responsive repairs", "void repairs", "building works", "cleaning",
+    "facilities management", "caretaking", "window cleaning", "roofline",
+)
+
+
+def is_non_property_maintenance_scope(primary_text, secondary_text=""):
+    """Reject equipment/fleet maintenance mislabelled as property maintenance.
+
+    A specific non-property asset type is not enough to reject a mixed contract:
+    explicit building, property, cleaning or facilities delivery in the primary
+    notice text keeps the opportunity eligible for normal classification.
+    """
+    combined = " ".join((primary_text or "", secondary_text or "")).casefold()
+    primary = (primary_text or "").casefold()
+    has_non_property_asset = any(term in combined for term in NON_PROPERTY_MAINTENANCE_TERMS)
+    has_property_delivery = any(term in primary for term in PROPERTY_DELIVERY_TERMS)
+    return has_non_property_asset and not has_property_delivery
+
+
 def score_record(record, services, region, min_value, max_value):
     primary_text = " ".join([
         record.get("title", ""), record.get("description", ""),
@@ -1318,6 +1352,10 @@ def score_record(record, services, region, min_value, max_value):
         record.get("trade_context", ""), record.get("buyer", ""),
     ]).lower()
     fulltext = " ".join([primary_text, secondary_text])
+    # Generic CPV phrases such as "repair and maintenance services" must not
+    # turn vehicle fleets or medical equipment into property-maintenance leads.
+    if is_non_property_maintenance_scope(primary_text, secondary_text):
+        return None
     primary_trade_hits = {
         "cleaning": keyword_hits(primary_text, CLEANING_TERMS),
         "fm": keyword_hits(primary_text, FM_TERMS),
