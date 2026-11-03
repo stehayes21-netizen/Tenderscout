@@ -1157,6 +1157,7 @@ class ConservativeReviewFilteringTests(unittest.TestCase):
         self.assertIsNotNone(scored)
 
     def test_greater_manchester_and_lancashire_nuts_codes_are_out_of_area(self):
+        import tenderscout
         for code in (
             "UKD3", "UKD31", "UKD32", "UKD33", "UKD34", "UKD35",
             "UKD36", "UKD37", "UKD4", "UKD41", "UKD42", "UKD43",
