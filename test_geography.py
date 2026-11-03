@@ -948,6 +948,51 @@ class ReviewQueueStageTests(unittest.TestCase):
         self.assertTrue(tenderscout.is_discovery_listing(record))
         self.assertTrue(tenderscout.review_eligible_stage(record))
 
+    def test_standstill_listing_tagged_only_south_east_is_excluded_from_target_review(self):
+        record = {
+            "source": "Standstill UK (RSS discovery; verify official notice)",
+            "description": "Buyer · Value: £45,000 · Region: South East England · Construction work",
+            "location_text": "North West England (aggregator region only; delivery site not confirmed)",
+            "status": "Standstill UK discovery listing — verify official notice",
+            "opportunity_stage": "Other notice",
+        }
+        self.assertTrue(tenderscout.standstill_region_is_outside_north_west(record))
+        self.assertFalse(tenderscout.review_eligible_stage(record))
+
+    def test_standstill_north_west_region_stays_in_review_without_delivery_proof(self):
+        record = {
+            "source": "Standstill UK (RSS discovery; verify official notice)",
+            "description": "Buyer · Value: £500,000 · Region: North West England · Grounds maintenance",
+            "location_text": "North West England (aggregator region only; delivery site not confirmed)",
+            "status": "Standstill UK discovery listing — verify official notice",
+            "opportunity_stage": "Other notice",
+        }
+        self.assertFalse(tenderscout.standstill_region_is_outside_north_west(record))
+        self.assertTrue(tenderscout.review_eligible_stage(record))
+
+    def test_standstill_multi_region_including_north_west_stays_in_review(self):
+        record = {
+            "source": "Standstill UK (RSS discovery; verify official notice)",
+            "description": "Region: Scotland, North West England, Yorkshire and the Humber · Grounds maintenance",
+            "opportunity_stage": "Other notice",
+        }
+        self.assertFalse(tenderscout.standstill_region_is_outside_north_west(record))
+        self.assertTrue(tenderscout.review_eligible_stage(record))
+
+    def test_standstill_uk_wide_or_missing_region_stays_in_review(self):
+        for description in (
+            "Region: UK-wide · Grounds maintenance",
+            "Buyer · Value: £45,000 · Grounds maintenance",
+        ):
+            with self.subTest(description=description):
+                record = {
+                    "source": "Standstill UK (RSS discovery; verify official notice)",
+                    "description": description,
+                    "opportunity_stage": "Other notice",
+                }
+                self.assertFalse(tenderscout.standstill_region_is_outside_north_west(record))
+                self.assertTrue(tenderscout.review_eligible_stage(record))
+
     def test_bearings_discovery_listing_remains_in_review(self):
         record = {
             "source": "Bearings (discovery; verify provider notice)",
