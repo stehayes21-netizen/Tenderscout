@@ -590,18 +590,20 @@ class OverlapAndTradeTests(unittest.TestCase):
             "deadline": "2099-12-31T00:00:00+00:00",
         }
         return tenderscout.score_record(
-            record, services or tenderscout.SERVICE_ORDER, "Target area", None, None)
+            record, services if services is not None else tenderscout.DEFAULT_SERVICES, "Target area", None, None)
 
-    def test_each_trade_is_recognised_and_labelled(self):
+    def test_core_services_and_property_trades_are_recognised(self):
         cases = {
             "Commercial cleaning of council offices": "Cleaning",
             "Soft FM and caretaking services": "Facilities management",
             "Responsive repairs and void works for housing stock": "Property maintenance",
             "Painting and decorating framework": "Property maintenance",
             "Roof repair programme": "Property maintenance",
-            "School refurbishment and extension works": "Construction",
-            "Demolition and groundworks": "Construction",
-            "New build housing development": "Construction",
+            "Plumbing repairs framework": "Property maintenance",
+            "Electrical installation and testing": "Property maintenance",
+            "Drainage and sewer repairs": "Property maintenance",
+            "Tiling and flooring repairs": "Property maintenance",
+            "Driveway and patio repairs": "Property maintenance",
         }
         for title, label in cases.items():
             with self.subTest(title=title):
@@ -609,30 +611,20 @@ class OverlapAndTradeTests(unittest.TestCase):
                 self.assertIsNotNone(result)
                 self.assertEqual(result["service_match"], label)
 
-    def test_unrelated_tenders_are_ignored(self):
-        for title in ("Supply of laptops", "Software licences",
-                      "Legal advice framework"):
+    def test_irrelevant_and_broad_construction_tenders_are_ignored_by_default(self):
+        for title in (
+            "Supply of laptops", "Software licences", "Legal advice framework",
+            "Catering services", "IT and telecoms support",
+            "School refurbishment and extension works",
+            "Demolition and new build housing development",
+            "Provision of Project Management & Cost Consultant Services",
+        ):
             with self.subTest(title=title):
                 self.assertIsNone(self.score(title))
 
-    def test_all_trades_are_in_scope_by_default(self):
-        for title, expected in (
-            ("Catering services", "Catering and food services"),
-            ("Roofing and roof repairs", "Roofing and roof repairs"),
-            ("IT and telecoms support", "IT and telecoms"),
-            ("Arboricultural services - tree planting and maintenance", "Tree surgery"),
-            ("RA360690 - Boiler Inspection", "Heating and boilers"),
-            ("Provision of Mechanical and Electrical Services", "Electrical installation and repairs"),
-            ("PA Unadopted Highways hard surface repairs", "Roads and paving"),
-            ("Provision of Project Management & Cost Consultant Services", "Construction project management"),
-        ):
-            with self.subTest(title=title):
-                result = self.score(title)
-                self.assertIsNotNone(result)
-                self.assertEqual(result["trade_category"], expected)
-
-    def test_a_trade_can_be_switched_off(self):
-        self.assertIsNone(self.score("Building refurbishment", services=["cleaning", "fm"]))
+    def test_default_services_are_narrow_and_construction_is_opt_in(self):
+        self.assertEqual(tenderscout.DEFAULT_SERVICES, ["cleaning", "fm", "maintenance"])
+        self.assertIsNone(self.score("Building refurbishment"))
         self.assertIsNotNone(self.score("Building refurbishment", services=["construction"]))
 
     def test_cleaning_wins_when_a_tender_matches_several_trades(self):
