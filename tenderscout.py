@@ -224,19 +224,18 @@ LOCAL_POSTCODE_DISTRICTS = {
     "WA9", "WA10", "WA11", "WA12",
     # Halton
     "WA7", "WA8",
-    # Warrington (postcode districts can cross borough edges; verify exact site where needed)
-    "WA1", "WA2", "WA3", "WA4", "WA5", "WA6", "WA13",
-    # Cheshire West and Chester (CH4 remains borderline and requires review)
-    "CH1", "CH2", "CH3", "CH64", "CH65", "CH66", "CW6", "CW7", "CW8", "CW9",
     # Knowsley
     "L26", "L28", "L32", "L33", "L34", "L35", "L36",
     # Wirral
     *(f"CH{n}" for n in range(41, 50)), "CH60", "CH61", "CH62", "CH63",
 }
-# CH4 is a boundary district and needs a site-level check.
+# Borderline district remains REVIEW until a site-level location is available.
 REVIEW_POSTCODE_DISTRICTS = {"CH4"}
 EXCLUDED_POSTCODE_DISTRICTS = {
-    *(f"CH{n}" for n in range(5, 41)),
+    *(f"CH{n}" for n in range(1, 41)),
+    "CH64", "CH65", "CH66",
+    *(f"CW{n}" for n in range(6, 10)),
+    *(f"WA{n}" for n in range(1, 7)), "WA13",
     "WN1", "WN2", "WN3", "WN4", "WN5", "WN6", "WN7", "WN8",
     "L39", "L40",
 }
@@ -261,16 +260,10 @@ LOCAL_PLACE_TERMS = [
     # Knowsley
     "knowsley", "huyton", "prescot", "halewood", "stockbridge village",
     "tarbock", "roby", "cronton",
-    # Wirral
+    # Wirral, including Wallasey
     "wirral", "birkenhead", "wallasey", "heswall", "bromborough", "bebington",
     "hoylake", "west kirby", "new brighton", "oxton", "prenton", "rock ferry",
     "tranmere", "moreton", "upton",
-    # Warrington
-    "warrington", "culcheth", "lymm", "padgate", "stockton heath", "latchford",
-    "grappenhall", "burtonwood", "winwick", "great sankey", "penketh", "thelwall",
-    # Cheshire West and Chester
-    "cheshire west", "west cheshire", "chester", "ellesmere port", "neston",
-    "northwich", "winsford", "frodsham", "helsby", "tarporley",
 ]
 AMBIGUOUS_PLACE_TERMS = [
     "allerton", "woolton", "garston", "walton", "kirkdale", "upton", "moreton",
@@ -315,7 +308,7 @@ DISTRICT_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\b")
 # places
 # require a postcode or place name; every other UK code is outside.
 NUTS_RE = re.compile(r"\bUK([C-N])(\d{0,2})\b")
-LOCAL_NUTS = {"UKD61", "UKD63", "UKD71", "UKD72", "UKD73", "UKD74"}
+LOCAL_NUTS = {"UKD71", "UKD72", "UKD73", "UKD74"}
 REVIEW_NUTS = {
     "UKD", "UKD3", "UKD31", "UKD32", "UKD34", "UKD35", "UKD36", "UKD37",
     "UKD4", "UKD43", "UKD47", "UKD6", "UKD7",
