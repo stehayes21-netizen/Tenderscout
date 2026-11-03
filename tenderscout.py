@@ -1456,7 +1456,9 @@ def is_confirmed_nonlive_notice(record):
 
 def review_eligible_stage(record):
     """Keep live/planned, discovery and ambiguous-stage records in location review."""
-    return not bool(record.get("_confirmed_nonlive_notice"))
+    if "_confirmed_nonlive_notice" in record:
+        return not bool(record.get("_confirmed_nonlive_notice"))
+    return not is_confirmed_nonlive_notice(record)
 
 
 def dedupe(records):
