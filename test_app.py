@@ -1158,6 +1158,7 @@ class ConservativeReviewFilteringTests(unittest.TestCase):
 
     def test_greater_manchester_and_lancashire_nuts_codes_are_out_of_area(self):
         import tenderscout
+        import tenderscout
         for code in (
             "UKD3", "UKD31", "UKD32", "UKD33", "UKD34", "UKD35",
             "UKD36", "UKD37", "UKD4", "UKD41", "UKD42", "UKD43",
@@ -1170,6 +1171,7 @@ class ConservativeReviewFilteringTests(unittest.TestCase):
                 self.assertEqual(result, "OUT_OF_AREA")
 
     def test_broad_cheshire_and_merseyside_nuts_codes_remain_review(self):
+        import tenderscout
         for code in ("UKD6", "UKD7"):
             with self.subTest(code=code):
                 result, _ = tenderscout.classify_geography(
