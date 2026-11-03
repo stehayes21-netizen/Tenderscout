@@ -1454,8 +1454,46 @@ def is_confirmed_nonlive_notice(record):
     return bool(status_tokens & nonlive_statuses)
 
 
+def standstill_region_is_outside_north_west(record):
+    """Exclude Standstill discovery listings explicitly tagged only to other UK regions.
+
+    Standstill's RSS location_text is a generic North West placeholder, not a
+    delivery site. Its separate Region metadata can safely remove listings
+    whose stated region is wholly outside the North West, but it cannot promote
+    any listing to LOCAL. Broad, multi-region, UK-wide and missing metadata
+    remain in REVIEW for official-notice verification.
+    """
+    source = str(record.get("source") or "").casefold()
+    if "standstill" not in source:
+        return False
+    description = str(record.get("description") or "")
+    match = re.search(r"(?:^|[·|;])\s*Region:\s*(.*?)(?:\s+·\s+|$)", description, re.IGNORECASE)
+    if not match:
+        return False
+    raw_regions = match.group(1).strip()
+    regions = {re.sub(r"\s+", " ", value.strip().casefold()) for value in raw_regions.split(",") if value.strip()}
+    if not regions:
+        return False
+    broad_regions = {"uk", "uk wide", "uk-wide", "united kingdom", "great britain"}
+    if regions & broad_regions:
+        return False
+    known_uk_regions = {
+        "north east england", "north west england", "yorkshire and the humber",
+        "east midlands", "west midlands", "east of england", "london",
+        "south east england", "south west england", "wales",
+        "scotland", "northern ireland",
+    }
+    # Be conservative: an unknown label or a mixed UK-wide label must not
+    # silently remove a potential local lead.
+    if not regions <= known_uk_regions:
+        return False
+    return "north west england" not in regions
+
+
 def review_eligible_stage(record):
     """Keep live/planned, discovery and ambiguous-stage records in location review."""
+    if standstill_region_is_outside_north_west(record):
+        return False
     if "_confirmed_nonlive_notice" in record:
         return not bool(record.get("_confirmed_nonlive_notice"))
     return not is_confirmed_nonlive_notice(record)
@@ -1552,6 +1590,7 @@ def main():
     rejected_by_scoring = 0
     excluded_by_stage = 0
     excluded_from_review_by_stage = 0
+    excluded_from_review_by_discovery_region = 0
     scored_geography_counts = {}
     scored_trade_counts = {}
     for row in all_rows:
@@ -1564,7 +1603,9 @@ def main():
         trade = scored.get("trade_category") or scored.get("service_match") or "NO TRADE MATCH"
         scored_trade_counts[trade] = scored_trade_counts.get(trade, 0) + 1
         if normalise_region(args.region) == TARGET_AREA_LABEL and geo == "REVIEW":
-            if review_eligible_stage(scored):
+            if standstill_region_is_outside_north_west(scored):
+                excluded_from_review_by_discovery_region += 1
+            elif review_eligible_stage(scored):
                 review_rows.append(scored)
             else:
                 excluded_from_review_by_stage += 1
@@ -1631,6 +1672,7 @@ def main():
     print(f"Rejected by scoring/value/deadline/trade rules: {rejected_by_scoring}")
     print(f"Excluded from active shortlist by notice stage: {excluded_by_stage}")
     print(f"Excluded from location review as non-live notices: {excluded_from_review_by_stage}")
+    print(f"Excluded from location review by explicit Standstill region metadata outside North West: {excluded_from_review_by_discovery_region}")
     print(f"Matches after filters: {len(filtered)}")
     print(f"Review queue: {len(review_rows)}")
     print(f"All fetched records: {all_path.resolve()}")
