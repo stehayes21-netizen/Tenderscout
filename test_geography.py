@@ -662,6 +662,7 @@ class TradeEvidencePriorityTests(unittest.TestCase):
             "buyer": "Sefton Council",
             "location_text": "UKD73, United Kingdom",
             "deadline": "",
+            "status": "complete",
             "opportunity_stage": "Other notice",
         }
         scored = tenderscout.score_record(
