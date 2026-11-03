@@ -519,10 +519,13 @@ class RegionCodeAndCommunityTests(unittest.TestCase):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "LOCAL")
 
-    def test_codes_covering_the_area_and_more_need_checking(self):
-        for code in ("UKD", "UKD3", "UKD36", "UKD47", "UKD6", "UKD7"):
+    def test_broad_north_west_codes_are_review_but_excluded_subregions_are_out(self):
+        for code in ("UKD", "UKD6", "UKD7"):
             with self.subTest(code=code):
                 self.assertEqual(self.classify(code), "REVIEW")
+        for code in ("UKD3", "UKD36", "UKD47"):
+            with self.subTest(code=code):
+                self.assertEqual(self.classify(code), "OUT_OF_AREA")
 
     def test_a_broad_code_is_confirmed_by_a_place_or_postcode(self):
         self.assertEqual(self.classify("UKD36 Wigan"), "OUT_OF_AREA")
