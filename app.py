@@ -780,6 +780,31 @@ def sample_line(record):
     ])
 
 
+def reclassify_saved_geography(db):
+    """Reapply current delivery-location rules to previously saved tenders.
+
+    Older records may not be returned by a later feed refresh, so their
+    geography can otherwise remain stale indefinitely. Preserve manually
+    entered records and every non-geography field, including pipeline status.
+    """
+    rows = db.execute(
+        "SELECT id, title, description, location_text, region_match, geography_reason "
+        "FROM tenders WHERE region_match != 'MANUAL'"
+    ).fetchall()
+    changed = 0
+    for row in rows:
+        record = dict(row)
+        classification, reason = collector.classify_geography(
+            record, collector.TARGET_AREA_LABEL
+        )
+        if classification != record.get("region_match") or reason != record.get("geography_reason"):
+            db.execute(
+                "UPDATE tenders SET region_match = ?, geography_reason = ? WHERE id = ?",
+                (classification, reason, record["id"]),
+            )
+            changed += 1
+    return changed
+
 def run_refresh():
     """Fetch official feeds and save matching tenders. Returns a dict of counts."""
     days = env_int("TENDERSCOUT_DAYS", 60)
@@ -814,6 +839,7 @@ def run_refresh():
 
     db = connect_db()
     try:
+        stats["reclassified"] = reclassify_saved_geography(db)
         for record in records:
             match = collector.score_record(
                 record, SERVICES, collector.TARGET_AREA_LABEL, None, None
