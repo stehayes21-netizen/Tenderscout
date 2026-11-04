@@ -744,12 +744,12 @@ def _start_stats(stats):
 
 def _coverage_status(stats):
     """Summarise what the collector can prove about source coverage."""
-    if stats.get("possible_cap") or stats.get("full_end"):
-        return "POSSIBLE TRUNCATION"
     if (stats.get("more") or stats.get("truncated_windows")
             or stats.get("stopped") or stats.get("error")
             or stats.get("partial_errors")):
         return "INCOMPLETE"
+    if stats.get("possible_cap") or stats.get("full_end"):
+        return "POSSIBLE TRUNCATION"
     return "FETCH COMPLETE (pagination ended or source exposes no cursor)"
 
 
