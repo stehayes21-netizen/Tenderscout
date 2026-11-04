@@ -18,7 +18,7 @@ class FindATenderPaginationTests(unittest.TestCase):
         ]
         calls = []
 
-        def fake_page_through(base_url, params, source, max_pages, started, max_seconds, stats):
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds, stats, **kwargs):
             calls.append(max_pages)
             return []
 
@@ -29,6 +29,34 @@ class FindATenderPaginationTests(unittest.TestCase):
 
         self.assertEqual(result, [])
         self.assertEqual(calls, [10, 10, 10])
+
+    def test_resumed_window_keeps_prior_records_and_uses_saved_cursor(self):
+        stats = tenderscout._start_stats({})
+        prior = [{"id": "page-one"}]
+        payload = {
+            "releases": [{}],
+            "links": {"next": "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=last"},
+        }
+        batches = [[{"id": "page-two"}]]
+        saved = []
+
+        with patch.object(tenderscout, "get_json", return_value=payload) as get_json, \\
+             patch.object(tenderscout, "extract_records", side_effect=batches), \\
+             patch.object(tenderscout.time, "sleep"):
+            rows = tenderscout._page_through(
+                tenderscout.FTS_URL, {"limit": "100"}, "Find a Tender", 1,
+                tenderscout.time.monotonic(), None, stats,
+                initial_cursor="resume-token", initial_results=prior,
+                on_page=lambda records, cursor, complete: saved.append(
+                    (list(records), cursor, complete)
+                ),
+            )
+
+        self.assertEqual(rows, prior + batches[0])
+        self.assertIn("cursor=resume-token", get_json.call_args.args[0])
+        self.assertEqual(saved[0][0], prior + batches[0])
+        self.assertTrue(saved[0][1])
+        self.assertFalse(saved[0][2])
 
     def test_page_limit_marks_window_as_truncated(self):
         stats = tenderscout._start_stats({})
