@@ -578,6 +578,37 @@ class RefreshTests(AppTestCase):
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json["status"], "completed")
 
+    def test_full_last_page_without_cursor_is_not_a_truncation_warning(self):
+        self.app_module.LAST_FEEDS = {
+            "Find a Tender": {"records": 100, "pages": 1, "last_batch": 100,
+                              "last_page_had_cursor": False}
+        }
+        self.assertEqual(self.app_module.refresh_feed_issues(), [])
+        self.assertEqual(self.app_module.refresh_feed_warnings(), [])
+        notes = self.app_module.feed_notes()
+        self.assertIn("FETCH COMPLETE", notes)
+        self.assertNotIn("POSSIBLE TRUNCATION", notes)
+
+    def test_possible_source_cap_is_warning_not_incomplete_failure(self):
+        self.app_module.LAST_FEEDS = {
+            "Bearings": {"records": 200, "pages": 1, "possible_cap": True}
+        }
+        self.assertEqual(self.app_module.refresh_feed_issues(), [])
+        warnings = self.app_module.refresh_feed_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("not confirmed pagination failure", warnings[0])
+        self.assertIn("POSSIBLE TRUNCATION", self.app_module.feed_notes())
+
+    def test_cursor_or_source_error_remains_incomplete(self):
+        self.app_module.LAST_FEEDS = {
+            "Find a Tender": {"records": 100, "pages": 1, "more": True,
+                              "truncated_windows": 1}
+        }
+        issues = self.app_module.refresh_feed_issues()
+        self.assertEqual(len(issues), 1)
+        self.assertIn("additional cursor pages not read", issues[0])
+        self.assertEqual(self.app_module.refresh_feed_warnings(), [])
+
     def test_csv_export_neutralises_spreadsheet_formulas(self):
         self.client.post("/add", data={"title": "=HYPERLINK(\"http://x\")"})
         exported = self.client.get("/export.csv").data.decode()
