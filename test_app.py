@@ -1279,6 +1279,69 @@ class ConservativeReviewFilteringTests(unittest.TestCase):
                 self.assertEqual(result, "REVIEW")
 
 
+    def test_vehicle_wash_cleaning_is_classified_as_cleaning_not_vehicle_maintenance(self):
+        import tenderscout
+        record = {
+            "title": "Vehicle Wash Cleaning — St Helens",
+            "description": (
+                "Steam-clean vehicle chassis, bodies and ancillary equipment "
+                "at Hardshaw Brook Depot."
+            ),
+            "trade_context": "Vehicle-fleet-support services",
+            "location_text": "Hardshaw Brook Depot, WA9 1JR",
+            "deadline": "2099-12-31T12:00:00+00:00",
+            "opportunity_stage": "Open for bids",
+        }
+        scored = tenderscout.score_record(
+            record, tenderscout.DEFAULT_SERVICES,
+            tenderscout.TARGET_AREA_LABEL, None, None
+        )
+        self.assertIsNotNone(scored)
+        self.assertEqual(scored["region_match"], "LOCAL")
+        self.assertEqual(scored["service_match"], "Cleaning")
+        self.assertEqual(scored["trade_category"], "Industrial cleaning")
+
+    def test_specialist_asbestos_and_waste_analysis_are_not_core_trade_leads(self):
+        import tenderscout
+        cases = [
+            {
+                "title": "Kingsway Tunnel Asbestos Removal",
+                "description": "Licensed asbestos removal and disposal of AIB panels.",
+                "trade_context": "Asbestos removal works; cleaning services",
+            },
+            {
+                "title": "Waste Composition Analysis",
+                "description": "Sampling, sorting and laboratory analysis of household waste.",
+                "trade_context": "Waste analysis consultancy; cleaning services",
+            },
+        ]
+        for record in cases:
+            with self.subTest(title=record["title"]):
+                record.update({
+                    "buyer": "Merseyside public authority",
+                    "location_text": "Liverpool",
+                    "deadline": "2099-12-31T12:00:00+00:00",
+                    "opportunity_stage": "Open for bids",
+                })
+                self.assertIsNone(tenderscout.score_record(
+                    record, tenderscout.DEFAULT_SERVICES,
+                    tenderscout.TARGET_AREA_LABEL, None, None
+                ))
+
+    def test_buyer_or_title_location_alone_never_confirms_local_delivery(self):
+        import tenderscout
+        result, reason = tenderscout.classify_geography(
+            {
+                "title": "Cleaning contract in Liverpool",
+                "description": "Services for Liverpool buildings",
+                "buyer": "Liverpool City Council",
+                "location_text": "",
+            },
+            tenderscout.TARGET_AREA_LABEL,
+        )
+        self.assertEqual(result, "REVIEW")
+        self.assertIn("title/description", reason)
+
 
 class CrossSourceDedupeTests(unittest.TestCase):
     def test_discovery_suffixes_and_missing_buyers_dedupe_to_official_notice(self):
