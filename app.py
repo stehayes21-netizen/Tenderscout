@@ -196,6 +196,11 @@ def connect_db():
     return db
 
 
+def _fts_checkpoint_can_clear(stats):
+    """Only discard saved pages when pagination ended without truncation."""
+    return collector._coverage_status(stats) == "FETCH COMPLETE (pagination ended or source exposes no cursor)"
+
+
 class FTSCheckpointStore:
     """Durable per-window Find a Tender cursor and accumulated-page store."""
 
@@ -981,7 +986,7 @@ def run_refresh():
     # Clear only after every fetched record has been committed and Find a
     # Tender reached the end of its cursor chain. Partial/time-limited runs must
     # retain their accumulated records and cursor for the next refresh.
-    if collector._coverage_status(fts_stats) != "INCOMPLETE":
+    if _fts_checkpoint_can_clear(fts_stats):
         fts_checkpoint.clear()
     for kind, lines in samples.items():
         for line in lines:
