@@ -50,6 +50,24 @@ class AppTestCase(unittest.TestCase):
         for name in ("TENDERSCOUT_DB", "DASHBOARD_USER", "DASHBOARD_PASSWORD"):
             os.environ.pop(name, None)
 
+    def test_fts_checkpoint_store_persists_across_instances_and_clears(self):
+        store = self.app_module.FTSCheckpointStore("test-fingerprint")
+        state = {"records": [{"id": "saved-page"}], "cursor": "next-token", "complete": False}
+        store.save("window-a", state)
+        reloaded = self.app_module.FTSCheckpointStore("test-fingerprint")
+        self.assertEqual(reloaded.load("window-a"), state)
+        reloaded.clear()
+        self.assertIsNone(store.load("window-a"))
+
+    def test_checkpoint_clears_only_for_complete_pagination(self):
+        can_clear = self.app_module._fts_checkpoint_can_clear
+        self.assertTrue(can_clear({}))
+        self.assertFalse(can_clear({"more": True}))
+        self.assertFalse(can_clear({"truncated_windows": 1}))
+        self.assertFalse(can_clear({"possible_cap": True}))
+        self.assertFalse(can_clear({"stopped": "time limit"}))
+        self.assertFalse(can_clear({"error": "HTTP 429"}))
+
     def refresh_with(self, records):
         collector = self.app_module.collector
         # Patch the executor as well as the feeds: the production refresh uses
