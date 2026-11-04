@@ -739,7 +739,7 @@ def dashboard():
     </style></head><body>
     <header><h1>Tender Scout</h1>
     <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
-    <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral, Warrington and Cheshire West and Chester. Other North West areas are excluded.</p>
+    <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley and Wirral. Warrington and Cheshire West and Chester are excluded.</p>
     <form id="refresh-form" method="post" action="/refresh">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
     <p id="refresh-status" class="note" role="status" aria-live="polite" hidden></p></header>
@@ -947,6 +947,8 @@ def feed_coverage_lines():
             f"{name}: {status}; {stats.get('records', 0)} notices "
             f"in {stats.get('pages', 0)} page(s)"
         )
+        if stats.get("first_date") and stats.get("last_date"):
+            line += f", published {stats['first_date']} to {stats['last_date']}"
         if stats.get("windows"):
             line += f" across {stats['windows']} search window(s)"
         if stats.get("feed_counts"):
