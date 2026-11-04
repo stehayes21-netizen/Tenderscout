@@ -825,10 +825,11 @@ def _fts_windows(days, recent_days=10):
     return windows
 
 
-def _page_through(base_url, params, source, max_pages, started, max_seconds, stats):
-    """Read one search page by page, following the feed's own next-page links."""
-    results = []
-    cursor = None
+def _page_through(base_url, params, source, max_pages, started, max_seconds, stats,
+                 initial_cursor=None, initial_results=None, on_page=None):
+    """Read a search window, optionally resuming and checkpointing every page."""
+    results = list(initial_results or [])
+    cursor = initial_cursor
     for _ in range(max_pages):
         if max_seconds and time.monotonic() - started > max_seconds:
             print("[WARN] Stopped early: the time limit for this source was reached", file=sys.stderr)
@@ -842,19 +843,20 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             stats["error"] = str(exc)[:320]
             return results
         batch = extract_records(payload, source)
-        # Pagination metadata is authoritative. A full-sized batch is not proof
-        # that another page exists, and an empty batch is not proof of completion
-        # when the feed still supplies a next-page cursor.
         _note_page(stats, batch)
         results.extend(batch)
         cursor = _next_cursor(payload)
         stats["last_page_had_cursor"] = bool(cursor)
+        if on_page:
+            # Persist the accumulated records and exact next cursor together.
+            # A restart can therefore resume without losing already-read pages.
+            on_page(results, cursor, not bool(cursor))
         if not cursor:
             return results
         # Find a Tender rate-limits bursty clients. Keep requests below a
         # conservative 10/minute cadence rather than hammering each page/window.
         time.sleep(10.5 if source == "Find a Tender" else 0.2)
-    stats["more"] = True  # used every allowed page and the feed still had more
+    stats["more"] = True
     stats["truncated_windows"] = stats.get("truncated_windows", 0) + 1
     print(
         f"[WARN] {source} pagination incomplete: reached the {max_pages}-page limit "
@@ -876,38 +878,43 @@ def fetch_fts_notice(notice_id):
     return records
 
 
-def fetch_fts(days, max_pages, max_seconds=None, stats=None):
+def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
     stats = _start_stats(stats)
     results = []
     started = time.monotonic()
-    # Daily windows for recent updates reduce the chance that a busy week hides
-    # new notices behind the first few cursor pages; older history remains weekly.
-    # Follow the official cursor for every window.
-    for start, end in _fts_windows(days):
-        if stats["stopped"]:
+    windows = _fts_windows(days)
+    for start, end in windows:
+        if stats["stopped"] or stats["error"]:
             break
-        if stats["windows"] and not stats.get("last_page_had_cursor"):
-            # If the previous window ended without a cursor, no page-level delay
-            # was applied. Otherwise _page_through already waited before the next
-            # request, so sleeping here too would halve coverage unnecessarily.
-            time.sleep(10.5)
-        stats["windows"] += 1
-        # Do not send the API stages filter here. Find a Tender's documented
-        # filter has historically omitted many Procurement Act 2023 notices,
-        # including tender/tenderUpdate releases, when stages=tender is supplied.
-        # Retrieve the complete release window and classify lifecycle locally.
         params = {
             "limit": "100",
             "updatedFrom": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "updatedTo": end.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        # Do not impose a separate per-window page cap for hosted refreshes.
-        # Busy windows must be allowed to follow their official cursor while the
-        # shared source time budget remains the hard stop. This avoids truncating
-        # a busy window merely because it reached an arbitrary six-page limit.
-        window_page_limit = max_pages
-        results.extend(_page_through(FTS_URL, params, "Find a Tender", window_page_limit,
-                                     started, max_seconds, stats))
+        window_key = params["updatedFrom"] + "|" + params["updatedTo"]
+        saved = checkpoint.load(window_key) if checkpoint else None
+        if saved and saved.get("complete"):
+            window_results = list(saved.get("records") or [])
+            stats["windows"] += 1
+            results.extend(window_results)
+            continue
+        if stats["windows"] and not stats.get("last_page_had_cursor"):
+            time.sleep(10.5)
+        stats["windows"] += 1
+        def persist(page_records, next_cursor, complete, key=window_key):
+            if checkpoint:
+                checkpoint.save(key, {
+                    "records": page_records,
+                    "cursor": next_cursor,
+                    "complete": complete,
+                })
+        window_results = _page_through(
+            FTS_URL, params, "Find a Tender", max_pages, started, max_seconds, stats,
+            initial_cursor=(saved or {}).get("cursor"),
+            initial_results=(saved or {}).get("records"),
+            on_page=persist if checkpoint else None,
+        )
+        results.extend(window_results)
         if stats["error"]:
             break
     _print_source_coverage("Find a Tender", stats)
