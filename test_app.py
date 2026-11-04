@@ -497,7 +497,8 @@ class RefreshTests(AppTestCase):
         result = self.app_module.collector.classify_geography(
             {"location_text": "North West, British Overseas Territories, Channel Islands, Europe, Isle of Man, Rest of the World"},
             self.app_module.collector.TARGET_AREA_LABEL,
-        )        self.assertEqual(result[0], "OUT_OF_AREA")
+        )
+        self.assertEqual(result[0], "OUT_OF_AREA")
 
     def test_unclear_locations_wait_in_the_review_view(self):
         self.refresh_with([feed_record("unk", "")])
@@ -995,7 +996,8 @@ class RefreshSummaryTests(AppTestCase):
             "last_batch": 100, "full_end": True
         }
         issues = self.app_module.refresh_feed_issues()
-        self.assertEqual(len(issues), 1)        self.assertIn("stopped early", issues[0])
+        self.assertEqual(len(issues), 1)
+        self.assertIn("stopped early", issues[0])
         warnings = self.app_module.refresh_feed_warnings()
         self.assertEqual(len(warnings), 1)
         self.assertIn("Contracts Finder", warnings[0])
