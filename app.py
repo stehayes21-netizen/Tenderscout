@@ -834,9 +834,6 @@ def run_refresh():
     app.logger.warning("REFRESH feeds: %s", LAST_FEEDS)
     samples = {"review": [], "outside": []}
     stats = {"fetched": len(records), "service": 0, "outside": 0, "local": 0, "review": 0}
-    if not records:
-        return stats
-
     db = connect_db()
     try:
         stats["reclassified"] = reclassify_saved_geography(db)
