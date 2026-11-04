@@ -80,9 +80,16 @@ class FindATenderPaginationTests(unittest.TestCase):
                 self.saved.append((key, state))
 
         checkpoint = Checkpoint()
+
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds,
+                              stats, initial_cursor=None, initial_results=None, on_page=None):
+            if on_page:
+                on_page([], None, True)
+            return []
+
         with (
             patch.object(tenderscout, "_fts_windows", return_value=windows),
-            patch.object(tenderscout, "_page_through", return_value=[]) as page_through,
+            patch.object(tenderscout, "_page_through", side_effect=fake_page_through) as page_through,
             patch.object(tenderscout.time, "sleep"),
         ):
             rows = tenderscout.fetch_fts(days=10, max_pages=10, checkpoint=checkpoint)
