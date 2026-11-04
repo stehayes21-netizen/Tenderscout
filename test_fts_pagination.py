@@ -22,7 +22,7 @@ class FindATenderPaginationTests(unittest.TestCase):
             calls.append(max_pages)
             return []
 
-        with patch.object(tenderscout, "_fts_windows", return_value=windows), \
+        with patch.object(tenderscout, "_fts_windows", return_value=windows), \"_fts_windows", return_value=[window]), \
              patch.object(tenderscout, "_page_through", side_effect=fake_page_through), \
              patch.object(tenderscout.time, "sleep"):
             result = tenderscout.fetch_fts(days=21, max_pages=10, max_seconds=150)
