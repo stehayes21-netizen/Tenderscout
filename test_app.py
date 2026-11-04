@@ -80,6 +80,50 @@ class AppTestCase(unittest.TestCase):
 
 
 class AppSmokeTest(AppTestCase):
+    def test_refresh_reclassifies_existing_saved_geography_without_resetting_pipeline(self):
+        db = self.app_module.connect_db()
+        fixtures = [
+            ("old-warrington", "UKD61"),
+            ("old-cheshire-west", "UKD63"),
+            ("old-halton", "UKD71"),
+        ]
+        for slug, location in fixtures:
+            db.execute(
+                """
+                INSERT INTO tenders
+                    (source, title, location_text, description, service_match,
+                     region_match, geography_reason, notice_url, pipeline_status)
+                VALUES (?, ?, ?, ?, ?, 'LOCAL', 'old classification', ?, 'Interested')
+                """
+                ,
+                ("Find a Tender", slug, location, "Commercial cleaning services",
+                 "Cleaning", "https://example.com/" + slug),
+            )
+        db.commit()
+        db.close()
+
+        self.refresh_with([feed_record(
+            "new-local-record", "Liverpool, L1 1AA",
+            title="Commercial cleaning at Liverpool offices",
+        )])
+
+        db = self.app_module.connect_db()
+        rows = {
+            row["title"]: dict(row)
+            for row in db.execute(
+                "SELECT title, region_match, geography_reason, pipeline_status FROM tenders "
+                "WHERE title IN ('old-warrington', 'old-cheshire-west', 'old-halton')"
+            ).fetchall()
+        }
+        db.close()
+        self.assertEqual(rows["old-warrington"]["region_match"], "OUT_OF_AREA")
+        self.assertEqual(rows["old-cheshire-west"]["region_match"], "OUT_OF_AREA")
+        self.assertEqual(rows["old-halton"]["region_match"], "LOCAL")
+        self.assertEqual(rows["old-warrington"]["pipeline_status"], "Interested")
+        self.assertEqual(rows["old-cheshire-west"]["pipeline_status"], "Interested")
+        self.assertEqual(rows["old-halton"]["pipeline_status"], "Interested")
+        self.assertNotEqual(rows["old-warrington"]["geography_reason"], "old classification")
+
     def test_dashboard_loads(self):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
