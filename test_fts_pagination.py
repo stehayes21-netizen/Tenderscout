@@ -362,6 +362,65 @@ class FindATenderDailyCheckpointTests(unittest.TestCase):
         )
 
 
+    def test_incomplete_daily_window_resumes_thursday_to_friday(self):
+        real_datetime = tenderscout.datetime
+
+        class Friday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+
+        unfinished_key = "2026-11-05T00:00:00|2026-11-06T00:00:00"
+        prior_records = [{"id": "thursday-page-before-interruption"}]
+
+        class Checkpoint:
+            def __init__(self):
+                self.loaded = []
+
+            def load(self, key):
+                self.loaded.append(key)
+                if key == unfinished_key:
+                    return {
+                        "records": prior_records,
+                        "cursor": "thursday-saved-next-page-token",
+                        "complete": False,
+                    }
+                return None
+
+            def save(self, key, state):
+                pass
+
+        checkpoint = Checkpoint()
+        resumed = []
+
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds,
+                              stats, initial_cursor=None, initial_results=None, on_page=None):
+            if params["updatedFrom"] + "|" + params["updatedTo"] == unfinished_key:
+                resumed.append((initial_cursor, list(initial_results or [])))
+                stats["stopped"] = "time limit"
+                return list(initial_results or []) + [{"id": "friday-page-after-resume"}]
+            return []
+
+        with (
+            patch.object(tenderscout, "datetime", Friday),
+            patch.object(tenderscout, "_page_through", side_effect=fake_page_through),
+            patch.object(tenderscout.time, "sleep"),
+        ):
+            rows = tenderscout.fetch_fts(
+                days=60, max_pages=10, max_seconds=150, checkpoint=checkpoint
+            )
+
+        self.assertIn(unfinished_key, checkpoint.loaded)
+        self.assertEqual(
+            resumed,
+            [("thursday-saved-next-page-token", prior_records)],
+        )
+        self.assertEqual(
+            rows,
+            prior_records + [{"id": "friday-page-after-resume"}],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
 
