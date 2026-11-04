@@ -87,17 +87,21 @@ class FindATenderPaginationTests(unittest.TestCase):
                 on_page([], None, True)
             return []
 
+        stats = tenderscout._start_stats({})
         with (
             patch.object(tenderscout, "_fts_windows", return_value=windows),
             patch.object(tenderscout, "_page_through", side_effect=fake_page_through) as page_through,
             patch.object(tenderscout.time, "sleep"),
         ):
-            rows = tenderscout.fetch_fts(days=10, max_pages=10, checkpoint=checkpoint)
+            rows = tenderscout.fetch_fts(
+                days=10, max_pages=10, checkpoint=checkpoint, stats=stats
+            )
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["id"], "2026-10-26T00:00:00|2026-11-02T00:00:00")
         self.assertEqual(page_through.call_count, 2)
         self.assertEqual(len(checkpoint.saved), 2)
+        self.assertEqual(stats["records"], 1, "reused records must be included in feed totals")
 
     def test_page_limit_marks_window_as_truncated(self):
         stats = tenderscout._start_stats({})
