@@ -736,9 +736,40 @@ def _page_url(base_url, params, cursor):
 def _start_stats(stats):
     stats = stats if stats is not None else {}
     stats.update({"pages": 0, "records": 0, "last_batch": 0, "more": False,
-                  "error": "", "stopped": "", "windows": 0, "full_end": False,
+                  "error": "", "partial_errors": "", "stopped": "", "windows": 0,
+                  "full_end": False, "possible_cap": False,
                   "truncated_windows": 0, "last_page_had_cursor": False})
     return stats
+
+
+def _coverage_status(stats):
+    """Summarise what the collector can prove about source coverage."""
+    if stats.get("possible_cap") or stats.get("full_end"):
+        return "POSSIBLE TRUNCATION"
+    if (stats.get("more") or stats.get("truncated_windows")
+            or stats.get("stopped") or stats.get("error")
+            or stats.get("partial_errors")):
+        return "INCOMPLETE"
+    return "FETCH COMPLETE (pagination ended or source exposes no cursor)"
+
+
+def _print_source_coverage(source, stats):
+    """Print comparable per-source diagnostics without claiming completeness."""
+    status = _coverage_status(stats)
+    details = [
+        f"windows={stats.get('windows', 0)}",
+        f"pages/feeds={stats.get('pages', 0)}",
+        f"records={stats.get('records', 0)}",
+        f"truncated_windows={stats.get('truncated_windows', 0)}",
+        f"stopped={stats.get('stopped') or 'no'}",
+        f"error={stats.get('error') or 'none'}",
+    ]
+    if stats.get("partial_errors"):
+        details.append(f"partial_errors={stats['partial_errors']}")
+    if stats.get("possible_cap") or stats.get("full_end"):
+        details.append("cap_warning=yes (source limit may have hidden additional records)")
+    print(f"{source} coverage: {status}; " + "; ".join(details))
+    return status
 
 
 def _note_page(stats, batch):
@@ -882,13 +913,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None):
                                      started, max_seconds, stats))
         if stats["error"]:
             break
-    coverage = "INCOMPLETE" if stats["more"] or stats["stopped"] or stats["error"] else "page-walk complete"
-    print(
-        "Find a Tender coverage: "
-        f"{coverage}; windows={stats['windows']}; pages={stats['pages']}; "
-        f"records={stats['records']}; truncated_windows={stats['truncated_windows']}; "
-        f"stopped={stats['stopped'] or 'no'}; error={stats['error'] or 'none'}"
-    )
+    _print_source_coverage("Find a Tender", stats)
     return results
 
 
@@ -910,6 +935,7 @@ def fetch_contracts_finder(days, max_pages, max_seconds=None, stats=None):
                                      started, max_seconds, stats))
         if stats["error"]:
             break
+    _print_source_coverage("Contracts Finder", stats)
     return results
 
 
@@ -982,8 +1008,9 @@ def fetch_bearings(max_seconds=None, stats=None):
         "records": len(results),
         "last_batch": len(results),
         "windows": 1,
-        "more": possible_cap,
-        "truncated_windows": 1 if possible_cap else 0,
+        "more": False,
+        "possible_cap": possible_cap,
+        "truncated_windows": 0,
         "full_end": False,
     })
     if possible_cap:
@@ -992,6 +1019,7 @@ def fetch_bearings(max_seconds=None, stats=None):
             "may exist, but the API response supplied no confirmed next-page cursor",
             file=sys.stderr,
         )
+    _print_source_coverage("Bearings", stats)
     return results
 
 
@@ -1137,17 +1165,18 @@ def fetch_standstill_northwest(max_seconds=None, stats=None):
     raw_count = len(output)
     output = dedupe(output)
     stats.update({
-        "pages": sum(1 for value in feed_counts.values() if value >= 0),
+        "pages": len(feed_counts),
         "records": len(output),
         "raw_records": raw_count,
         "last_batch": len(output),
-        "windows": len(feed_counts),
+        "windows": len(feeds),
         "more": False,
         "full_end": any(value >= 50 for value in feed_counts.values()),
         "feed_counts": feed_counts,
-        "partial_errors": "; ".join(errors)[:320] if feed_counts else "",
+        "partial_errors": "; ".join(errors)[:320] if errors and feed_counts else "",
         "error": ("; ".join(errors)[:320] if errors and not feed_counts else ""),
     })
+    _print_source_coverage("Standstill UK (RSS discovery)", stats)
     return output
 
 
