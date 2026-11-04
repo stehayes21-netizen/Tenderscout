@@ -906,6 +906,9 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
         if saved and saved.get("complete") and window_index >= 2:
             window_results = list(saved.get("records") or [])
             stats["windows"] += 1
+            # Include reused records in the source total without counting them
+            # as newly fetched pages.
+            stats["records"] += len(window_results)
             results.extend(window_results)
             continue
         if stats["windows"] and not stats.get("last_page_had_cursor"):
