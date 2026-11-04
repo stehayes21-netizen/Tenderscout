@@ -60,30 +60,37 @@ class FindATenderPaginationTests(unittest.TestCase):
         self.assertTrue(saved[0][1])
         self.assertFalse(saved[0][2])
 
-    def test_completed_window_is_reused_without_fetching_again(self):
-        window = (dt("2026-10-21T00:00:00"), dt("2026-10-22T00:00:00"))
+    def test_recent_completed_windows_are_refetched_but_history_is_reused(self):
+        windows = [
+            (dt("2026-11-04T00:00:00"), dt("2026-11-05T00:00:00")),
+            (dt("2026-11-03T00:00:00"), dt("2026-11-04T00:00:00")),
+            (dt("2026-10-26T00:00:00"), dt("2026-11-02T00:00:00")),
+        ]
 
         class Checkpoint:
             def __init__(self):
                 self.loaded = []
+                self.saved = []
 
             def load(self, key):
                 self.loaded.append(key)
-                return {"records": [{"id": "already-collected"}], "cursor": None, "complete": True}
+                return {"records": [{"id": key}], "cursor": None, "complete": True}
 
             def save(self, key, state):
-                raise AssertionError("A completed window must not be fetched or rewritten")
+                self.saved.append((key, state))
 
         checkpoint = Checkpoint()
         with (
-            patch.object(tenderscout, "_fts_windows", return_value=[window]),
-            patch.object(tenderscout, "_page_through") as page_through,
+            patch.object(tenderscout, "_fts_windows", return_value=windows),
+            patch.object(tenderscout, "_page_through", return_value=[]) as page_through,
+            patch.object(tenderscout.time, "sleep"),
         ):
-            rows = tenderscout.fetch_fts(days=1, max_pages=10, checkpoint=checkpoint)
+            rows = tenderscout.fetch_fts(days=10, max_pages=10, checkpoint=checkpoint)
 
-        self.assertEqual(rows, [{"id": "already-collected"}])
-        self.assertEqual(checkpoint.loaded, ["2026-10-21T00:00:00|2026-10-22T00:00:00"])
-        page_through.assert_not_called()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], "2026-10-26T00:00:00|2026-11-02T00:00:00")
+        self.assertEqual(page_through.call_count, 2)
+        self.assertEqual(len(checkpoint.saved), 2)
 
     def test_page_limit_marks_window_as_truncated(self):
         stats = tenderscout._start_stats({})
