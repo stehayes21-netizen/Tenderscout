@@ -808,7 +808,10 @@ def _fts_windows(days, recent_days=10):
     Older history stays weekly so the hosted collector can cover more time within
     Find a Tender's rate limit.
     """
-    now = datetime.now(timezone.utc)
+    # Anchor search windows to UTC day boundaries so later refreshes can resume
+    # the exact same unfinished query window rather than generating a new cursor.
+    current = datetime.now(timezone.utc)
+    now = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     earliest = now - timedelta(days=days)
     recent_cutoff = max(earliest, now - timedelta(days=min(days, recent_days)))
     windows = []
