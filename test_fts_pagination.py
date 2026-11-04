@@ -79,7 +79,7 @@ class FindATenderPaginationTests(unittest.TestCase):
         ]
         calls = []
 
-        def fake_page_through(base_url, params, source, max_pages, started, max_seconds, stats):
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds, stats, **kwargs):
             calls.append(max_pages)
             return []
 
