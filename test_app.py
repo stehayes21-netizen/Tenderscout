@@ -1374,3 +1374,28 @@ class CrossSourceDedupeTests(unittest.TestCase):
             "published_date": "2026-11-03",
             "opportunity_stage": "Open for bids",
         }
+
+class NullSafeGeographyTextTests(unittest.TestCase):
+    def test_classify_geography_handles_explicit_null_title_and_description(self):
+        import tenderscout
+        result = tenderscout.classify_geography(
+            {"title": None, "description": None, "location_text": ""},
+            "North West",
+        )
+        self.assertEqual(result[0], "REVIEW")
+
+    def test_classify_geography_handles_missing_title_and_description(self):
+        import tenderscout
+        result = tenderscout.classify_geography(
+            {"location_text": ""},
+            "North West",
+        )
+        self.assertEqual(result[0], "REVIEW")
+
+    def test_classify_geography_handles_mixed_null_and_text_fields(self):
+        import tenderscout
+        result = tenderscout.classify_geography(
+            {"title": "Cleaning services", "description": None, "location_text": ""},
+            "North West",
+        )
+        self.assertEqual(result[0], "REVIEW")
