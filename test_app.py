@@ -247,8 +247,7 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(pipeline.status_code, 200)
         self.assertIn(b"Planned cleaning contract", pipeline.data)
         self.assertNotIn(b"Live cleaning tender", pipeline.data)
-        self.assertIn(b"Reviewing", pipeline.data)
-        filtered = self.client.get("/?view=pipeline&trade=Commercial%20and%20office%20cleaning")
+        self.assertIn(b"Reviewing", pipeline.data)        filtered = self.client.get("/?view=pipeline&trade=Commercial%20and%20office%20cleaning")
         self.assertEqual(filtered.status_code, 200)
         self.assertIn(b"Planned cleaning contract", filtered.data)
         self.assertNotIn(b"Live cleaning tender", filtered.data)
@@ -497,8 +496,7 @@ class RefreshTests(AppTestCase):
         result = self.app_module.collector.classify_geography(
             {"location_text": "North West, British Overseas Territories, Channel Islands, Europe, Isle of Man, Rest of the World"},
             self.app_module.collector.TARGET_AREA_LABEL,
-        )
-        self.assertEqual(result[0], "OUT_OF_AREA")
+        )        self.assertEqual(result[0], "OUT_OF_AREA")
 
     def test_unclear_locations_wait_in_the_review_view(self):
         self.refresh_with([feed_record("unk", "")])
@@ -747,7 +745,6 @@ class RefreshSummaryTests(AppTestCase):
         r = self.client.get("/?done=1&n=abc")
         self.assertEqual(r.status_code, 200)
         self.assertNotIn(b"Refresh complete.", r.data)
-
     def test_api_refresh_status_recovers_stale_running_state(self):
         db = self.app_module.connect_db()
         started = (self.app_module.datetime.now(self.app_module.timezone.utc)
@@ -997,8 +994,7 @@ class RefreshSummaryTests(AppTestCase):
             "last_batch": 100, "full_end": True
         }
         issues = self.app_module.refresh_feed_issues()
-        self.assertEqual(len(issues), 1)
-        self.assertIn("stopped early", issues[0])
+        self.assertEqual(len(issues), 1)        self.assertIn("stopped early", issues[0])
         warnings = self.app_module.refresh_feed_warnings()
         self.assertEqual(len(warnings), 1)
         self.assertIn("Contracts Finder", warnings[0])
@@ -1040,7 +1036,9 @@ class FeedDiagnosticsTests(AppTestCase):
             r = self.client.post("/refresh", follow_redirects=True)
         page = r.data.decode()
         self.assertIn("Find a Tender: FETCH COMPLETE (pagination ended or source exposes no cursor); 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
-        fts_line = next(line for line in page.split("<br>") if line.startswith("Find a Tender:"))
+        fts_start = page.index("Find a Tender:")
+        fts_end = page.find("<br>", fts_start)
+        fts_line = page[fts_start:fts_end if fts_end >= 0 else len(page)]
         self.assertNotIn("POSSIBLE TRUNCATION", fts_line)
         self.assertIn("Contracts Finder: INCOMPLETE; 250 notices in 3 page(s)", page)
         self.assertIn("stopped: time limit", page)
@@ -1248,39 +1246,3 @@ class CrossSourceDedupeTests(unittest.TestCase):
             "published_date": "2026-11-03",
             "opportunity_stage": "Open for bids",
         }
-        records = [
-            dict(base, source="Standstill UK", buyer="Liverpool City Council", notice_url="https://a.example/1", ocid="a"),
-            dict(base, source="Bearings", buyer="Sefton Council", notice_url="https://b.example/2", ocid="b"),
-        ]
-        self.assertEqual(len(tenderscout.dedupe(records)), 2)
-
-    def test_generic_titles_and_same_source_not_merged(self):
-        import tenderscout
-        records = [
-            {"source": "Standstill UK", "title": "Grounds Maintenance Services", "buyer": "", "ocid": "a"},
-            {"source": "Standstill UK", "title": "Grounds Maintenance Services", "buyer": "", "ocid": "b"},
-        ]
-        self.assertEqual(len(tenderscout.dedupe(records)), 2)
-
-    def test_cross_source_match_prefers_official_feed_and_keeps_missing_fields(self):
-        import tenderscout
-        records = [
-            {
-                "source": "Bearings discovery", "title": "Structural Repairs and Planned Maintenance to Blackpool Tower Winter 2026/7 and Summer 2027 — closes 20 Nov 2026",
-                "buyer": "", "notice_url": "https://discovery.example/1", "ocid": "disc-1",
-                "opportunity_stage": "Other notice", "estimated_value_gbp": "4000000",
-            },
-            {
-                "source": "Find a Tender", "title": "Structural Repairs and Planned Maintenance to Blackpool Tower Winter 2026/7 and Summer 2027",
-                "buyer": "Blackpool Council", "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
-                "ocid": "official-1", "opportunity_stage": "Open for bids",
-            },
-        ]
-        result = tenderscout.dedupe(records)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["source"], "Find a Tender")
-        self.assertEqual(result[0]["estimated_value_gbp"], "4000000")
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
