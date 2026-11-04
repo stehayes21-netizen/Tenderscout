@@ -77,7 +77,6 @@ class FindATenderPaginationTests(unittest.TestCase):
             patch.object(tenderscout, "_fts_windows", return_value=[window]),
             patch.object(tenderscout, "_page_through") as page_through,
         ):
-             patch.object(tenderscout, "_page_through") as page_through:
             rows = tenderscout.fetch_fts(days=1, max_pages=10, checkpoint=checkpoint)
 
         self.assertEqual(rows, [{"id": "already-collected"}])
