@@ -890,7 +890,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
     results = []
     started = time.monotonic()
     windows = _fts_windows(days)
-    for start, end in windows:
+    for window_index, (start, end) in enumerate(windows):
         if stats["stopped"] or stats["error"]:
             break
         params = {
@@ -900,7 +900,10 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
         }
         window_key = params["updatedFrom"] + "|" + params["updatedTo"]
         saved = checkpoint.load(window_key) if checkpoint else None
-        if saved and saved.get("complete"):
+        # Re-fetch the two most recent daily windows on every refresh. Their
+        # contents can change as notices are published/updated during the day;
+        # older completed windows are stable and can be safely reused.
+        if saved and saved.get("complete") and window_index >= 2:
             window_results = list(saved.get("records") or [])
             stats["windows"] += 1
             results.extend(window_results)
