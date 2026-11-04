@@ -978,9 +978,11 @@ def run_refresh():
         db.commit()
     finally:
         db.close()
-    # Clear only after every fetched record has been committed to the tender
-    # table. If scoring or persistence fails, the page checkpoints remain.
-    fts_checkpoint.clear()
+    # Clear only after every fetched record has been committed and Find a
+    # Tender reached the end of its cursor chain. Partial/time-limited runs must
+    # retain their accumulated records and cursor for the next refresh.
+    if collector._coverage_status(fts_stats) != "INCOMPLETE":
+        fts_checkpoint.clear()
     for kind, lines in samples.items():
         for line in lines:
             app.logger.warning("REFRESH %s: %s", kind, line)
