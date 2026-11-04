@@ -40,9 +40,9 @@ class FindATenderPaginationTests(unittest.TestCase):
         batches = [[{"id": "page-two"}]]
         saved = []
 
-        with patch.object(tenderscout, "get_json", return_value=payload) as get_json, \\
-             patch.object(tenderscout, "extract_records", side_effect=batches), \\
-             patch.object(tenderscout.time, "sleep"):
+        with (patch.object(tenderscout, "get_json", return_value=payload) as get_json,
+              patch.object(tenderscout, "extract_records", side_effect=batches),
+              patch.object(tenderscout.time, "sleep")):
             rows = tenderscout._page_through(
                 tenderscout.FTS_URL, {"limit": "100"}, "Find a Tender", 1,
                 tenderscout.time.monotonic(), None, stats,
