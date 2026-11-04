@@ -101,6 +101,34 @@ class FindATenderWindowStrategyTests(unittest.TestCase):
         self.assertEqual(windows[10][1], windows[9][0])
         self.assertEqual(windows[10][1] - windows[10][0], tenderscout.timedelta(days=7))
 
+    def test_historical_weekly_windows_stay_fixed_across_adjacent_days(self):
+        real_datetime = tenderscout.datetime
+
+        class Wednesday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
+
+        class Thursday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+        with patch.object(tenderscout, "datetime", Wednesday):
+            wed = tenderscout._fts_windows(60, recent_days=10)
+        with patch.object(tenderscout, "datetime", Thursday):
+            thu = tenderscout._fts_windows(60, recent_days=10)
+
+        wed_weekly = [window for window in wed if window[1] - window[0] >= tenderscout.timedelta(days=6)]
+        thu_weekly = [window for window in thu if window[1] - window[0] >= tenderscout.timedelta(days=6)]
+        self.assertEqual(wed_weekly, thu_weekly)
+        self.assertTrue(all(end.weekday() == 0 and end.hour == 0 for _, end in wed_weekly[:-1]))
+        for windows in (wed, thu):
+            ordered = sorted(windows, key=lambda window: window[0])
+            self.assertEqual(ordered[0][0], ordered[-1][1] - tenderscout.timedelta(days=60))
+            for (_, end), (start, _) in zip(ordered, ordered[1:]):
+                self.assertEqual(end, start)
+
 
 class FindATenderDirectLookupTests(unittest.TestCase):
     def test_known_notice_uses_official_id_endpoint(self):
