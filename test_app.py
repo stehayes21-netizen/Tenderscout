@@ -997,9 +997,9 @@ class RefreshSummaryTests(AppTestCase):
             "last_batch": 100, "full_end": True
         }
         issues = self.app_module.refresh_feed_issues()
-        self.assertEqual(len(issues), 2)
+        self.assertEqual(len(issues), 1)
         self.assertIn("stopped early", issues[0])
-        self.assertIn("possible page truncation", issues[1])
+        self.assertEqual(self.app_module.refresh_feed_warnings(), [])
 
     def test_api_refresh_status_reports_success_and_summary(self):
         collector = self.app_module.collector
@@ -1036,10 +1036,11 @@ class FeedDiagnosticsTests(AppTestCase):
              patch.object(collector, "fetch_contracts_finder", side_effect=fake_cf):
             r = self.client.post("/refresh", follow_redirects=True)
         page = r.data.decode()
-        self.assertIn("Find a Tender: 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
-        self.assertIn("no next-page link came back, so results may be cut off", page)
-        self.assertIn("Contracts Finder: 250 notices in 3 page(s)", page)
-        self.assertIn("Stopped early (time limit)", page)
+        self.assertIn("Find a Tender: FETCH COMPLETE; 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
+        self.assertNotIn("POSSIBLE TRUNCATION", page)
+        self.assertIn("Contracts Finder: INCOMPLETE; 250 notices in 3 page(s)", page)
+        self.assertIn("stopped: time limit", page)
+        self.assertIn("Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley and Wirral. Warrington and Cheshire West and Chester are excluded.", page)
 
     def test_collector_records_pages_and_stops_when_no_next_link(self):
         import tenderscout
