@@ -132,9 +132,44 @@ class SourceCoverageDiagnosticsTests(unittest.TestCase):
         with patch.object(tenderscout, "get_json", return_value={"data": data}):
             rows = tenderscout.fetch_bearings(stats=stats)
         self.assertEqual(len(rows), 200)
-        self.assertTrue(stats["more"])
-        self.assertEqual(stats["truncated_windows"], 1)
+        self.assertFalse(stats["more"])
+        self.assertTrue(stats["possible_cap"])
+        self.assertEqual(stats["truncated_windows"], 0)
         self.assertFalse(stats["full_end"])
+        self.assertEqual(tenderscout._coverage_status(stats), "POSSIBLE TRUNCATION")
+
+
+class ConsistentSourceCoverageSummaryTests(unittest.TestCase):
+    def test_cursor_remaining_is_incomplete(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"windows": 2, "pages": 6, "records": 600,
+                      "more": True, "truncated_windows": 1})
+        self.assertEqual(tenderscout._coverage_status(stats), "INCOMPLETE")
+
+    def test_source_error_is_incomplete_even_after_partial_records(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 2, "records": 120, "error": "HTTP 429"})
+        self.assertEqual(tenderscout._coverage_status(stats), "INCOMPLETE")
+
+    def test_partial_standstill_feed_failure_is_incomplete(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 5, "windows": 7, "records": 80,
+                      "partial_errors": "Construction CPV: timeout"})
+        self.assertEqual(tenderscout._coverage_status(stats), "INCOMPLETE")
+
+    def test_standstill_feed_cap_is_possible_truncation(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 7, "windows": 7, "records": 350,
+                      "full_end": True})
+        self.assertEqual(tenderscout._coverage_status(stats), "POSSIBLE TRUNCATION")
+
+    def test_clean_cursor_end_is_not_misreported_as_incomplete(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 3, "windows": 2, "records": 175})
+        self.assertEqual(
+            tenderscout._coverage_status(stats),
+            "FETCH COMPLETE (pagination ended or source exposes no cursor)",
+        )
 
 
 if __name__ == "__main__":
