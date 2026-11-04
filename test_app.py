@@ -80,6 +80,24 @@ class AppTestCase(unittest.TestCase):
 
 
 class AppSmokeTest(AppTestCase):
+    def test_empty_feed_refresh_still_reclassifies_saved_geography(self):
+        db = self.app_module.connect_db()
+        db.execute(
+            "INSERT INTO tenders (source, title, location_text, description, service_match, "
+            "region_match, geography_reason, notice_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("Find a Tender", "stale Warrington record", "UKD61", "Cleaning services",
+             "Cleaning", "LOCAL", "old classification", "https://example.com/stale-warrington"),
+        )
+        db.commit()
+        db.close()
+
+        self.refresh_with([])
+
+        db = self.app_module.connect_db()
+        row = db.execute("SELECT region_match FROM tenders WHERE title = ?",
+                         ("stale Warrington record",)).fetchone()
+        db.close()
+        self.assertEqual(row["region_match"], "OUT_OF_AREA")
     def test_refresh_reclassifies_existing_saved_geography_without_resetting_pipeline(self):
         db = self.app_module.connect_db()
         fixtures = [
