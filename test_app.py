@@ -1085,7 +1085,7 @@ class FeedDiagnosticsTests(AppTestCase):
     def test_dashboard_shows_what_each_feed_returned(self):
         collector = self.app_module.collector
 
-        def fake_fts(days, pages, limit, stats):
+        def fake_fts(days, pages, limit, stats, checkpoint=None):
             stats.update({"pages": 1, "records": 100, "last_batch": 100, "more": False,
                           "error": "", "stopped": "", "first_date": "2026-10-11",
                           "last_date": "2026-10-12"})
