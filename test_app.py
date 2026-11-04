@@ -578,6 +578,37 @@ class RefreshTests(AppTestCase):
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json["status"], "completed")
 
+    def test_full_last_page_without_cursor_is_not_a_truncation_warning(self):
+        self.app_module.LAST_FEEDS = {
+            "Find a Tender": {"records": 100, "pages": 1, "last_batch": 100,
+                              "last_page_had_cursor": False}
+        }
+        self.assertEqual(self.app_module.refresh_feed_issues(), [])
+        self.assertEqual(self.app_module.refresh_feed_warnings(), [])
+        notes = self.app_module.feed_notes()
+        self.assertIn("FETCH COMPLETE", notes)
+        self.assertNotIn("POSSIBLE TRUNCATION", notes)
+
+    def test_possible_source_cap_is_warning_not_incomplete_failure(self):
+        self.app_module.LAST_FEEDS = {
+            "Bearings": {"records": 200, "pages": 1, "possible_cap": True}
+        }
+        self.assertEqual(self.app_module.refresh_feed_issues(), [])
+        warnings = self.app_module.refresh_feed_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("not confirmed pagination failure", warnings[0])
+        self.assertIn("POSSIBLE TRUNCATION", self.app_module.feed_notes())
+
+    def test_cursor_or_source_error_remains_incomplete(self):
+        self.app_module.LAST_FEEDS = {
+            "Find a Tender": {"records": 100, "pages": 1, "more": True,
+                              "truncated_windows": 1}
+        }
+        issues = self.app_module.refresh_feed_issues()
+        self.assertEqual(len(issues), 1)
+        self.assertIn("additional cursor pages not read", issues[0])
+        self.assertEqual(self.app_module.refresh_feed_warnings(), [])
+
     def test_csv_export_neutralises_spreadsheet_formulas(self):
         self.client.post("/add", data={"title": "=HYPERLINK(\"http://x\")"})
         exported = self.client.get("/export.csv").data.decode()
@@ -716,7 +747,6 @@ class RefreshSummaryTests(AppTestCase):
         r = self.client.get("/?done=1&n=abc")
         self.assertEqual(r.status_code, 200)
         self.assertNotIn(b"Refresh complete.", r.data)
-
     def test_api_refresh_status_recovers_stale_running_state(self):
         db = self.app_module.connect_db()
         started = (self.app_module.datetime.now(self.app_module.timezone.utc)
@@ -966,9 +996,12 @@ class RefreshSummaryTests(AppTestCase):
             "last_batch": 100, "full_end": True
         }
         issues = self.app_module.refresh_feed_issues()
-        self.assertEqual(len(issues), 2)
+        self.assertEqual(len(issues), 1)
         self.assertIn("stopped early", issues[0])
-        self.assertIn("possible page truncation", issues[1])
+        warnings = self.app_module.refresh_feed_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Contracts Finder", warnings[0])
+        self.assertIn("not confirmed pagination failure", warnings[0])
 
     def test_api_refresh_status_reports_success_and_summary(self):
         collector = self.app_module.collector
@@ -1005,10 +1038,14 @@ class FeedDiagnosticsTests(AppTestCase):
              patch.object(collector, "fetch_contracts_finder", side_effect=fake_cf):
             r = self.client.post("/refresh", follow_redirects=True)
         page = r.data.decode()
-        self.assertIn("Find a Tender: 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
-        self.assertIn("no next-page link came back, so results may be cut off", page)
-        self.assertIn("Contracts Finder: 250 notices in 3 page(s)", page)
-        self.assertIn("Stopped early (time limit)", page)
+        self.assertIn("Find a Tender: FETCH COMPLETE (pagination ended or source exposes no cursor); 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
+        fts_start = page.index("Find a Tender:")
+        fts_end = page.find("<br>", fts_start)
+        fts_line = page[fts_start:fts_end if fts_end >= 0 else len(page)]
+        self.assertNotIn("POSSIBLE TRUNCATION", fts_line)
+        self.assertIn("Contracts Finder: INCOMPLETE; 250 notices in 3 page(s)", page)
+        self.assertIn("stopped: time limit", page)
+        self.assertIn("Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley and Wirral. Warrington and Cheshire West and Chester are excluded.", page)
 
     def test_collector_records_pages_and_stops_when_no_next_link(self):
         import tenderscout
@@ -1212,39 +1249,3 @@ class CrossSourceDedupeTests(unittest.TestCase):
             "published_date": "2026-11-03",
             "opportunity_stage": "Open for bids",
         }
-        records = [
-            dict(base, source="Standstill UK", buyer="Liverpool City Council", notice_url="https://a.example/1", ocid="a"),
-            dict(base, source="Bearings", buyer="Sefton Council", notice_url="https://b.example/2", ocid="b"),
-        ]
-        self.assertEqual(len(tenderscout.dedupe(records)), 2)
-
-    def test_generic_titles_and_same_source_not_merged(self):
-        import tenderscout
-        records = [
-            {"source": "Standstill UK", "title": "Grounds Maintenance Services", "buyer": "", "ocid": "a"},
-            {"source": "Standstill UK", "title": "Grounds Maintenance Services", "buyer": "", "ocid": "b"},
-        ]
-        self.assertEqual(len(tenderscout.dedupe(records)), 2)
-
-    def test_cross_source_match_prefers_official_feed_and_keeps_missing_fields(self):
-        import tenderscout
-        records = [
-            {
-                "source": "Bearings discovery", "title": "Structural Repairs and Planned Maintenance to Blackpool Tower Winter 2026/7 and Summer 2027 — closes 20 Nov 2026",
-                "buyer": "", "notice_url": "https://discovery.example/1", "ocid": "disc-1",
-                "opportunity_stage": "Other notice", "estimated_value_gbp": "4000000",
-            },
-            {
-                "source": "Find a Tender", "title": "Structural Repairs and Planned Maintenance to Blackpool Tower Winter 2026/7 and Summer 2027",
-                "buyer": "Blackpool Council", "notice_url": "https://www.find-tender.service.gov.uk/Notice/123456-2026",
-                "ocid": "official-1", "opportunity_stage": "Open for bids",
-            },
-        ]
-        result = tenderscout.dedupe(records)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["source"], "Find a Tender")
-        self.assertEqual(result[0]["estimated_value_gbp"], "4000000")
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

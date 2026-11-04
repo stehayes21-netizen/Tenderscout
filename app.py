@@ -601,6 +601,9 @@ def dashboard():
     banner = ""
     if request.args.get("refresh_started") == "1":
         banner = '<div class="banner"><b>Refresh already running.</b> The existing search is still in progress. Reload this page shortly to see its results.</div>'
+    refresh_summary = (request.args.get("refresh_summary") or "").strip()
+    if refresh_summary:
+        banner = '<div class="banner"><b>Refresh result.</b> ' + safe(refresh_summary) + '</div>'
     if request.args.get("done") == "1":
         try:
             counts = {k: max(0, min(int(request.args.get(k, "")), 1000000))
@@ -634,8 +637,7 @@ def dashboard():
       if (!response.ok) throw new Error('Status check returned HTTP ' + response.status);
       var state = await response.json();
       if (state.status === 'completed') {
-        show(state.summary || 'Search finished. Reloading opportunities…');
-        window.location.replace('/?done=0');
+        window.location.replace('/?refresh_summary=' + encodeURIComponent(state.summary || 'Search completed.'));
         return true;
       }
       if (state.status === 'incomplete') {
@@ -737,7 +739,7 @@ def dashboard():
     </style></head><body>
     <header><h1>Tender Scout</h1>
     <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
-    <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley, Wirral, Warrington and Cheshire West and Chester. Other North West areas are excluded.</p>
+    <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley and Wirral. Warrington and Cheshire West and Chester are excluded.</p>
     <form id="refresh-form" method="post" action="/refresh">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
     <p id="refresh-status" class="note" role="status" aria-live="polite" hidden></p></header>
@@ -934,31 +936,45 @@ def refresh_or_error():
     return stats, None
 
 
-def feed_notes():
-    """One short line per feed: what came back, and any sign it was cut short."""
+def feed_coverage_lines():
+    """Return per-source coverage labels using the collector's authoritative rules."""
     lines = []
-    for name, st in LAST_FEEDS.items():
-        if not st:
+    for name, stats in LAST_FEEDS.items():
+        if not isinstance(stats, dict):
             continue
-        text = f"{name}: {st.get('records', 0)} notices in {st.get('pages', 0)} page(s)"
-        if st.get("windows"):
-            text += f" over {st['windows']} week(s) searched"
-        if st.get("first_date"):
-            text += f", published {st['first_date']} to {st['last_date']}"
-        if st.get("feed_counts"):
-            feed_detail = ", ".join(f"{label}: {count}" for label, count in st["feed_counts"].items())
-            text += f". Feed breakdown — {feed_detail}"
-        if st.get("error"):
-            text += f". Problem: {st['error']}"
-        elif st.get("partial_errors"):
-            text += f". Some feeds failed: {st['partial_errors']}"
-        elif st.get("stopped"):
-            text += ". Stopped early (time limit), so there may be more"
-        elif st.get("more"):
-            text += ". More pages were available but not read"
-        elif st.get("full_end") or st.get("last_batch", 0) >= 100:
-            text += ". The last page was full but no next-page link came back, so results may be cut off"
-        lines.append(safe(text))
+        status = collector._coverage_status(stats)
+        line = (
+            f"{name}: {status}; {stats.get('records', 0)} notices "
+            f"in {stats.get('pages', 0)} page(s)"
+        )
+        if stats.get("first_date") and stats.get("last_date"):
+            line += f", published {stats['first_date']} to {stats['last_date']}"
+        if stats.get("windows"):
+            line += f" across {stats['windows']} search window(s)"
+        if stats.get("feed_counts"):
+            detail = ", ".join(
+                f"{label}: {count}" for label, count in stats["feed_counts"].items()
+            )
+            line += f"; feed breakdown: {detail}"
+        if stats.get("error"):
+            line += f"; error: {stats['error']}"
+        if stats.get("partial_errors"):
+            line += f"; partial errors: {stats['partial_errors']}"
+        if stats.get("stopped"):
+            line += f"; stopped: {stats['stopped']}"
+        if stats.get("more"):
+            line += "; additional cursor pages were not read"
+        if stats.get("truncated_windows"):
+            line += f"; truncated windows: {stats['truncated_windows']}"
+        if status == "POSSIBLE TRUNCATION":
+            line += "; source cap may have hidden more records (not confirmed)"
+        lines.append(line)
+    return lines
+
+
+def feed_notes():
+    """Render source-by-source diagnostics for the synchronous refresh result."""
+    lines = [safe(line) for line in feed_coverage_lines()]
     if not lines:
         return ""
     return '<div class="note">' + "<br>".join(lines) + "</div>"
@@ -989,10 +1005,12 @@ def refresh():
 
 
 def refresh_feed_issues():
-    """Return feeds with explicit signs that collection may be incomplete."""
+    """Return only proven collector conditions that make coverage incomplete."""
     issues = []
     for name, feed in LAST_FEEDS.items():
         if not isinstance(feed, dict):
+            continue
+        if collector._coverage_status(feed) != "INCOMPLETE":
             continue
         reasons = []
         if feed.get("error"):
@@ -1002,14 +1020,25 @@ def refresh_feed_issues():
         if feed.get("stopped"):
             reasons.append("stopped early")
         if feed.get("more"):
-            reasons.append("more pages available")
+            reasons.append("additional cursor pages not read")
         if feed.get("truncated_windows"):
             reasons.append("one or more search windows truncated")
-        if feed.get("full_end") or feed.get("last_batch", 0) >= 100:
-            reasons.append("possible page truncation")
-        if reasons:
-            issues.append(f"{name}: {', '.join(reasons)}")
+        issues.append(f"{name}: {', '.join(reasons) or 'collector marked coverage incomplete'}")
     return issues
+
+
+def refresh_feed_warnings():
+    """Return possible source-cap truncation separately from incomplete collection."""
+    warnings = []
+    for name, feed in LAST_FEEDS.items():
+        if not isinstance(feed, dict):
+            continue
+        if collector._coverage_status(feed) == "POSSIBLE TRUNCATION":
+            warnings.append(
+                f"{name}: source cap may have hidden additional records; "
+                "this is a warning, not confirmed pagination failure"
+            )
+    return warnings
 
 
 def _set_refresh_state(status, summary="", error="", refresh_token=None):
@@ -1064,13 +1093,21 @@ def _run_background_refresh(refresh_token=None):
             _set_refresh_state("failed", error=error.get_data(as_text=True)[:1000], refresh_token=refresh_token)
             return None, error
         summary = summary_text(stats)
+        coverage_lines = feed_coverage_lines()
+        if coverage_lines:
+            summary += " Source coverage: " + " | ".join(coverage_lines)
         issues = refresh_feed_issues()
+        warnings = refresh_feed_warnings()
         if issues:
             detail = "; ".join(issues)
             _set_refresh_state("incomplete", summary=summary + " Some source results may be missing.",
                                error="Partial collection: " + detail[:900], refresh_token=refresh_token)
             app.logger.warning("Refresh saved partial results: %s", detail)
         else:
+            if warnings:
+                warning_text = "; ".join(warnings)
+                summary += " Coverage warning: " + warning_text
+                app.logger.warning("Refresh completed with possible source-cap warnings: %s", warning_text)
             _set_refresh_state("completed", summary=summary, refresh_token=refresh_token)
         return stats, None
     except Exception:
