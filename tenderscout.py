@@ -1236,10 +1236,13 @@ def classify_geography(record, region):
 
     raw_location_text = str(record.get("location_text") or "")
     location_text = raw_location_text.lower()
-    prose = " ".join([
-        record.get("title", ""),
-        record.get("description", ""),
-    ]).lower()
+    # Feed records may contain explicit nulls as well as missing keys.
+    # Normalise both before joining so one incomplete notice cannot abort
+    # saved-record geography reclassification.
+    prose = " ".join(
+        str(record.get(field) or "")
+        for field in ("title", "description")
+    ).lower()
 
     full, bare = postcode_districts(location_text, include_bare=True)
     districts = full | bare
