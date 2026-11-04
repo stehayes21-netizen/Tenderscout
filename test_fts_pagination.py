@@ -163,6 +163,12 @@ class ConsistentSourceCoverageSummaryTests(unittest.TestCase):
                       "full_end": True})
         self.assertEqual(tenderscout._coverage_status(stats), "POSSIBLE TRUNCATION")
 
+    def test_known_feed_failure_takes_priority_over_possible_cap(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 6, "windows": 7, "records": 300,
+                      "full_end": True, "partial_errors": "One feed timed out"})
+        self.assertEqual(tenderscout._coverage_status(stats), "INCOMPLETE")
+
     def test_clean_cursor_end_is_not_misreported_as_incomplete(self):
         stats = tenderscout._start_stats({})
         stats.update({"pages": 3, "windows": 2, "records": 175})
