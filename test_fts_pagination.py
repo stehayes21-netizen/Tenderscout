@@ -58,6 +58,29 @@ class FindATenderPaginationTests(unittest.TestCase):
         self.assertTrue(saved[0][1])
         self.assertFalse(saved[0][2])
 
+    def test_completed_window_is_reused_without_fetching_again(self):
+        window = (dt("2026-10-21T00:00:00"), dt("2026-10-22T00:00:00"))
+
+        class Checkpoint:
+            def __init__(self):
+                self.loaded = []
+
+            def load(self, key):
+                self.loaded.append(key)
+                return {"records": [{"id": "already-collected"}], "cursor": None, "complete": True}
+
+            def save(self, key, state):
+                raise AssertionError("A completed window must not be fetched or rewritten")
+
+        checkpoint = Checkpoint()
+        with patch.object(tenderscout, "_fts_windows", return_value=[window]), \\
+             patch.object(tenderscout, "_page_through") as page_through:
+            rows = tenderscout.fetch_fts(days=1, max_pages=10, checkpoint=checkpoint)
+
+        self.assertEqual(rows, [{"id": "already-collected"}])
+        self.assertEqual(checkpoint.loaded, ["2026-10-21T00:00:00|2026-10-22T00:00:00"])
+        page_through.assert_not_called()
+
     def test_page_limit_marks_window_as_truncated(self):
         stats = tenderscout._start_stats({})
         first = {"releases": [{"id": "a"}], "links": {"next": "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=next"}}
