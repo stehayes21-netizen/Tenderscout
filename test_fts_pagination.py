@@ -282,7 +282,7 @@ class FindATenderDailyCheckpointTests(unittest.TestCase):
 
         wed_daily = [w for w in wed if w[1] - w[0] == tenderscout.timedelta(days=1)]
         thu_daily = [w for w in thu if w[1] - w[0] == tenderscout.timedelta(days=1)]
-        self.assertEqual(wed_daily[1:], thu_daily[1:])
+        self.assertEqual(wed_daily, thu_daily[1:])
         self.assertIn(
             (dt("2026-11-04T00:00:00"), dt("2026-11-05T00:00:00")),
             thu_daily,
