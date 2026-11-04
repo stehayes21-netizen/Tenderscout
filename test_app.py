@@ -584,7 +584,10 @@ class RefreshTests(AppTestCase):
                               "last_page_had_cursor": False}
         }
         self.assertEqual(self.app_module.refresh_feed_issues(), [])
-        self.assertEqual(self.app_module.refresh_feed_warnings(), [])
+        warnings = self.app_module.refresh_feed_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Contracts Finder", warnings[0])
+        self.assertIn("not confirmed pagination failure", warnings[0])
         notes = self.app_module.feed_notes()
         self.assertIn("FETCH COMPLETE", notes)
         self.assertNotIn("POSSIBLE TRUNCATION", notes)
@@ -1036,7 +1039,7 @@ class FeedDiagnosticsTests(AppTestCase):
              patch.object(collector, "fetch_contracts_finder", side_effect=fake_cf):
             r = self.client.post("/refresh", follow_redirects=True)
         page = r.data.decode()
-        self.assertIn("Find a Tender: FETCH COMPLETE; 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
+        self.assertIn("Find a Tender: FETCH COMPLETE (pagination ended or source exposes no cursor); 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
         self.assertNotIn("POSSIBLE TRUNCATION", page)
         self.assertIn("Contracts Finder: INCOMPLETE; 250 notices in 3 page(s)", page)
         self.assertIn("stopped: time limit", page)
