@@ -88,6 +88,96 @@ class FindATenderDirectLookupTests(unittest.TestCase):
             tenderscout.fetch_fts_notice("../098300-2026")
 
 
+class SourceCoverageDiagnosticsTests(unittest.TestCase):
+    def test_full_sized_page_without_next_cursor_is_not_called_truncated(self):
+        stats = tenderscout._start_stats({})
+        batch = [{"id": str(i)} for i in range(100)]
+        payload = {"releases": [{}]}
+        with patch.object(tenderscout, "get_json", return_value=payload), \
+             patch.object(tenderscout, "extract_records", return_value=batch):
+            rows = tenderscout._page_through(
+                tenderscout.FTS_URL, {"limit": "100"}, "Find a Tender", 2,
+                tenderscout.time.monotonic(), None, stats
+            )
+        self.assertEqual(len(rows), 100)
+        self.assertFalse(stats["more"])
+        self.assertFalse(stats["full_end"])
+        self.assertEqual(stats["truncated_windows"], 0)
+
+    def test_empty_page_with_next_cursor_continues_pagination(self):
+        stats = tenderscout._start_stats({})
+        payloads = [
+            {"releases": [], "links": {"next": "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=next"}},
+            {"releases": [{}]},
+        ]
+        batches = [[], [{"id": "later-page"}]]
+        with patch.object(tenderscout, "get_json", side_effect=payloads) as get_json, \
+             patch.object(tenderscout, "extract_records", side_effect=batches), \
+             patch.object(tenderscout.time, "sleep"):
+            rows = tenderscout._page_through(
+                tenderscout.FTS_URL, {"limit": "100"}, "Find a Tender", 2,
+                tenderscout.time.monotonic(), None, stats
+            )
+        self.assertEqual(rows, [{"id": "later-page"}])
+        self.assertEqual(get_json.call_count, 2)
+        self.assertFalse(stats["more"])
+
+    def test_bearings_200_item_limit_is_reported_as_possible_truncation(self):
+        stats = {}
+        data = [
+            {"kind": "tender", "title": f"Opportunity {i}",
+             "url": f"https://example.com/opportunity/{i}"}
+            for i in range(200)
+        ]
+        with patch.object(tenderscout, "get_json", return_value={"data": data}):
+            rows = tenderscout.fetch_bearings(stats=stats)
+        self.assertEqual(len(rows), 200)
+        self.assertFalse(stats["more"])
+        self.assertTrue(stats["possible_cap"])
+        self.assertEqual(stats["truncated_windows"], 0)
+        self.assertFalse(stats["full_end"])
+        self.assertEqual(tenderscout._coverage_status(stats), "POSSIBLE TRUNCATION")
+
+
+class ConsistentSourceCoverageSummaryTests(unittest.TestCase):
+    def test_cursor_remaining_is_incomplete(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"windows": 2, "pages": 6, "records": 600,
+                      "more": True, "truncated_windows": 1})
+        self.assertEqual(tenderscout._coverage_status(stats), "INCOMPLETE")
+
+    def test_source_error_is_incomplete_even_after_partial_records(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 2, "records": 120, "error": "HTTP 429"})
+        self.assertEqual(tenderscout._coverage_status(stats), "INCOMPLETE")
+
+    def test_partial_standstill_feed_failure_is_incomplete(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 5, "windows": 7, "records": 80,
+                      "partial_errors": "Construction CPV: timeout"})
+        self.assertEqual(tenderscout._coverage_status(stats), "INCOMPLETE")
+
+    def test_standstill_feed_cap_is_possible_truncation(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 7, "windows": 7, "records": 350,
+                      "full_end": True})
+        self.assertEqual(tenderscout._coverage_status(stats), "POSSIBLE TRUNCATION")
+
+    def test_known_feed_failure_takes_priority_over_possible_cap(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 6, "windows": 7, "records": 300,
+                      "full_end": True, "partial_errors": "One feed timed out"})
+        self.assertEqual(tenderscout._coverage_status(stats), "INCOMPLETE")
+
+    def test_clean_cursor_end_is_not_misreported_as_incomplete(self):
+        stats = tenderscout._start_stats({})
+        stats.update({"pages": 3, "windows": 2, "records": 175})
+        self.assertEqual(
+            tenderscout._coverage_status(stats),
+            "FETCH COMPLETE (pagination ended or source exposes no cursor)",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
 
