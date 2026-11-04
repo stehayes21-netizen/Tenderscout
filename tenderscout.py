@@ -75,7 +75,7 @@ TRADE_KEYWORDS = {
     "School and college cleaning": ["school cleaning", "college cleaning", "education cleaning"],
     "Domestic and communal-area cleaning": ["communal cleaning", "domestic cleaning", "housing cleaning"],
     "Deep cleaning": ["deep clean", "deep cleaning", "specialist cleaning"],
-    "Industrial cleaning": ["industrial cleaning", "factory cleaning", "industrial hygiene"],
+    "Industrial cleaning": ["industrial cleaning", "factory cleaning", "industrial hygiene", "vehicle wash cleaning", "vehicle washing", "fleet washing", "vehicle cleaning", "steam cleaning vehicles"],
     "Window cleaning": ["window cleaning", "glass cleaning"],
     "Gutter cleaning": ["gutter cleaning", "gutter clearance"],
     "Carpet and upholstery cleaning": ["carpet cleaning", "upholstery cleaning"],
@@ -165,6 +165,7 @@ CLEANING_TERMS = [
     "specialized cleaning", "biohazard cleaning", "kitchen extraction",
     "commercial cleaning", "office cleaning", "contract cleaning",
     "building cleaning", "school cleaning", "communal cleaning",
+    "vehicle wash", "vehicle washing", "fleet washing", "vehicle cleaning", "steam cleaning vehicles",
     "cleansing services",
 ]
 FM_TERMS = [
@@ -1391,6 +1392,27 @@ def is_non_property_maintenance_scope(primary_text, secondary_text=""):
     return has_non_property_asset and not has_property_delivery
 
 
+SPECIALIST_NON_CORE_TERMS = (
+    "asbestos removal", "asbestos survey", "asbestos management",
+    "waste composition", "waste characterisation", "waste characterization",
+    "waste analysis", "waste sampling", "waste audit",
+)
+
+
+def is_specialist_non_core_scope(primary_text):
+    """Reject specialist asbestos/waste-analysis work unless the notice also specifies core delivery.
+
+    Secondary CPV or buyer metadata must not turn a specialist consultancy or
+    licensed asbestos contract into a cleaning/FM/property-maintenance lead.
+    Explicit core work in the title/description remains eligible for review.
+    """
+    primary = (primary_text or "").casefold()
+    specialist = any(term in primary for term in SPECIALIST_NON_CORE_TERMS)
+    core_terms = (CLEANING_TERMS, FM_TERMS, MAINTENANCE_TERMS, CONSTRUCTION_TERMS)
+    explicit_core_delivery = any(keyword_hits(primary, terms) for terms in core_terms)
+    return specialist and not explicit_core_delivery
+
+
 def score_record(record, services, region, min_value, max_value):
     primary_text = " ".join([
         record.get("title", ""), record.get("description", ""),
@@ -1399,6 +1421,10 @@ def score_record(record, services, region, min_value, max_value):
         record.get("trade_context", ""), record.get("buyer", ""),
     ]).lower()
     fulltext = " ".join([primary_text, secondary_text])
+    # Specialist asbestos/waste-analysis notices must not qualify merely
+    # because secondary CPV or buyer metadata contains a core-service term.
+    if is_specialist_non_core_scope(primary_text):
+        return None
     # Generic CPV phrases such as "repair and maintenance services" must not
     # turn vehicle fleets or medical equipment into property-maintenance leads.
     if is_non_property_maintenance_scope(primary_text, secondary_text):
