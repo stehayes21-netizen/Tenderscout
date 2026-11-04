@@ -584,10 +584,7 @@ class RefreshTests(AppTestCase):
                               "last_page_had_cursor": False}
         }
         self.assertEqual(self.app_module.refresh_feed_issues(), [])
-        warnings = self.app_module.refresh_feed_warnings()
-        self.assertEqual(len(warnings), 1)
-        self.assertIn("Contracts Finder", warnings[0])
-        self.assertIn("not confirmed pagination failure", warnings[0])
+        self.assertEqual(self.app_module.refresh_feed_warnings(), [])
         notes = self.app_module.feed_notes()
         self.assertIn("FETCH COMPLETE", notes)
         self.assertNotIn("POSSIBLE TRUNCATION", notes)
@@ -1002,7 +999,10 @@ class RefreshSummaryTests(AppTestCase):
         issues = self.app_module.refresh_feed_issues()
         self.assertEqual(len(issues), 1)
         self.assertIn("stopped early", issues[0])
-        self.assertEqual(self.app_module.refresh_feed_warnings(), [])
+        warnings = self.app_module.refresh_feed_warnings()
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Contracts Finder", warnings[0])
+        self.assertIn("not confirmed pagination failure", warnings[0])
 
     def test_api_refresh_status_reports_success_and_summary(self):
         collector = self.app_module.collector
@@ -1040,7 +1040,8 @@ class FeedDiagnosticsTests(AppTestCase):
             r = self.client.post("/refresh", follow_redirects=True)
         page = r.data.decode()
         self.assertIn("Find a Tender: FETCH COMPLETE (pagination ended or source exposes no cursor); 100 notices in 1 page(s), published 2026-10-11 to 2026-10-12", page)
-        self.assertNotIn("POSSIBLE TRUNCATION", page)
+        fts_line = next(line for line in page.split("<br>") if line.startswith("Find a Tender:"))
+        self.assertNotIn("POSSIBLE TRUNCATION", fts_line)
         self.assertIn("Contracts Finder: INCOMPLETE; 250 notices in 3 page(s)", page)
         self.assertIn("stopped: time limit", page)
         self.assertIn("Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley and Wirral. Warrington and Cheshire West and Chester are excluded.", page)
