@@ -802,24 +802,28 @@ def _windows(days, size=7):
 
 
 def _fts_windows(days, recent_days=10):
-    """Search recent Find a Tender updates in daily slices, then older history weekly.
+    """Search recent updates daily, then older history in fixed UTC weeks.
 
-    Daily slices avoid a busy week's first 400 releases hiding a recent notice.
-    Older history stays weekly so the hosted collector can cover more time within
-    Find a Tender's rate limit.
+    The recent/weekly boundary is anchored to the Monday at or before the
+    recent cutoff. This keeps historical weekly query windows identical across
+    refreshes during the same UTC week, so their saved cursors remain reusable.
     """
-    # Anchor search windows to UTC day boundaries so later refreshes can resume
-    # the exact same unfinished query window rather than generating a new cursor.
     current = datetime.now(timezone.utc)
     now = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     earliest = now - timedelta(days=days)
-    recent_cutoff = max(earliest, now - timedelta(days=min(days, recent_days)))
+    cutoff_target = now - timedelta(days=min(days, recent_days))
+    recent_cutoff = cutoff_target - timedelta(days=cutoff_target.weekday())
+    recent_cutoff = max(earliest, recent_cutoff)
+
     windows = []
     end = now
     while end > recent_cutoff:
         start = max(recent_cutoff, end - timedelta(days=1))
         windows.append((start, end))
         end = start
+
+    # recent_cutoff is Monday 00:00 UTC (unless the requested lookback starts
+    # later). Weekly history is therefore aligned to fixed calendar weeks.
     end = recent_cutoff
     while end > earliest:
         start = max(earliest, end - timedelta(days=7))
