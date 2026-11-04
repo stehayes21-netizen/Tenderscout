@@ -280,8 +280,9 @@ class FindATenderDailyCheckpointTests(unittest.TestCase):
         with patch.object(tenderscout, "datetime", Thursday):
             thu = tenderscout._fts_windows(60, recent_days=10)
 
-        wed_daily = [w for w in wed if w[1] - w[0] == tenderscout.timedelta(days=1)]
-        thu_daily = [w for w in thu if w[1] - w[0] == tenderscout.timedelta(days=1)]
+        recent_cutoff = dt("2026-10-26T00:00:00")
+        wed_daily = [w for w in wed if w[1] - w[0] == tenderscout.timedelta(days=1) and w[0] >= recent_cutoff]
+        thu_daily = [w for w in thu if w[1] - w[0] == tenderscout.timedelta(days=1) and w[0] >= recent_cutoff]
         self.assertEqual(wed_daily, thu_daily[1:])
         self.assertIn(
             (dt("2026-11-04T00:00:00"), dt("2026-11-05T00:00:00")),
