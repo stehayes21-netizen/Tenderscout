@@ -261,6 +261,92 @@ class ConsistentSourceCoverageSummaryTests(unittest.TestCase):
         )
 
 
+class FindATenderDailyCheckpointTests(unittest.TestCase):
+    def test_daily_windows_remain_stable_across_adjacent_days(self):
+        real_datetime = tenderscout.datetime
+
+        class Wednesday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
+
+        class Thursday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+        with patch.object(tenderscout, "datetime", Wednesday):
+            wed = tenderscout._fts_windows(60, recent_days=10)
+        with patch.object(tenderscout, "datetime", Thursday):
+            thu = tenderscout._fts_windows(60, recent_days=10)
+
+        wed_daily = [w for w in wed if w[1] - w[0] == tenderscout.timedelta(days=1)]
+        thu_daily = [w for w in thu if w[1] - w[0] == tenderscout.timedelta(days=1)]
+        self.assertEqual(wed_daily[1:], thu_daily[1:])
+        self.assertIn(
+            (dt("2026-11-04T00:00:00"), dt("2026-11-05T00:00:00")),
+            thu_daily,
+        )
+
+    def test_incomplete_daily_window_resumes_next_day_with_saved_cursor_and_records(self):
+        real_datetime = tenderscout.datetime
+
+        class Thursday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+        unfinished_key = "2026-11-04T00:00:00|2026-11-05T00:00:00"
+        prior_records = [{"id": "page-before-interruption"}]
+
+        class Checkpoint:
+            def __init__(self):
+                self.loaded = []
+
+            def load(self, key):
+                self.loaded.append(key)
+                if key == unfinished_key:
+                    return {
+                        "records": prior_records,
+                        "cursor": "saved-next-page-token",
+                        "complete": False,
+                    }
+                return None
+
+            def save(self, key, state):
+                pass
+
+        checkpoint = Checkpoint()
+        resumed = []
+
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds,
+                              stats, initial_cursor=None, initial_results=None, on_page=None):
+            if params["updatedFrom"] + "|" + params["updatedTo"] == unfinished_key:
+                resumed.append((initial_cursor, list(initial_results or [])))
+                stats["stopped"] = "time limit"
+                return list(initial_results or []) + [{"id": "page-after-resume"}]
+            return []
+
+        with (
+            patch.object(tenderscout, "datetime", Thursday),
+            patch.object(tenderscout, "_page_through", side_effect=fake_page_through),
+            patch.object(tenderscout.time, "sleep"),
+        ):
+            rows = tenderscout.fetch_fts(
+                days=60, max_pages=10, max_seconds=150, checkpoint=checkpoint
+            )
+
+        self.assertIn(unfinished_key, checkpoint.loaded)
+        self.assertEqual(
+            resumed,
+            [("saved-next-page-token", prior_records)],
+        )
+        self.assertEqual(
+            rows,
+            prior_records + [{"id": "page-after-resume"}],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
 
