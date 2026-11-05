@@ -911,6 +911,10 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
             stats["records"] += len(window_results)
             results.extend(window_results)
             continue
+        # A completed recent window is deliberately fetched from page one.
+        # Do not seed that fresh fetch with its previous records, or every
+        # refresh would append duplicate copies of the already-read pages.
+        resume_state = saved if saved and not saved.get("complete") else None
         if stats["windows"] and not stats.get("last_page_had_cursor"):
             time.sleep(10.5)
         stats["windows"] += 1
@@ -923,8 +927,8 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
                 })
         window_results = _page_through(
             FTS_URL, params, "Find a Tender", max_pages, started, max_seconds, stats,
-            initial_cursor=(saved or {}).get("cursor"),
-            initial_results=(saved or {}).get("records"),
+            initial_cursor=(resume_state or {}).get("cursor"),
+            initial_results=(resume_state or {}).get("records"),
             on_page=persist if checkpoint else None,
         )
         results.extend(window_results)
