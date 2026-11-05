@@ -139,12 +139,29 @@ class FindATenderPaginationTests(unittest.TestCase):
 
 class FindATenderWindowStrategyTests(unittest.TestCase):
     def test_recent_lookback_uses_daily_windows_then_weekly_history(self):
-        windows = tenderscout._fts_windows(24, recent_days=10)
-        self.assertEqual(len(windows), 12)  # 10 daily windows plus 2 older weekly windows
-        self.assertEqual(windows[0][1] - windows[0][0], tenderscout.timedelta(days=1))
-        self.assertEqual(windows[9][1] - windows[9][0], tenderscout.timedelta(days=1))
-        self.assertEqual(windows[10][1], windows[9][0])
-        self.assertEqual(windows[10][1] - windows[10][0], tenderscout.timedelta(days=7))
+        real_datetime = tenderscout.datetime
+
+        class Thursday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+        with patch.object(tenderscout, "datetime", Thursday):
+            windows = tenderscout._fts_windows(24, recent_days=10)
+
+        # The Monday-aligned recent boundary produces 11 daily windows here,
+        # followed by two fixed weekly history windows.
+        self.assertEqual(len(windows), 13)
+        for index in range(11):
+            self.assertEqual(
+                windows[index][1] - windows[index][0],
+                tenderscout.timedelta(days=1),
+            )
+        self.assertEqual(windows[11][1], windows[10][0])
+        self.assertEqual(
+            windows[11][1] - windows[11][0],
+            tenderscout.timedelta(days=7),
+        )
 
     def test_historical_weekly_windows_stay_fixed_across_adjacent_days(self):
         real_datetime = tenderscout.datetime
