@@ -80,12 +80,14 @@ class FindATenderPaginationTests(unittest.TestCase):
                 self.saved.append((key, state))
 
         checkpoint = Checkpoint()
+        fetch_inputs = []
 
         def fake_page_through(base_url, params, source, max_pages, started, max_seconds,
                               stats, initial_cursor=None, initial_results=None, on_page=None):
+            fetch_inputs.append((initial_cursor, list(initial_results or [])))
             if on_page:
                 on_page([], None, True)
-            return []
+            return [{"id": "fresh-" + params["updatedFrom"]}]
 
         stats = tenderscout._start_stats({})
         with (
@@ -97,9 +99,16 @@ class FindATenderPaginationTests(unittest.TestCase):
                 days=10, max_pages=10, checkpoint=checkpoint, stats=stats
             )
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["id"], "2026-10-26T00:00:00|2026-11-02T00:00:00")
+        self.assertEqual(
+            {row["id"] for row in rows},
+            {
+                "fresh-2026-11-04T00:00:00",
+                "fresh-2026-11-03T00:00:00",
+                "2026-10-26T00:00:00|2026-11-02T00:00:00",
+            },
+        )
         self.assertEqual(page_through.call_count, 2)
+        self.assertEqual(fetch_inputs, [(None, []), (None, [])])
         self.assertEqual(len(checkpoint.saved), 2)
         self.assertEqual(stats["records"], 1, "reused records must be included in feed totals")
 
