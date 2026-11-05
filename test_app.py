@@ -68,6 +68,21 @@ class AppTestCase(unittest.TestCase):
         self.assertFalse(can_clear({"stopped": "time limit"}))
         self.assertFalse(can_clear({"error": "HTTP 429"}))
 
+    def test_cancelled_and_withdrawn_notices_are_excluded_from_live_and_review(self):
+        collector = self.app_module.collector
+        for status in ("cancelled", "withdrawn"):
+            with self.subTest(status=status):
+                record = feed_record(
+                    f"nonlive-{status}",
+                    "Liverpool, L1 1AA",
+                    title=f"{status.title()} cleaning tender",
+                )
+                record["opportunity_stage"] = "Other notice"
+                record["status"] = status
+                self.assertTrue(collector.is_confirmed_nonlive_notice(record))
+                self.assertFalse(collector.shortlist_eligible_stage(record))
+                self.assertFalse(collector.review_eligible_stage(record))
+
     def refresh_with(self, records):
         collector = self.app_module.collector
         # Patch the executor as well as the feeds: the production refresh uses
