@@ -18,17 +18,99 @@ class FindATenderPaginationTests(unittest.TestCase):
         ]
         calls = []
 
-        def fake_page_through(base_url, params, source, max_pages, started, max_seconds, stats):
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds, stats, **kwargs):
             calls.append(max_pages)
             return []
 
-        with patch.object(tenderscout, "_fts_windows", return_value=windows), \
-             patch.object(tenderscout, "_page_through", side_effect=fake_page_through), \
-             patch.object(tenderscout.time, "sleep"):
+        with (
+            patch.object(tenderscout, "_fts_windows", return_value=windows),
+            patch.object(tenderscout, "_page_through", side_effect=fake_page_through),
+            patch.object(tenderscout.time, "sleep"),
+        ):
             result = tenderscout.fetch_fts(days=21, max_pages=10, max_seconds=150)
 
         self.assertEqual(result, [])
         self.assertEqual(calls, [10, 10, 10])
+
+    def test_resumed_window_keeps_prior_records_and_uses_saved_cursor(self):
+        stats = tenderscout._start_stats({})
+        prior = [{"id": "page-one"}]
+        payload = {
+            "releases": [{}],
+            "links": {"next": "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?cursor=last"},
+        }
+        batches = [[{"id": "page-two"}]]
+        saved = []
+
+        with (patch.object(tenderscout, "get_json", return_value=payload) as get_json,
+              patch.object(tenderscout, "extract_records", side_effect=batches),
+              patch.object(tenderscout.time, "sleep")):
+            rows = tenderscout._page_through(
+                tenderscout.FTS_URL, {"limit": "100"}, "Find a Tender", 1,
+                tenderscout.time.monotonic(), None, stats,
+                initial_cursor="resume-token", initial_results=prior,
+                on_page=lambda records, cursor, complete: saved.append(
+                    (list(records), cursor, complete)
+                ),
+            )
+
+        self.assertEqual(rows, prior + batches[0])
+        self.assertIn("cursor=resume-token", get_json.call_args.args[0])
+        self.assertEqual(saved[0][0], prior + batches[0])
+        self.assertTrue(saved[0][1])
+        self.assertFalse(saved[0][2])
+
+    def test_recent_completed_windows_are_refetched_but_history_is_reused(self):
+        windows = [
+            (dt("2026-11-04T00:00:00"), dt("2026-11-05T00:00:00")),
+            (dt("2026-11-03T00:00:00"), dt("2026-11-04T00:00:00")),
+            (dt("2026-10-26T00:00:00"), dt("2026-11-02T00:00:00")),
+        ]
+
+        class Checkpoint:
+            def __init__(self):
+                self.loaded = []
+                self.saved = []
+
+            def load(self, key):
+                self.loaded.append(key)
+                return {"records": [{"id": key}], "cursor": None, "complete": True}
+
+            def save(self, key, state):
+                self.saved.append((key, state))
+
+        checkpoint = Checkpoint()
+        fetch_inputs = []
+
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds,
+                              stats, initial_cursor=None, initial_results=None, on_page=None):
+            fetch_inputs.append((initial_cursor, list(initial_results or [])))
+            if on_page:
+                on_page([], None, True)
+            return [{"id": "fresh-" + params["updatedFrom"]}]
+
+        stats = tenderscout._start_stats({})
+        with (
+            patch.object(tenderscout, "_fts_windows", return_value=windows),
+            patch.object(tenderscout, "_page_through", side_effect=fake_page_through) as page_through,
+            patch.object(tenderscout.time, "sleep"),
+        ):
+            rows = tenderscout.fetch_fts(
+                days=10, max_pages=10, checkpoint=checkpoint, stats=stats
+            )
+
+        self.assertEqual(
+            {row["id"] for row in rows},
+            {
+                "fresh-2026-11-04T00:00:00",
+                "fresh-2026-11-03T00:00:00",
+                "2026-10-26T00:00:00|2026-11-02T00:00:00",
+            },
+        )
+        self.assertEqual(page_through.call_count, 2)
+        self.assertEqual(fetch_inputs, [(None, []), (None, [])])
+        self.assertEqual(len(checkpoint.saved), 2)
+        self.assertEqual(stats["records"], 1, "reused records must be included in feed totals")
 
     def test_page_limit_marks_window_as_truncated(self):
         stats = tenderscout._start_stats({})
@@ -51,7 +133,7 @@ class FindATenderPaginationTests(unittest.TestCase):
         ]
         calls = []
 
-        def fake_page_through(base_url, params, source, max_pages, started, max_seconds, stats):
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds, stats, **kwargs):
             calls.append(max_pages)
             return []
 
@@ -66,12 +148,57 @@ class FindATenderPaginationTests(unittest.TestCase):
 
 class FindATenderWindowStrategyTests(unittest.TestCase):
     def test_recent_lookback_uses_daily_windows_then_weekly_history(self):
-        windows = tenderscout._fts_windows(24, recent_days=10)
-        self.assertEqual(len(windows), 12)  # 10 daily windows plus 2 older weekly windows
-        self.assertEqual(windows[0][1] - windows[0][0], tenderscout.timedelta(days=1))
-        self.assertEqual(windows[9][1] - windows[9][0], tenderscout.timedelta(days=1))
-        self.assertEqual(windows[10][1], windows[9][0])
-        self.assertEqual(windows[10][1] - windows[10][0], tenderscout.timedelta(days=7))
+        real_datetime = tenderscout.datetime
+
+        class Thursday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+        with patch.object(tenderscout, "datetime", Thursday):
+            windows = tenderscout._fts_windows(24, recent_days=10)
+
+        # The Monday-aligned recent boundary produces 11 daily windows here,
+        # followed by two fixed weekly history windows.
+        self.assertEqual(len(windows), 13)
+        for index in range(11):
+            self.assertEqual(
+                windows[index][1] - windows[index][0],
+                tenderscout.timedelta(days=1),
+            )
+        self.assertEqual(windows[11][1], windows[10][0])
+        self.assertEqual(
+            windows[11][1] - windows[11][0],
+            tenderscout.timedelta(days=7),
+        )
+
+    def test_historical_weekly_windows_stay_fixed_across_adjacent_days(self):
+        real_datetime = tenderscout.datetime
+
+        class Wednesday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
+
+        class Thursday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+        with patch.object(tenderscout, "datetime", Wednesday):
+            wed = tenderscout._fts_windows(60, recent_days=10)
+        with patch.object(tenderscout, "datetime", Thursday):
+            thu = tenderscout._fts_windows(60, recent_days=10)
+
+        wed_weekly = [window for window in wed if window[1] - window[0] >= tenderscout.timedelta(days=6)]
+        thu_weekly = [window for window in thu if window[1] - window[0] >= tenderscout.timedelta(days=6)]
+        self.assertEqual(wed_weekly, thu_weekly)
+        self.assertTrue(all(end.weekday() == 0 and end.hour == 0 for _, end in wed_weekly[:-1]))
+        for windows in (wed, thu):
+            ordered = sorted(windows, key=lambda window: window[0])
+            self.assertEqual(ordered[0][0], ordered[-1][1] - tenderscout.timedelta(days=60))
+            for (_, end), (start, _) in zip(ordered, ordered[1:]):
+                self.assertEqual(end, start)
 
 
 class FindATenderDirectLookupTests(unittest.TestCase):
@@ -175,6 +302,152 @@ class ConsistentSourceCoverageSummaryTests(unittest.TestCase):
         self.assertEqual(
             tenderscout._coverage_status(stats),
             "FETCH COMPLETE (pagination ended or source exposes no cursor)",
+        )
+
+
+class FindATenderDailyCheckpointTests(unittest.TestCase):
+    def test_daily_windows_remain_stable_across_adjacent_days(self):
+        real_datetime = tenderscout.datetime
+
+        class Wednesday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
+
+        class Thursday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+        with patch.object(tenderscout, "datetime", Wednesday):
+            wed = tenderscout._fts_windows(60, recent_days=10)
+        with patch.object(tenderscout, "datetime", Thursday):
+            thu = tenderscout._fts_windows(60, recent_days=10)
+
+        recent_cutoff = dt("2026-10-26T00:00:00")
+        wed_daily = [w for w in wed if w[1] - w[0] == tenderscout.timedelta(days=1) and w[0] >= recent_cutoff]
+        thu_daily = [w for w in thu if w[1] - w[0] == tenderscout.timedelta(days=1) and w[0] >= recent_cutoff]
+        self.assertEqual(wed_daily, thu_daily[1:])
+        self.assertIn(
+            (dt("2026-11-04T00:00:00"), dt("2026-11-05T00:00:00")),
+            thu_daily,
+        )
+
+    def test_incomplete_daily_window_resumes_next_day_with_saved_cursor_and_records(self):
+        real_datetime = tenderscout.datetime
+
+        class Thursday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+        unfinished_key = "2026-11-04T00:00:00|2026-11-05T00:00:00"
+        prior_records = [{"id": "page-before-interruption"}]
+
+        class Checkpoint:
+            def __init__(self):
+                self.loaded = []
+
+            def load(self, key):
+                self.loaded.append(key)
+                if key == unfinished_key:
+                    return {
+                        "records": prior_records,
+                        "cursor": "saved-next-page-token",
+                        "complete": False,
+                    }
+                return None
+
+            def save(self, key, state):
+                pass
+
+        checkpoint = Checkpoint()
+        resumed = []
+
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds,
+                              stats, initial_cursor=None, initial_results=None, on_page=None):
+            if params["updatedFrom"] + "|" + params["updatedTo"] == unfinished_key:
+                resumed.append((initial_cursor, list(initial_results or [])))
+                stats["stopped"] = "time limit"
+                return list(initial_results or []) + [{"id": "page-after-resume"}]
+            return []
+
+        with (
+            patch.object(tenderscout, "datetime", Thursday),
+            patch.object(tenderscout, "_page_through", side_effect=fake_page_through),
+            patch.object(tenderscout.time, "sleep"),
+        ):
+            rows = tenderscout.fetch_fts(
+                days=60, max_pages=10, max_seconds=150, checkpoint=checkpoint
+            )
+
+        self.assertIn(unfinished_key, checkpoint.loaded)
+        self.assertEqual(
+            resumed,
+            [("saved-next-page-token", prior_records)],
+        )
+        self.assertEqual(
+            rows,
+            prior_records + [{"id": "page-after-resume"}],
+        )
+
+
+    def test_incomplete_daily_window_resumes_thursday_to_friday(self):
+        real_datetime = tenderscout.datetime
+
+        class Friday(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return real_datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+
+        unfinished_key = "2026-11-05T00:00:00|2026-11-06T00:00:00"
+        prior_records = [{"id": "thursday-page-before-interruption"}]
+
+        class Checkpoint:
+            def __init__(self):
+                self.loaded = []
+
+            def load(self, key):
+                self.loaded.append(key)
+                if key == unfinished_key:
+                    return {
+                        "records": prior_records,
+                        "cursor": "thursday-saved-next-page-token",
+                        "complete": False,
+                    }
+                return None
+
+            def save(self, key, state):
+                pass
+
+        checkpoint = Checkpoint()
+        resumed = []
+
+        def fake_page_through(base_url, params, source, max_pages, started, max_seconds,
+                              stats, initial_cursor=None, initial_results=None, on_page=None):
+            if params["updatedFrom"] + "|" + params["updatedTo"] == unfinished_key:
+                resumed.append((initial_cursor, list(initial_results or [])))
+                stats["stopped"] = "time limit"
+                return list(initial_results or []) + [{"id": "friday-page-after-resume"}]
+            return []
+
+        with (
+            patch.object(tenderscout, "datetime", Friday),
+            patch.object(tenderscout, "_page_through", side_effect=fake_page_through),
+            patch.object(tenderscout.time, "sleep"),
+        ):
+            rows = tenderscout.fetch_fts(
+                days=60, max_pages=10, max_seconds=150, checkpoint=checkpoint
+            )
+
+        self.assertIn(unfinished_key, checkpoint.loaded)
+        self.assertEqual(
+            resumed,
+            [("thursday-saved-next-page-token", prior_records)],
+        )
+        self.assertEqual(
+            rows,
+            prior_records + [{"id": "friday-page-after-resume"}],
         )
 
 

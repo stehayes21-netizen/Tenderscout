@@ -165,6 +165,13 @@ def ensure_schema(db):
         if "heartbeat_at" not in refresh_columns:
             db.execute("ALTER TABLE refresh_state ADD COLUMN heartbeat_at TEXT")
     db.execute("INSERT INTO refresh_state (id, status) VALUES (1, 'idle') ON CONFLICT(id) DO NOTHING")
+    db.execute("""CREATE TABLE IF NOT EXISTS fts_checkpoints (
+        fingerprint TEXT NOT NULL,
+        window_key TEXT NOT NULL,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (fingerprint, window_key)
+    )""")
     if USE_POSTGRES:
         db.execute("ALTER TABLE private_leads ADD COLUMN IF NOT EXISTS urgency TEXT DEFAULT 'Normal'")
     else:
@@ -187,6 +194,52 @@ def connect_db():
     db = Database()
     ensure_schema(db)
     return db
+
+
+def _fts_checkpoint_can_clear(stats):
+    """Only discard saved pages when pagination ended without truncation."""
+    return collector._coverage_status(stats) == "FETCH COMPLETE (pagination ended or source exposes no cursor)"
+
+
+class FTSCheckpointStore:
+    """Durable per-window Find a Tender cursor and accumulated-page store."""
+
+    def __init__(self, fingerprint):
+        self.fingerprint = fingerprint
+
+    def load(self, window_key):
+        db = connect_db()
+        try:
+            row = db.execute(
+                "SELECT state_json FROM fts_checkpoints WHERE fingerprint = ? AND window_key = ?",
+                (self.fingerprint, window_key),
+            ).fetchone()
+            return json.loads(row["state_json"]) if row else None
+        finally:
+            db.close()
+
+    def save(self, window_key, state):
+        db = connect_db()
+        try:
+            db.execute(
+                """INSERT INTO fts_checkpoints (fingerprint, window_key, state_json, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(fingerprint, window_key) DO UPDATE SET
+                       state_json=excluded.state_json, updated_at=excluded.updated_at""",
+                (self.fingerprint, window_key, json.dumps(state, ensure_ascii=False),
+                 datetime.now(timezone.utc).isoformat()),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def clear(self):
+        db = connect_db()
+        try:
+            db.execute("DELETE FROM fts_checkpoints WHERE fingerprint = ?", (self.fingerprint,))
+            db.commit()
+        finally:
+            db.close()
 
 
 # ---------------------------------------------------------------- security --
@@ -817,10 +870,11 @@ def run_refresh():
     # falsely reporting incomplete coverage before the source can finish.
     fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 720)
     fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
+    fts_checkpoint = FTSCheckpointStore(f"fts-v1-days-{days}")
     # Run independent free sources concurrently. Bearings and Standstill are
     # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
     with ThreadPoolExecutor(max_workers=4) as pool:
-        fts_job = pool.submit(collector.fetch_fts, days, pages, fts_limit, fts_stats)
+        fts_job = pool.submit(collector.fetch_fts, days, pages, fts_limit, fts_stats, fts_checkpoint)
         cf_job = pool.submit(collector.fetch_contracts_finder, days, pages, limit, cf_stats)
         bearings_job = pool.submit(collector.fetch_bearings, limit, bearings_stats)
         standstill_job = pool.submit(collector.fetch_standstill_northwest, limit, standstill_stats)
@@ -929,6 +983,11 @@ def run_refresh():
         db.commit()
     finally:
         db.close()
+    # Clear only after every fetched record has been committed and Find a
+    # Tender reached the end of its cursor chain. Partial/time-limited runs must
+    # retain their accumulated records and cursor for the next refresh.
+    if _fts_checkpoint_can_clear(fts_stats):
+        fts_checkpoint.clear()
     for kind, lines in samples.items():
         for line in lines:
             app.logger.warning("REFRESH %s: %s", kind, line)

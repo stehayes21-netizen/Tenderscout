@@ -50,6 +50,39 @@ class AppTestCase(unittest.TestCase):
         for name in ("TENDERSCOUT_DB", "DASHBOARD_USER", "DASHBOARD_PASSWORD"):
             os.environ.pop(name, None)
 
+    def test_fts_checkpoint_store_persists_across_instances_and_clears(self):
+        store = self.app_module.FTSCheckpointStore("test-fingerprint")
+        state = {"records": [{"id": "saved-page"}], "cursor": "next-token", "complete": False}
+        store.save("window-a", state)
+        reloaded = self.app_module.FTSCheckpointStore("test-fingerprint")
+        self.assertEqual(reloaded.load("window-a"), state)
+        reloaded.clear()
+        self.assertIsNone(store.load("window-a"))
+
+    def test_checkpoint_clears_only_for_complete_pagination(self):
+        can_clear = self.app_module._fts_checkpoint_can_clear
+        self.assertTrue(can_clear({}))
+        self.assertFalse(can_clear({"more": True}))
+        self.assertFalse(can_clear({"truncated_windows": 1}))
+        self.assertFalse(can_clear({"possible_cap": True}))
+        self.assertFalse(can_clear({"stopped": "time limit"}))
+        self.assertFalse(can_clear({"error": "HTTP 429"}))
+
+    def test_cancelled_and_withdrawn_notices_are_excluded_from_live_and_review(self):
+        collector = self.app_module.collector
+        for status in ("cancelled", "withdrawn"):
+            with self.subTest(status=status):
+                record = feed_record(
+                    f"nonlive-{status}",
+                    "Liverpool, L1 1AA",
+                    title=f"{status.title()} cleaning tender",
+                )
+                record["opportunity_stage"] = "Other notice"
+                record["status"] = status
+                self.assertTrue(collector.is_confirmed_nonlive_notice(record))
+                self.assertFalse(collector.shortlist_eligible_stage(record))
+                self.assertFalse(collector.review_eligible_stage(record))
+
     def refresh_with(self, records):
         collector = self.app_module.collector
         # Patch the executor as well as the feeds: the production refresh uses
@@ -1085,7 +1118,7 @@ class FeedDiagnosticsTests(AppTestCase):
     def test_dashboard_shows_what_each_feed_returned(self):
         collector = self.app_module.collector
 
-        def fake_fts(days, pages, limit, stats):
+        def fake_fts(days, pages, limit, stats, checkpoint=None):
             stats.update({"pages": 1, "records": 100, "last_batch": 100, "more": False,
                           "error": "", "stopped": "", "first_date": "2026-10-11",
                           "last_date": "2026-10-12"})
