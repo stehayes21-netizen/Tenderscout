@@ -1432,3 +1432,50 @@ class NullSafeGeographyTextTests(unittest.TestCase):
             "North West",
         )
         self.assertEqual(result[0], "REVIEW")
+
+
+class FindATenderCancellationClassificationTests(unittest.TestCase):
+    def test_tender_cancellation_tag_overrides_tender_period_and_is_not_live(self):
+        import tenderscout
+
+        release = {
+            "id": "102556-2026",
+            "ocid": "ocds-h6vhtk-example",
+            "date": "2026-11-05T10:00:00Z",
+            "tag": ["tenderCancellation"],
+            "tender": {
+                "title": "Invitation to Tender — Window Cleaning Wirral 2026",
+                "status": "tender",
+                "tenderPeriod": {"endDate": "2026-12-01T12:00:00Z"},
+            },
+        }
+
+        record = tenderscout.extract_records({"releases": [release]}, "Find a Tender")[0]
+
+        self.assertEqual(record["opportunity_stage"], "Other notice")
+        self.assertEqual(record["status"], "tenderCancellation")
+        self.assertEqual(record["ocid"], "ocds-h6vhtk-example")
+        self.assertTrue(tenderscout.is_confirmed_nonlive_notice(record))
+        self.assertFalse(tenderscout.shortlist_eligible_stage(record))
+        self.assertFalse(tenderscout.review_eligible_stage(record))
+
+    def test_ordinary_tender_tag_remains_open_for_bids(self):
+        import tenderscout
+
+        release = {
+            "id": "102557-2026",
+            "ocid": "ocds-h6vhtk-ordinary",
+            "tag": ["tender"],
+            "tender": {
+                "title": "Window Cleaning Services",
+                "status": "tender",
+                "tenderPeriod": {"endDate": "2099-12-01T12:00:00Z"},
+            },
+        }
+
+        record = tenderscout.extract_records({"releases": [release]}, "Find a Tender")[0]
+
+        self.assertEqual(record["opportunity_stage"], "Open for bids")
+        self.assertEqual(record["status"], "tender")
+        self.assertFalse(tenderscout.is_confirmed_nonlive_notice(record))
+        self.assertTrue(tenderscout.shortlist_eligible_stage(record))
