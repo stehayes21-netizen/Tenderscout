@@ -965,7 +965,7 @@ def run_refresh():
                     opportunity_stage=excluded.opportunity_stage,
                     ocid=excluded.ocid,
                     related_ocids=excluded.related_ocids,
-                    notice_status=excluded.notice_status,
+                    notice_status=CASE WHEN tenders.notice_status = 'cancelled' THEN tenders.notice_status ELSE excluded.notice_status END,
                     saved_at=excluded.saved_at
                 """,
                 (
