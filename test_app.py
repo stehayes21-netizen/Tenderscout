@@ -691,7 +691,7 @@ class RefreshTests(AppTestCase):
         self.assertEqual(by_url[cancel_url]["notice_status"], "cancelled")
         self.assertEqual(by_url[cancel_url]["related_ocids"], '["ocds-h6vhtk-078a5d"]')
         self.assertEqual(by_url[continuing_url]["notice_status"], "")
-        self.assertIsNone(by_url[continuing_url]["cancelled_by_notice_url"])
+        self.assertEqual(by_url[continuing_url]["cancelled_by_notice_url"], "")
 
         board = self.client.get("/").data.decode()
         self.assertNotIn("102437-2026", board)
