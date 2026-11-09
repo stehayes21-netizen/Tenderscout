@@ -701,6 +701,19 @@ class RefreshTests(AppTestCase):
         self.assertIn("102437-2026", exported)
         self.assertIn("102556-2026", exported)
 
+        # A later refresh that sees the older tender again must not resurrect it
+        # merely because the cancellation release is outside that fetch window.
+        self.refresh_with([original, continuing])
+        db = self.app_module.connect_db()
+        persisted = db.execute(
+            "SELECT notice_status, cancelled_by_notice_url FROM tenders WHERE notice_url = ?",
+            (old_url,),
+        ).fetchone()
+        db.close()
+        self.assertEqual(persisted["notice_status"], "cancelled")
+        self.assertEqual(persisted["cancelled_by_notice_url"], cancel_url)
+        self.assertNotIn("102437-2026", self.client.get("/").data.decode())
+
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
         self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
         db = self.app_module.connect_db()
