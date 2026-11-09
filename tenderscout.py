@@ -341,6 +341,7 @@ FIELDS = [
     "service_match", "region_match", "geography_reason", "estimated_value_gbp",
     "contract_start_date", "contract_end_date",
     "deadline", "status", "opportunity_stage", "score", "score_reasons", "notice_url", "ocid",
+    "related_ocids", "notice_status",
 ]
 
 EXPLICIT_LOCATION_KEYS = (
@@ -637,11 +638,31 @@ def extract_records(payload, source):
             for candidate in location_candidates:
                 add_location_values(candidate, location_parts)
 
+            related_processes = rel.get("relatedProcesses") or rel.get("relatedProcess") or tender.get("relatedProcesses") or []
+            if isinstance(related_processes, dict):
+                related_processes = [related_processes]
+            related_ocids = []
+            if isinstance(related_processes, list):
+                for related in related_processes:
+                    if not isinstance(related, dict):
+                        continue
+                    identifier = related.get("identifier") or related.get("ocid") or related.get("processIdentifier")
+                    if isinstance(identifier, dict):
+                        identifier = identifier.get("id") or identifier.get("value")
+                    identifier = as_text(identifier).strip()
+                    if identifier.startswith("ocds-") and identifier not in related_ocids:
+                        related_ocids.append(identifier)
             raw_tags = rel.get("tag") or rel.get("tags") or []
             if isinstance(raw_tags, str):
                 raw_tags = [raw_tags]
             tag_text = " ".join(as_text(tag) for tag in raw_tags).lower()
-            if "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
+            tag_tokens = set(re.findall(r"[a-z]+", tag_text))
+            # A cancellation release can still carry tender-period data. Its
+            # explicit lifecycle tag must take precedence over generic "tender".
+            is_tender_cancellation = "tendercancellation" in tag_tokens
+            if is_tender_cancellation:
+                opportunity_stage = "Other notice"
+            elif "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
                 opportunity_stage = "Planning / upcoming"
             elif "tender" in tag_text:
                 opportunity_stage = "Open for bids"
@@ -688,9 +709,11 @@ def extract_records(payload, source):
                 "contract_start_date": contract_start_date,
                 "contract_end_date": contract_end_date,
                 "deadline": deadline,
-                "status": as_text(first(tender, "status") or first(rel, "tag")),
+                "status": "tenderCancellation" if is_tender_cancellation else as_text(first(tender, "status") or first(rel, "tag")),
                 "notice_url": notice_url,
                 "ocid": as_text(first(rel, "ocid")),
+                "related_ocids": related_ocids,
+                "notice_status": "cancelled" if is_tender_cancellation else "",
                 "_raw": rel,
             })
     return output
@@ -1592,7 +1615,8 @@ def is_confirmed_nonlive_notice(record):
     nonlive_statuses = {
         "complete", "award", "awarded", "contractaward", "contractawarded",
         "awardupdate", "contractupdate", "contractamendment",
-        "implementation", "contracttermination", "cancelled", "withdrawn",
+        "implementation", "contracttermination", "tendercancellation",
+        "cancelled", "withdrawn",
     }
     return bool(status_tokens & nonlive_statuses)
 
@@ -1661,7 +1685,6 @@ def dedupe(records):
     """
     by_key = {}
     notice_key = {}
-    ocid_key = {}
     title_groups = {}
     for row in records:
         notice_url = str(row.get("notice_url") or "").strip()
@@ -1673,8 +1696,6 @@ def dedupe(records):
         key = None
         if notice_url and notice_url in notice_key:
             key = notice_key[notice_url]
-        elif ocid and ("ocid", ocid) in ocid_key:
-            key = ocid_key[("ocid", ocid)]
         elif title_key and len(title_key.split()) >= 5:
             # Only bridge copies from different sources. A missing buyer is
             # acceptable on discovery listings; conflicting named buyers are not.
@@ -1682,19 +1703,24 @@ def dedupe(records):
                 current = by_key[existing_key]
                 current_source = str(current.get("source") or "").strip().casefold()
                 current_buyer = _dedupe_buyer_key(current.get("buyer"))
+                current_ocid = str(current.get("ocid") or "").strip()
+                # Releases under one OCID are distinct notices in the same
+                # procurement history. Never collapse them by title.
+                if ocid and current_ocid and ocid == current_ocid:
+                    continue
                 if current_source != source and (not buyer_key or not current_buyer or buyer_key == current_buyer):
                     key = existing_key
                     break
 
         if key is None:
-            key = ("ocid", ocid) if ocid else (
-                "record", source, title_key, buyer_key, str(row.get("published_date") or "")
+            # A notice URL identifies the publication; an OCID identifies
+            # the wider procurement and must not be used as a notice dedupe key.
+            key = ("notice", notice_url) if notice_url else (
+                "record", source, ocid, title_key, buyer_key, str(row.get("published_date") or "")
             )
 
         if notice_url:
             notice_key[notice_url] = key
-        if ocid:
-            ocid_key[("ocid", ocid)] = key
         if title_key and len(title_key.split()) >= 5:
             title_groups.setdefault(title_key, [])
             if key not in title_groups[title_key]:

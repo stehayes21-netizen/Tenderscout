@@ -209,16 +209,20 @@ class OpportunityStageTests(unittest.TestCase):
         self.assertTrue(rows)
         self.assertEqual(rows[0]["opportunity_stage"], "Other notice")
         self.assertFalse(tenderscout.shortlist_eligible_stage(rows[0]))
-    def test_dedupe_prefers_open_tender_over_planning_for_same_process(self):
+    def test_dedupe_preserves_distinct_notices_under_the_same_ocid(self):
         rows = [
-            {"ocid": "ocds-test-2", "title": "Cleaning", "buyer": "Council",
+            {"ocid": "ocds-test-2", "notice_url": "https://example.test/notice/1",
+             "title": "Cleaning", "buyer": "Council",
              "opportunity_stage": "Planning / upcoming"},
-            {"ocid": "ocds-test-2", "title": "Cleaning", "buyer": "Council",
+            {"ocid": "ocds-test-2", "notice_url": "https://example.test/notice/2",
+             "title": "Cleaning", "buyer": "Council",
              "opportunity_stage": "Open for bids"},
         ]
         result = tenderscout.dedupe(rows)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["opportunity_stage"], "Open for bids")
+        self.assertEqual(len(result), 2)
+        self.assertEqual({row["notice_url"] for row in result}, {
+            "https://example.test/notice/1", "https://example.test/notice/2"
+        })
 
 
 class GeographyClassifierTests(unittest.TestCase):

@@ -86,7 +86,11 @@ COLUMNS = """
     trade_category TEXT DEFAULT 'Other / unclassified',
     saved_at TEXT,
     pipeline_status TEXT DEFAULT 'Reviewing',
-    opportunity_stage TEXT DEFAULT 'Other notice'
+    opportunity_stage TEXT DEFAULT 'Other notice',
+    ocid TEXT,
+    related_ocids TEXT,
+    notice_status TEXT DEFAULT '',
+    cancelled_by_notice_url TEXT
 """
 # Columns added after the first release; added to older databases on start-up.
 # Older rows default to REVIEW because their location was never confirmed.
@@ -94,6 +98,10 @@ ADDED_COLUMNS = [
     ("pipeline_status", "TEXT DEFAULT 'Reviewing'"),
     ("region_match", "TEXT DEFAULT 'REVIEW'"),
     ("opportunity_stage", "TEXT DEFAULT 'Other notice'"),
+    ("ocid", "TEXT"),
+    ("related_ocids", "TEXT"),
+    ("notice_status", "TEXT DEFAULT ''"),
+    ("cancelled_by_notice_url", "TEXT"),
     ("description", "TEXT"),
     ("estimated_value_gbp", "TEXT"),
     ("contract_start_date", "TEXT"),
@@ -397,6 +405,9 @@ def dashboard():
         "region_match = 'REVIEW'" if review_view
         else "region_match IN ('LOCAL', 'REVIEW', 'MANUAL')"
     )
+    # A cancellation suppresses the affected notice in every dashboard view,
+    # while preserving it and the cancellation event in the audit/export data.
+    condition += " AND COALESCE(notice_status, '') != 'cancelled'"
     params = []
     if pipeline_view:
         condition += " AND opportunity_stage = ?"
@@ -934,8 +945,9 @@ def run_refresh():
                  estimated_value_gbp, contract_start_date, contract_end_date,
                  contact_name, contact_email, contact_phone, eligibility_text,
                  service_match, score, deadline, notice_url,
-                 geography_reason, region_match, trade_category, saved_at, pipeline_status, opportunity_stage)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 geography_reason, region_match, trade_category, saved_at, pipeline_status, opportunity_stage,
+                 ocid, related_ocids, notice_status, cancelled_by_notice_url)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(notice_url) DO UPDATE SET
                     source=excluded.source, title=excluded.title, buyer=excluded.buyer,
                     published_date=excluded.published_date,
@@ -951,6 +963,9 @@ def run_refresh():
                     region_match=excluded.region_match,
                     trade_category=excluded.trade_category,
                     opportunity_stage=excluded.opportunity_stage,
+                    ocid=excluded.ocid,
+                    related_ocids=excluded.related_ocids,
+                    notice_status=CASE WHEN tenders.notice_status = 'cancelled' THEN tenders.notice_status ELSE excluded.notice_status END,
                     saved_at=excluded.saved_at
                 """,
                 (
@@ -977,9 +992,25 @@ def run_refresh():
                     datetime.now(timezone.utc).isoformat(),
                     "Reviewing",
                     match.get("opportunity_stage", "Open for bids"),
+                    match.get("ocid", ""),
+                    json.dumps(match.get("related_ocids") or [], ensure_ascii=False),
+                    match.get("notice_status", ""),
+                    "",
                 ),
             )
             stats["local" if region_match == "LOCAL" else "review"] += 1
+        # A UK12/tenderCancellation release terminates the procurement identified
+        # by its own OCID. Do not apply that cancellation to related-process OCIDs:
+        # those may identify an earlier or continuing procurement.
+        for cancellation in records:
+            if cancellation.get("notice_status") != "cancelled" or not cancellation.get("ocid"):
+                continue
+            cancellation_url = cancellation.get("notice_url") or ""
+            db.execute(
+                "UPDATE tenders SET notice_status = 'cancelled', cancelled_by_notice_url = ? "
+                "WHERE source = 'Find a Tender' AND ocid = ? AND notice_url != ?",
+                (cancellation_url, cancellation.get("ocid"), cancellation_url),
+            )
         db.commit()
     finally:
         db.close()
@@ -1362,7 +1393,7 @@ EXPORT_FIELDS = [
     "contact_name", "contact_email", "contact_phone", "eligibility_text",
     "service_match", "score", "deadline", "notice_url", "geography_reason",
     "region_match", "trade_category", "saved_at", "pipeline_status",
-    "opportunity_stage",
+    "opportunity_stage", "ocid", "related_ocids", "notice_status", "cancelled_by_notice_url",
 ]
 
 
