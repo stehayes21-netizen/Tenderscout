@@ -641,7 +641,13 @@ def extract_records(payload, source):
             if isinstance(raw_tags, str):
                 raw_tags = [raw_tags]
             tag_text = " ".join(as_text(tag) for tag in raw_tags).lower()
-            if "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
+            tag_tokens = set(re.findall(r"[a-z]+", tag_text))
+            # A cancellation release can still carry tender-period data. Its
+            # explicit lifecycle tag must take precedence over generic "tender".
+            is_tender_cancellation = "tendercancellation" in tag_tokens
+            if is_tender_cancellation:
+                opportunity_stage = "Other notice"
+            elif "planning" in tag_text or "pipeline" in tag_text or "early market" in tag_text:
                 opportunity_stage = "Planning / upcoming"
             elif "tender" in tag_text:
                 opportunity_stage = "Open for bids"
@@ -688,7 +694,7 @@ def extract_records(payload, source):
                 "contract_start_date": contract_start_date,
                 "contract_end_date": contract_end_date,
                 "deadline": deadline,
-                "status": as_text(first(tender, "status") or first(rel, "tag")),
+                "status": "tenderCancellation" if is_tender_cancellation else as_text(first(tender, "status") or first(rel, "tag")),
                 "notice_url": notice_url,
                 "ocid": as_text(first(rel, "ocid")),
                 "_raw": rel,
@@ -1592,7 +1598,8 @@ def is_confirmed_nonlive_notice(record):
     nonlive_statuses = {
         "complete", "award", "awarded", "contractaward", "contractawarded",
         "awardupdate", "contractupdate", "contractamendment",
-        "implementation", "contracttermination", "cancelled", "withdrawn",
+        "implementation", "contracttermination", "tendercancellation",
+        "cancelled", "withdrawn",
     }
     return bool(status_tokens & nonlive_statuses)
 
