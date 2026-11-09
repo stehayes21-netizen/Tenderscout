@@ -644,6 +644,63 @@ class RefreshTests(AppTestCase):
         self.assertEqual(row["published_date"], "2026-10-25")
         self.assertIn("Property maintenance", row["service_match"])
         self.assertEqual(row["pipeline_status"], "Bidding")
+    def test_cancellation_suppresses_only_the_same_ocid_and_keeps_the_history(self):
+        original = feed_record(
+            "duplicate-process", "Liverpool L2 2DH",
+            url="https://www.find-tender.service.gov.uk/Notice/102437-2026",
+            title="Window cleaning services",
+        )
+        original["ocid"] = "ocds-h6vhtk-07931c"
+
+        cancellation = feed_record(
+            "duplicate-process-cancellation", "Liverpool L2 2DH",
+            url="https://www.find-tender.service.gov.uk/Notice/102556-2026",
+            title="Window cleaning services",
+        )
+        cancellation.update({
+            "ocid": "ocds-h6vhtk-07931c",
+            "status": "tenderCancellation",
+            "notice_status": "cancelled",
+            "opportunity_stage": "Other notice",
+            "related_ocids": ["ocds-h6vhtk-078a5d"],
+        })
+
+        continuing = feed_record(
+            "continuing-process", "Liverpool L2 2DH",
+            url="https://www.find-tender.service.gov.uk/Notice/098300-2026",
+            title="Window cleaning services",
+        )
+        continuing["ocid"] = "ocds-h6vhtk-078a5d"
+
+        self.refresh_with([original, cancellation, continuing])
+
+        db = self.app_module.connect_db()
+        rows = db.execute(
+            "SELECT notice_url, ocid, notice_status, cancelled_by_notice_url, related_ocids "
+            "FROM tenders ORDER BY notice_url"
+        ).fetchall()
+        db.close()
+        by_url = {row["notice_url"]: row for row in rows}
+        old_url = "https://www.find-tender.service.gov.uk/Notice/102437-2026"
+        cancel_url = "https://www.find-tender.service.gov.uk/Notice/102556-2026"
+        continuing_url = "https://www.find-tender.service.gov.uk/Notice/098300-2026"
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(by_url[old_url]["notice_status"], "cancelled")
+        self.assertEqual(by_url[old_url]["cancelled_by_notice_url"], cancel_url)
+        self.assertEqual(by_url[cancel_url]["notice_status"], "cancelled")
+        self.assertEqual(by_url[cancel_url]["related_ocids"], '["ocds-h6vhtk-078a5d"]')
+        self.assertEqual(by_url[continuing_url]["notice_status"], "")
+        self.assertIsNone(by_url[continuing_url]["cancelled_by_notice_url"])
+
+        board = self.client.get("/").data.decode()
+        self.assertNotIn("102437-2026", board)
+        self.assertNotIn("102556-2026", board)
+        self.assertIn("098300-2026", board)
+        exported = self.client.get("/export.csv").data.decode()
+        self.assertIn("102437-2026", exported)
+        self.assertIn("102556-2026", exported)
+
     def test_refresh_keeps_the_pipeline_stage_you_set(self):
         self.refresh_with([feed_record("liv", "Liverpool L2 2DH")])
         db = self.app_module.connect_db()
@@ -1443,6 +1500,12 @@ class FindATenderCancellationClassificationTests(unittest.TestCase):
             "ocid": "ocds-h6vhtk-example",
             "date": "2026-11-05T10:00:00Z",
             "tag": ["tenderCancellation"],
+            "relatedProcesses": [{
+                "id": "related-process-1",
+                "relationship": ["prior"],
+                "scheme": "ocid",
+                "identifier": "ocds-h6vhtk-continuing",
+            }],
             "tender": {
                 "title": "Invitation to Tender — Window Cleaning Wirral 2026",
                 "status": "tender",
@@ -1455,6 +1518,8 @@ class FindATenderCancellationClassificationTests(unittest.TestCase):
         self.assertEqual(record["opportunity_stage"], "Other notice")
         self.assertEqual(record["status"], "tenderCancellation")
         self.assertEqual(record["ocid"], "ocds-h6vhtk-example")
+        self.assertEqual(record["related_ocids"], ["ocds-h6vhtk-continuing"])
+        self.assertEqual(record["notice_status"], "cancelled")
         self.assertTrue(tenderscout.is_confirmed_nonlive_notice(record))
         self.assertFalse(tenderscout.shortlist_eligible_stage(record))
         self.assertFalse(tenderscout.review_eligible_stage(record))
