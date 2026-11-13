@@ -876,12 +876,15 @@ def run_refresh():
     # Each source stops after this many seconds, so a slow feed cannot make the
     # request run past the web server's timeout.
     limit = env_int("TENDERSCOUT_SECONDS_PER_SOURCE", 60)
-    # Find a Tender rate-limits pagination. A 60-day lookback has ten daily
-    # windows plus weekly history; allow enough time to traverse them without
-    # falsely reporting incomplete coverage before the source can finish.
+    # Find a Tender rate-limits pagination. Six-hour windows improve source
+    # coverage, but a 60-day lookback now has 240 windows. Keep each refresh
+    # bounded; durable page/window checkpoints resume the historical backfill
+    # over successive runs instead of pretending it can finish in one request.
     fts_limit = env_int("TENDERSCOUT_FTS_SECONDS", 720)
     fts_stats, cf_stats, bearings_stats, standstill_stats = {}, {}, {}, {}
-    fts_checkpoint = FTSCheckpointStore(f"fts-v1-days-{days}")
+    # Version the checkpoint namespace so old daily/weekly window state cannot
+    # be mistaken for state produced by the six-hour collection strategy.
+    fts_checkpoint = FTSCheckpointStore(f"fts-v2-six-hour-days-{days}")
     # Run independent free sources concurrently. Bearings and Standstill are
     # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
     with ThreadPoolExecutor(max_workers=4) as pool:
