@@ -420,7 +420,7 @@ def _retry_after_seconds(value, status_code):
     return max(120, requested) if status_code == 429 else max(1, requested)
 
 
-def get_json(url: str, timeout: int = 25):
+def get_json(url: str, timeout: int = 25, max_retry_wait=None):
     """Fetch JSON and honour Retry-After on one rate-limit or temporary 503 response.
 
     Find a Tender has returned HTTP 429 with a 120-second Retry-After and can
@@ -448,6 +448,15 @@ def get_json(url: str, timeout: int = 25):
             retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
             if exc.code in {429, 503} and attempt == 0:
                 delay = _retry_after_seconds(retry_after, exc.code)
+                # A long server-mandated wait must not overrun the collector's
+                # source budget. Defer this exact page to the saved checkpoint
+                # and let the next scheduled refresh retry it.
+                if max_retry_wait is not None and delay > max(0, max_retry_wait):
+                    raise RuntimeError(
+                        f"HTTP {exc.code}; retry deferred because Retry-After "
+                        f"({delay}s) exceeds the remaining collection budget "
+                        f"({max(0, int(max_retry_wait))}s)"
+                    ) from None
                 print(
                     f"[WARN] {source_name_for_url(url)} returned HTTP {exc.code}; "
                     f"waiting {delay}s before one retry",
@@ -880,8 +889,12 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             stats["stopped"] = "time limit"
             return results
         url = _page_url(base_url, params, cursor)
+        remaining_budget = (
+            max(0, max_seconds - (time.monotonic() - started))
+            if max_seconds else None
+        )
         try:
-            payload = get_json(url)
+            payload = get_json(url, max_retry_wait=remaining_budget)
         except Exception as exc:
             print(f"[WARN] {source} fetch failed: {exc}", file=sys.stderr)
             stats["error"] = str(exc)[:320]
