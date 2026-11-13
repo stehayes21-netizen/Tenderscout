@@ -517,3 +517,17 @@ class FindATenderRateLimitTests(unittest.TestCase):
             tenderscout.get_json(tenderscout.FTS_URL)
         sleep.assert_called_once_with(60)
 
+    def test_503_retry_is_deferred_when_wait_exceeds_source_budget(self):
+        import io
+        error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+            "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages",
+            503, "Service Unavailable", {"Retry-After": "45"},
+            io.BytesIO(b"temporarily unavailable")
+        )
+        with patch.object(tenderscout.urllib.request, "urlopen", side_effect=[error]) as opener, \
+             patch.object(tenderscout.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "retry deferred"):
+                tenderscout.get_json(tenderscout.FTS_URL, max_retry_wait=20)
+        sleep.assert_not_called()
+        self.assertEqual(opener.call_count, 1)
+
