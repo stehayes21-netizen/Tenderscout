@@ -59,6 +59,39 @@ class AppTestCase(unittest.TestCase):
         reloaded.clear()
         self.assertIsNone(store.load("window-a"))
 
+    def test_refresh_uses_a_new_checkpoint_namespace_for_six_hour_windows(self):
+        collector = self.app_module.collector
+        captured = {}
+
+        class InlineFuture:
+            def __init__(self, fn, args, kwargs):
+                self.value = fn(*args, **kwargs)
+            def result(self):
+                return self.value
+
+        class InlineExecutor:
+            def __init__(self, *args, **kwargs):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def submit(self, fn, *args, **kwargs):
+                return InlineFuture(fn, args, kwargs)
+
+        def fake_fts(days, pages, limit, stats, checkpoint):
+            captured["fingerprint"] = checkpoint.fingerprint
+            return []
+
+        with patch.object(self.app_module, "ThreadPoolExecutor", InlineExecutor), \
+             patch.object(collector, "fetch_fts", side_effect=fake_fts), \
+             patch.object(collector, "fetch_contracts_finder", return_value=[]), \
+             patch.object(collector, "fetch_bearings", return_value=[]), \
+             patch.object(collector, "fetch_standstill_northwest", return_value=[]):
+            self.client.post("/refresh", follow_redirects=True)
+
+        self.assertEqual(captured["fingerprint"], "fts-v2-six-hour-days-60")
+
     def test_checkpoint_clears_only_for_complete_pagination(self):
         can_clear = self.app_module._fts_checkpoint_can_clear
         self.assertTrue(can_clear({}))
