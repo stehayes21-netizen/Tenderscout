@@ -463,3 +463,34 @@ class FindATenderRateLimitTests(unittest.TestCase):
              patch.object(tenderscout.time, "sleep") as sleep:
             tenderscout.get_json(tenderscout.FTS_URL)
         sleep.assert_called_once_with(120)
+
+    def test_503_waits_for_retry_after_before_one_retry(self):
+        import io
+        from unittest.mock import MagicMock
+        error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+            "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages",
+            503, "Service Unavailable", {"Retry-After": "45"}, io.BytesIO(b"temporarily unavailable")
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"releases": []}'
+        with patch.object(tenderscout.urllib.request, "urlopen", side_effect=[error, response]) as opener, \
+             patch.object(tenderscout.time, "sleep") as sleep:
+            result = tenderscout.get_json(tenderscout.FTS_URL)
+        self.assertEqual(result, {"releases": []})
+        sleep.assert_called_once_with(45)
+        self.assertEqual(opener.call_count, 2)
+
+    def test_503_without_retry_after_uses_bounded_fallback(self):
+        import io
+        from unittest.mock import MagicMock
+        error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+            "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages",
+            503, "Service Unavailable", {}, io.BytesIO(b"temporarily unavailable")
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"releases": []}'
+        with patch.object(tenderscout.urllib.request, "urlopen", side_effect=[error, response]), \
+             patch.object(tenderscout.time, "sleep") as sleep:
+            tenderscout.get_json(tenderscout.FTS_URL)
+        sleep.assert_called_once_with(30)
+
