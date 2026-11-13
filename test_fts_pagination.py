@@ -147,7 +147,7 @@ class FindATenderPaginationTests(unittest.TestCase):
 
 
 class FindATenderWindowStrategyTests(unittest.TestCase):
-    def test_recent_lookback_uses_daily_windows_then_weekly_history(self):
+    def test_all_fts_windows_are_six_hours_and_cover_requested_lookback(self):
         real_datetime = tenderscout.datetime
 
         class Thursday(real_datetime):
@@ -156,23 +156,16 @@ class FindATenderWindowStrategyTests(unittest.TestCase):
                 return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
 
         with patch.object(tenderscout, "datetime", Thursday):
-            windows = tenderscout._fts_windows(24, recent_days=10)
+            windows = tenderscout._fts_windows(24)
 
-        # The Monday-aligned recent boundary produces 11 daily windows here,
-        # followed by two fixed weekly history windows.
-        self.assertEqual(len(windows), 13)
-        for index in range(11):
-            self.assertEqual(
-                windows[index][1] - windows[index][0],
-                tenderscout.timedelta(days=1),
-            )
-        self.assertEqual(windows[11][1], windows[10][0])
-        self.assertEqual(
-            windows[11][1] - windows[11][0],
-            tenderscout.timedelta(days=7),
-        )
+        self.assertEqual(len(windows), 96)
+        self.assertEqual(windows[0], (dt("2026-11-05T06:00:00"), dt("2026-11-05T12:00:00")))
+        self.assertEqual(windows[-1], (dt("2026-10-12T12:00:00"), dt("2026-10-12T18:00:00")))
+        self.assertTrue(all(end - start == tenderscout.timedelta(hours=6) for start, end in windows))
+        for newer, older in zip(windows, windows[1:]):
+            self.assertEqual(newer[0], older[1], "six-hour windows must be contiguous")
 
-    def test_historical_weekly_windows_stay_fixed_across_adjacent_days(self):
+    def test_historical_six_hour_windows_stay_fixed_across_adjacent_days(self):
         real_datetime = tenderscout.datetime
 
         class Wednesday(real_datetime):
@@ -186,21 +179,13 @@ class FindATenderWindowStrategyTests(unittest.TestCase):
                 return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
 
         with patch.object(tenderscout, "datetime", Wednesday):
-            wed = tenderscout._fts_windows(60, recent_days=10)
+            wed = tenderscout._fts_windows(60)
         with patch.object(tenderscout, "datetime", Thursday):
-            thu = tenderscout._fts_windows(60, recent_days=10)
+            thu = tenderscout._fts_windows(60)
 
-        wed_weekly = [window for window in wed if window[1] - window[0] >= tenderscout.timedelta(days=6)]
-        thu_weekly = [window for window in thu if window[1] - window[0] >= tenderscout.timedelta(days=6)]
-        self.assertEqual(wed_weekly, thu_weekly)
-        self.assertTrue(all(end.weekday() == 0 and end.hour == 0 for _, end in wed_weekly[:-1]))
-        for windows in (wed, thu):
-            ordered = sorted(windows, key=lambda window: window[0])
-            self.assertEqual(ordered[0][0], ordered[-1][1] - tenderscout.timedelta(days=60))
-            for (_, end), (start, _) in zip(ordered, ordered[1:]):
-                self.assertEqual(end, start)
-
-
+        # Four new six-hour windows are added for the new day; overlapping
+        # historical intervals keep the same checkpoint keys.
+        self.assertEqual(wed[:-4], thu[4:])
 class FindATenderDirectLookupTests(unittest.TestCase):
     def test_known_notice_uses_official_id_endpoint(self):
         record = {"title": "Window Cleaning Services - Wirral", "notice_url": "https://www.find-tender.service.gov.uk/Notice/098300-2026"}
@@ -306,7 +291,7 @@ class ConsistentSourceCoverageSummaryTests(unittest.TestCase):
 
 
 class FindATenderDailyCheckpointTests(unittest.TestCase):
-    def test_daily_windows_remain_stable_across_adjacent_days(self):
+    def test_six_hour_windows_remain_stable_across_adjacent_days(self):
         real_datetime = tenderscout.datetime
 
         class Wednesday(real_datetime):
@@ -320,20 +305,13 @@ class FindATenderDailyCheckpointTests(unittest.TestCase):
                 return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
 
         with patch.object(tenderscout, "datetime", Wednesday):
-            wed = tenderscout._fts_windows(60, recent_days=10)
+            wed = tenderscout._fts_windows(60)
         with patch.object(tenderscout, "datetime", Thursday):
-            thu = tenderscout._fts_windows(60, recent_days=10)
+            thu = tenderscout._fts_windows(60)
 
-        recent_cutoff = dt("2026-10-26T00:00:00")
-        wed_daily = [w for w in wed if w[1] - w[0] == tenderscout.timedelta(days=1) and w[0] >= recent_cutoff]
-        thu_daily = [w for w in thu if w[1] - w[0] == tenderscout.timedelta(days=1) and w[0] >= recent_cutoff]
-        self.assertEqual(wed_daily, thu_daily[1:])
-        self.assertIn(
-            (dt("2026-11-04T00:00:00"), dt("2026-11-05T00:00:00")),
-            thu_daily,
-        )
+        self.assertEqual(wed[:-4], thu[4:])
 
-    def test_incomplete_daily_window_resumes_next_day_with_saved_cursor_and_records(self):
+    def test_incomplete_six_hour_window_resumes_with_saved_cursor_and_records(self):
         real_datetime = tenderscout.datetime
 
         class Thursday(real_datetime):
@@ -341,7 +319,7 @@ class FindATenderDailyCheckpointTests(unittest.TestCase):
             def now(cls, tz=None):
                 return real_datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
 
-        unfinished_key = "2026-11-04T00:00:00|2026-11-05T00:00:00"
+        unfinished_key = "2026-11-05T06:00:00|2026-11-05T12:00:00"
         prior_records = [{"id": "page-before-interruption"}]
 
         class Checkpoint:
@@ -392,7 +370,7 @@ class FindATenderDailyCheckpointTests(unittest.TestCase):
         )
 
 
-    def test_incomplete_daily_window_resumes_thursday_to_friday(self):
+    def test_incomplete_six_hour_window_resumes_friday_with_saved_cursor_and_records(self):
         real_datetime = tenderscout.datetime
 
         class Friday(real_datetime):
@@ -400,7 +378,7 @@ class FindATenderDailyCheckpointTests(unittest.TestCase):
             def now(cls, tz=None):
                 return real_datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
 
-        unfinished_key = "2026-11-05T00:00:00|2026-11-06T00:00:00"
+        unfinished_key = "2026-11-06T06:00:00|2026-11-06T12:00:00"
         prior_records = [{"id": "thursday-page-before-interruption"}]
 
         class Checkpoint:
