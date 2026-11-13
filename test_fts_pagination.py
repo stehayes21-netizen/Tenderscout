@@ -494,3 +494,26 @@ class FindATenderRateLimitTests(unittest.TestCase):
             tenderscout.get_json(tenderscout.FTS_URL)
         sleep.assert_called_once_with(30)
 
+    def test_503_parses_http_date_retry_after(self):
+        import io
+        from unittest.mock import MagicMock
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 11, 13, 18, 0, tzinfo=timezone.utc)
+
+        error = __import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
+            "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages",
+            503, "Service Unavailable",
+            {"Retry-After": "Fri, 13 Nov 2026 18:01:00 GMT"},
+            io.BytesIO(b"temporarily unavailable")
+        )
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"releases": []}'
+        with patch.object(tenderscout, "datetime", FixedDateTime), \
+             patch.object(tenderscout.urllib.request, "urlopen", side_effect=[error, response]), \
+             patch.object(tenderscout.time, "sleep") as sleep:
+            tenderscout.get_json(tenderscout.FTS_URL)
+        sleep.assert_called_once_with(60)
+
