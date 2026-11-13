@@ -894,7 +894,10 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             if max_seconds else None
         )
         try:
-            payload = get_json(url, max_retry_wait=remaining_budget)
+            payload = (
+                get_json(url, max_retry_wait=remaining_budget)
+                if remaining_budget is not None else get_json(url)
+            )
         except Exception as exc:
             print(f"[WARN] {source} fetch failed: {exc}", file=sys.stderr)
             stats["error"] = str(exc)[:320]
