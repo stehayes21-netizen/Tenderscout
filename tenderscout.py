@@ -34,6 +34,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -398,13 +399,33 @@ def source_name_for_url(url):
     return host or "Procurement feed"
 
 
-def get_json(url: str, timeout: int = 25):
-    """Fetch JSON and honour the source's Retry-After on one rate-limit response.
+def _retry_after_seconds(value, status_code):
+    """Parse Retry-After as seconds or an HTTP date, with conservative fallbacks."""
+    default = 120 if status_code == 429 else 30
+    if not value:
+        return default
+    try:
+        requested = int(value)
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            requested = max(
+                0,
+                int((retry_at - datetime.now(timezone.utc)).total_seconds() + 0.999),
+            )
+        except (TypeError, ValueError, OverflowError):
+            return default
+    return max(120, requested) if status_code == 429 else max(1, requested)
 
-    Find a Tender has returned HTTP 429 with a 120-second Retry-After. Retrying
-    immediately or shortening the normal request delay causes more throttling.
-    Retry only once; if the feed is still limiting us, let the caller record a
-    clear incomplete-coverage error instead of looping or hammering the source.
+
+def get_json(url: str, timeout: int = 25, max_retry_wait=None):
+    """Fetch JSON and honour Retry-After on one rate-limit or temporary 503 response.
+
+    Find a Tender has returned HTTP 429 with a 120-second Retry-After and can
+    return HTTP 503 during temporary service interruptions. Retry only once;
+    if the feed is still unavailable, let the caller record incomplete coverage.
     """
     req = urllib.request.Request(
         url,
@@ -425,21 +446,29 @@ def get_json(url: str, timeout: int = 25):
             except Exception:
                 body = ""
             retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
-            if exc.code == 429 and attempt == 0:
-                # Use the server-provided delay. If absent/malformed, use the
-                # known conservative 120-second minimum; never retry early.
-                try:
-                    delay = max(120, int(retry_after))
-                except (TypeError, ValueError):
-                    delay = 120
-                print(f"[WARN] {source_name_for_url(url)} rate limited (HTTP 429); waiting {delay}s before one retry", file=sys.stderr)
+            if exc.code in {429, 503} and attempt == 0:
+                delay = _retry_after_seconds(retry_after, exc.code)
+                # A long server-mandated wait must not overrun the collector's
+                # source budget. Defer this exact page to the saved checkpoint
+                # and let the next scheduled refresh retry it.
+                if max_retry_wait is not None and delay > max(0, max_retry_wait):
+                    raise RuntimeError(
+                        f"HTTP {exc.code}; retry deferred because Retry-After "
+                        f"({delay}s) exceeds the remaining collection budget "
+                        f"({max(0, int(max_retry_wait))}s)"
+                    ) from None
+                print(
+                    f"[WARN] {source_name_for_url(url)} returned HTTP {exc.code}; "
+                    f"waiting {delay}s before one retry",
+                    file=sys.stderr,
+                )
                 time.sleep(delay)
                 continue
-            retry_note = f" Retry after {retry_after} seconds." if retry_after.isdigit() else ""
+            retry_note = f" Retry-After: {retry_after}." if retry_after else ""
             raise RuntimeError(
                 f"HTTP {exc.code} {exc.reason}.{retry_note} Feed said: {body or 'no details returned'}"
             ) from None
-    raise RuntimeError("Rate-limit retry exhausted.")
+    raise RuntimeError("Temporary feed retry exhausted.")
 
 
 def as_text(value):
@@ -824,32 +853,26 @@ def _windows(days, size=7):
     return windows
 
 
-def _fts_windows(days, recent_days=10):
-    """Search recent updates daily, then older history in fixed UTC weeks.
+def _fts_windows(days, window_hours=6):
+    """Search FTS in fixed six-hour UTC windows to avoid source-side truncation.
 
-    The recent/weekly boundary is anchored to the Monday at or before the
-    recent cutoff. This keeps historical weekly query windows identical across
-    refreshes during the same UTC week, so their saved cursors remain reusable.
+    Open Contracting's maintained FTS collector uses 6-hour windows because
+    the endpoint does not reliably return all releases for longer date ranges.
+    Boundaries stay aligned to UTC clock intervals, so completed windows can
+    be checkpointed and reused safely between refreshes.
     """
+    if window_hours <= 0 or 24 % window_hours:
+        raise ValueError("window_hours must be a positive divisor of 24")
     current = datetime.now(timezone.utc)
-    now = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    earliest = now - timedelta(days=days)
-    cutoff_target = now - timedelta(days=min(days, recent_days))
-    recent_cutoff = cutoff_target - timedelta(days=cutoff_target.weekday())
-    recent_cutoff = max(earliest, recent_cutoff)
+    step_seconds = window_hours * 60 * 60
+    current_seconds = current.hour * 60 * 60 + current.minute * 60 + current.second
+    rounded_seconds = ((current_seconds + step_seconds - 1) // step_seconds) * step_seconds
+    end = current.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(seconds=rounded_seconds)
+    earliest = end - timedelta(days=days)
 
     windows = []
-    end = now
-    while end > recent_cutoff:
-        start = max(recent_cutoff, end - timedelta(days=1))
-        windows.append((start, end))
-        end = start
-
-    # recent_cutoff is Monday 00:00 UTC (unless the requested lookback starts
-    # later). Weekly history is therefore aligned to fixed calendar weeks.
-    end = recent_cutoff
     while end > earliest:
-        start = max(earliest, end - timedelta(days=7))
+        start = max(earliest, end - timedelta(hours=window_hours))
         windows.append((start, end))
         end = start
     return windows
@@ -866,8 +889,15 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             stats["stopped"] = "time limit"
             return results
         url = _page_url(base_url, params, cursor)
+        remaining_budget = (
+            max(0, max_seconds - (time.monotonic() - started))
+            if max_seconds else None
+        )
         try:
-            payload = get_json(url)
+            payload = (
+                get_json(url, max_retry_wait=remaining_budget)
+                if remaining_budget is not None else get_json(url)
+            )
         except Exception as exc:
             print(f"[WARN] {source} fetch failed: {exc}", file=sys.stderr)
             stats["error"] = str(exc)[:320]
@@ -923,9 +953,9 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
         }
         window_key = params["updatedFrom"] + "|" + params["updatedTo"]
         saved = checkpoint.load(window_key) if checkpoint else None
-        # Re-fetch the two most recent daily windows on every refresh. Their
-        # contents can change as notices are published/updated during the day;
-        # older completed windows are stable and can be safely reused.
+        # Re-fetch the two most recent six-hour windows on every refresh.
+        # Newly amended notices are indexed by their update timestamp and will
+        # appear in a recent window; older completed windows can be reused.
         if saved and saved.get("complete") and window_index >= 2:
             window_results = list(saved.get("records") or [])
             stats["windows"] += 1
