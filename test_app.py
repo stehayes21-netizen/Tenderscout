@@ -1332,7 +1332,7 @@ class SearchWindowTests(unittest.TestCase):
         import tenderscout
         calls = []
 
-        def fake_get(url, timeout=25):
+        def fake_get(url, timeout=25, max_retry_wait=None):
             calls.append(url)
             return {"releases": [{"ocid": f"o{len(calls)}", "id": "1", "tender": {"title": "T"}}]}
 
