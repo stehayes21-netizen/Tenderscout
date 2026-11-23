@@ -360,6 +360,19 @@ class AppSmokeTest(AppTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.get_json(), {"status": "ok", "database": "sqlite"})
 
+    def test_health_answers_without_waiting_for_the_database(self):
+        # Render restarts the instance if /health is slow while it wakes; it must not open a connection.
+        with patch.object(self.app_module, "connect_db", side_effect=AssertionError("database touched")):
+            r = self.client.get("/health")
+        self.assertEqual(r.status_code, 200)
+
+    def test_database_health_check_reports_failures(self):
+        self.assertEqual(self.client.get("/health/db").get_json(), {"status": "ok", "database": "sqlite"})
+        with patch.object(self.app_module, "connect_db", side_effect=RuntimeError("down")):
+            r = self.client.get("/health/db")
+        self.assertEqual(r.status_code, 503)
+        self.assertEqual(r.get_json(), {"status": "error"})
+
 
     def test_source_directory_lists_council_and_community_sources(self):
         r = self.client.get("/sources")
