@@ -152,6 +152,52 @@ def is_household(record):
     return "HH" in uid or any(_has(words, t) for t in ["single storey", "two storey", "dormer", "porch", "conservatory", "garage conversion", "loft conversion", "rear extension", "side extension"])
 
 
+# Job size, so each job goes to firms big enough (and not too big) to take it on.
+JOB_SIZES = ("Small", "Medium", "Large")
+JOB_SIZE_HELP = {
+    "Small": "Small job: 1-3 person firm can do it",
+    "Medium": "Medium job: needs a team of about 4-10",
+    "Large": "Large job: needs a bigger contractor (10+)",
+}
+_HOMES = re.compile(
+    r"(\d+)\s*(?:no\.?\s*)?(?:x\s*)?(?:new\s+)?(?:residential\s+)?(dwellings?|homes?|houses?|apartments?|flats?|bungalows?|units?)\b",
+    re.I,
+)
+_MEDIUM_WORDS = [
+    "industrial", "warehouse", "logistics", "school", "classroom", "hotel", "petrol filling station",
+    "supermarket", "care home", "surgery", "gym", "nursery", "library", "office building", "three storey",
+]
+
+
+def job_size(description, app_size=None):
+    """Small, Medium or Large, from the number of homes and the kind of building."""
+    homes = max((int(m.group(1)) for m in _HOMES.finditer(description or "")), default=0)
+    size = (app_size or "").strip()
+    if size == "Large" or homes >= 10:
+        return "Large"
+    if size == "Medium" or homes >= 3:
+        return "Medium"
+    words = _words(description)
+    if any(_has(words, t) for t in _MEDIUM_WORDS):
+        return "Medium"
+    return "Small"
+
+
+def sizes_for_team(team_size):
+    """Which job sizes a firm of this many tradespeople should be sent."""
+    try:
+        team = int(team_size)
+    except (TypeError, ValueError):
+        team = 0
+    if team <= 0:
+        return {"Small", "Medium"}          # not told: send the everyday jobs
+    if team <= 3:
+        return {"Small"}
+    if team <= 10:
+        return {"Small", "Medium"}
+    return set(JOB_SIZES)
+
+
 def normalise(record, fetched_at=None):
     """Turn a PlanIt record into a planning lead, or None if it isn't useful."""
     if not record.get("name") or not record.get("description") or not is_useful(record):
@@ -173,6 +219,7 @@ def normalise(record, fetched_at=None):
         "start_date": str(record.get("start_date") or "")[:10],
         "decided_date": str(record.get("decided_date") or "")[:10],
         "trades": ", ".join(trades),
+        "job_size": job_size(record.get("description"), record.get("app_size")),
         "household": 1 if is_household(record) else 0,
         "council_url": council_url if council_url.startswith(("https://", "http://")) else "",
         "planit_url": planit_url if planit_url.startswith("https://") else "",

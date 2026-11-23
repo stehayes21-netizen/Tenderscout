@@ -15,7 +15,7 @@ SUNDAY = datetime(2026, 11, 22, 20, 0, tzinfo=timezone.utc)
 def sub(**kw):
     base = {"id": 1, "name": "Dave Jones", "business": "DJ Building", "email": "dave@example.com",
             "planning_trades": "Extensions and building work", "tender_trades": "", "areas": "",
-            "active": 1, "last_sent_at": None}
+            "active": 1, "last_sent_at": None, "team_size": None}
     base.update(kw)
     return base
 
@@ -168,3 +168,64 @@ class SubscriberPageTests(PlanningPageTests):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JobSizeAndPlacesTests(SubscriberPageTests):
+    def test_job_sizes_from_real_descriptions(self):
+        js = planning.job_size
+        self.assertEqual(js("Single storey side extension.", "Small"), "Small")
+        self.assertEqual(js("Demolition of existing garage and construction of 1no bungalow with associated landscaping.", "Small"), "Small")
+        self.assertEqual(js("Prior approval for change of use from offices (E) to 4no apartments (C3) at ground floor.", "Small"), "Medium")
+        self.assertEqual(js("ERECTION OF 7 NO. DWELLINGS, FORMATION OF PEDESTRIAN LINK", "Small"), "Medium")
+        self.assertEqual(js("Erection of 33no. dwellings (Class C3), construction of new vehicle access points", "Large"), "Large")
+        self.assertEqual(js("approval of reserved matters for the erection of 310 dwellings, internal access roads", "Small"), "Large")
+        self.assertEqual(js("ERECTION OF A GYM (USE CLASS E) TOGETHER WITH THE ERECTION OF A SUBSTATION", "Medium"), "Medium")
+        self.assertEqual(js("Works to 2no beech trees under TPO.", "Small"), "Small")
+
+    def test_team_size_decides_which_jobs_a_firm_gets(self):
+        self.assertEqual(planning.sizes_for_team(2), {"Small"})
+        self.assertEqual(planning.sizes_for_team(6), {"Small", "Medium"})
+        self.assertEqual(planning.sizes_for_team(25), {"Small", "Medium", "Large"})
+        self.assertEqual(planning.sizes_for_team(None), {"Small", "Medium"})
+        leads = [l for l in (planning.normalise(r) for r in REAL) if l]
+        sub_small = sub(planning_trades="New homes and conversions", team_size=2)
+        sub_big = sub(planning_trades="New homes and conversions", team_size=30)
+        small_got = {l["name"] for l in digest.match_planning(sub_small, leads)}
+        big_got = {l["name"] for l in digest.match_planning(sub_big, leads)}
+        self.assertNotIn("StHelens/P/2026/0593/FUL", small_got)      # 33 dwellings: too big for 2 people
+        self.assertIn("StHelens/P/2026/0593/FUL", big_got)
+        self.assertIn("StHelens/P/2026/0567/FUL", small_got)         # 1 bungalow: fine for a small firm
+
+    def test_sixth_firm_for_a_trade_and_area_goes_on_the_waiting_list(self):
+        for i in range(5):
+            self.add(name=f"Firm {i}", email=f"f{i}@example.com", planning_trades=["Trees and landscaping"],
+                     tender_trades=[], areas=["Sefton"])
+        page = self.add(name="Firm 6", email="f6@example.com", planning_trades=["Trees and landscaping"],
+                        tender_trades=[], areas=["Sefton"]).get_data(as_text=True)
+        self.assertIn("Added to the waiting list", page)
+        self.assertIn("Trees and landscaping in Sefton", page)
+        db = self.app.connect_db()
+        sixth = db.execute("SELECT * FROM subscribers WHERE email = 'f6@example.com'").fetchone()
+        db.close()
+        self.assertEqual(sixth["active"], 0)
+        self.assertTrue(sixth["notes"].startswith("WAITING LIST"))
+        # Resuming is blocked while the area is full.
+        r = self.client.post(f"/subscribers/{sixth['id']}/toggle", follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Can&#x27;t resume", r.replace("Can't", "Can&#x27;t"))
+        # A different area for the same trade is still open.
+        ok = self.add(name="Firm 7", email="f7@example.com", planning_trades=["Trees and landscaping"],
+                      tender_trades=[], areas=["Knowsley"]).get_data(as_text=True)
+        self.assertIn("Subscriber added", ok)
+        self.assertIn("Sefton 5/5", ok)
+
+    def test_no_areas_ticked_counts_as_all_six(self):
+        for i in range(5):
+            self.add(name=f"Firm {i}", email=f"f{i}@example.com", planning_trades=["Roofing"], tender_trades=[])
+        page = self.add(name="Firm 6", email="f6@example.com", planning_trades=["Roofing"], tender_trades=[],
+                        areas=["Halton"]).get_data(as_text=True)
+        self.assertIn("Added to the waiting list", page)
+
+    def test_team_size_is_saved_and_shown(self):
+        page = self.add(team_size="3").get_data(as_text=True)
+        self.assertIn("3 tradespeople", page)
+        self.assertIn("gets small jobs", page)

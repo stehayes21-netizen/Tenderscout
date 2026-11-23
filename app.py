@@ -195,6 +195,13 @@ def ensure_schema(db):
         last_sent_at TEXT,
         created_at TEXT NOT NULL
     )""")
+    for table, column, ddl in (("planning_leads", "job_size", "TEXT"), ("subscribers", "team_size", "INTEGER")):
+        if USE_POSTGRES:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}")
+        else:
+            cols = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+            if column not in cols:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
     db.execute("""CREATE TABLE IF NOT EXISTS refresh_state (
         id INTEGER PRIMARY KEY,
         status TEXT NOT NULL,
@@ -1966,12 +1973,12 @@ def refresh_planning_leads(getter=None, now=None, sleep=None):
         for lead in leads:
             db.execute(
                 "INSERT INTO planning_leads (name,area,address,postcode,description,app_type,app_state,app_size,"
-                "start_date,decided_date,trades,household,council_url,planit_url,fetched_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET "
+                "start_date,decided_date,trades,job_size,household,council_url,planit_url,fetched_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET "
                 "app_state=excluded.app_state, decided_date=excluded.decided_date, trades=excluded.trades, "
-                "description=excluded.description, fetched_at=excluded.fetched_at",
+                "job_size=excluded.job_size, description=excluded.description, fetched_at=excluded.fetched_at",
                 tuple(lead[k] for k in ("name", "area", "address", "postcode", "description", "app_type", "app_state",
-                                        "app_size", "start_date", "decided_date", "trades", "household",
+                                        "app_size", "start_date", "decided_date", "trades", "job_size", "household",
                                         "council_url", "planit_url", "fetched_at")),
             )
         cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=PLANNING_KEEP_DAYS)).date().isoformat()
@@ -2114,7 +2121,7 @@ def planning_page():
         trades_html = "".join(f'<span class="tag">{safe(t.strip())}</span>' for t in str(row["trades"] or "").split(",") if t.strip())
         cards += (
             f'<article class="plan{" hot" if approved else ""}">'
-            f'<p class="kicker">{safe(row["area"])} · {"Household" if row["household"] else "Commercial / development"} · {safe(row["app_size"] or "Size not stated")}</p>'
+            f'<p class="kicker">{safe(row["area"])} · {"Household" if row["household"] else "Commercial / development"} · {safe(row["job_size"] or planning.job_size(row["description"], row["app_size"]))} job</p>'
             f'<h3>{safe(row["description"])}</h3>'
             f'<p class="where"><b>WHERE:</b> {safe(row["address"])}</p>'
             f'<p class="stage {"ok" if approved else ""}">{safe(planning.status_label(row["app_state"]))}'
@@ -2264,13 +2271,54 @@ def _subscriber_form_values(form):
         "areas": ", ".join(a for a in form.getlist("areas") if a in planning.AREAS),
         "monthly_fee": (form.get("monthly_fee") or "").strip()[:20],
         "notes": (form.get("notes") or "").strip()[:2000],
+        "team_size": _int_or_none(form.get("team_size")),
     }
+
+
+def _int_or_none(value):
+    try:
+        n = int(str(value or "").strip())
+    except ValueError:
+        return None
+    return n if 0 < n < 10000 else None
+
+
+PLACES_PER_TRADE_AREA = env_int("TENDERSCOUT_PLACES_PER_AREA", 5)
+
+
+def _sub_areas(value):
+    areas = [a for a in digest.split_list(value) if a in planning.AREAS]
+    return areas or list(planning.AREAS)   # none ticked = all six
+
+
+def places_taken(db, exclude_id=None):
+    """{(trade, area): number of active subscribers} for planning trades."""
+    taken = {}
+    for sub in db.execute("SELECT id, planning_trades, areas FROM subscribers WHERE active = 1").fetchall():
+        if exclude_id is not None and sub["id"] == exclude_id:
+            continue
+        for trade in digest.split_list(sub["planning_trades"]):
+            for area in _sub_areas(sub["areas"]):
+                taken[(trade, area)] = taken.get((trade, area), 0) + 1
+    return taken
+
+
+def full_places(db, planning_trades, areas, exclude_id=None):
+    """Trade-and-area combinations this subscriber wants that already have the maximum number of firms."""
+    taken = places_taken(db, exclude_id)
+    return [f"{t} in {a}" for t in digest.split_list(planning_trades) for a in _sub_areas(areas)
+            if taken.get((t, a), 0) >= PLACES_PER_TRADE_AREA]
 
 
 @app.route("/subscribers/<int:sub_id>/toggle", methods=["POST"])
 def subscriber_toggle(sub_id):
     db = connect_db()
     try:
+        sub = db.execute("SELECT * FROM subscribers WHERE id = ?", (sub_id,)).fetchone()
+        if not sub:
+            return Response("Subscriber not found", 404)
+        if not sub["active"] and full_places(db, sub["planning_trades"], sub["areas"], exclude_id=sub_id):
+            return redirect("/subscribers?sent=full")
         db.execute("UPDATE subscribers SET active = CASE WHEN active = 1 THEN 0 ELSE 1 END WHERE id = ?", (sub_id,))
         db.commit()
     finally:
@@ -2365,15 +2413,26 @@ def subscribers_page():
             elif not values["planning_trades"] and not values["tender_trades"]:
                 message = '<p class="notice warn">Pick at least one planning lead type or tender trade.</p>'
             else:
+                full = full_places(db, values["planning_trades"], values["areas"])
+                notes = values["notes"]
+                if full:
+                    notes = ("WAITING LIST: full for " + "; ".join(full) + ". " + notes).strip()
                 db.execute(
-                    "INSERT INTO subscribers (name,business,email,planning_trades,tender_trades,areas,monthly_fee,active,notes,created_at) "
-                    "VALUES (?,?,?,?,?,?,?,1,?,?)",
+                    "INSERT INTO subscribers (name,business,email,planning_trades,tender_trades,areas,monthly_fee,active,notes,team_size,created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (values["name"], values["business"], values["email"], values["planning_trades"], values["tender_trades"],
-                     values["areas"], values["monthly_fee"], values["notes"], datetime.now(timezone.utc).isoformat()),
+                     values["areas"], values["monthly_fee"], 0 if full else 1, notes, values["team_size"],
+                     datetime.now(timezone.utc).isoformat()),
                 )
                 db.commit()
-                message = '<p class="notice ok">Subscriber added. Tap Preview to see their email.</p>'
+                if full:
+                    message = ('<p class="notice warn"><b>Added to the waiting list.</b> These already have '
+                               f'{PLACES_PER_TRADE_AREA} firms: ' + safe("; ".join(full)) +
+                               '. Untick those areas or trades to start them now, or wait for a place.</p>')
+                else:
+                    message = '<p class="notice ok">Subscriber added. Tap Preview to see their email.</p>'
         subs = db.execute("SELECT * FROM subscribers ORDER BY active DESC, name").fetchall()
+        taken = places_taken(db)
     finally:
         db.close()
 
@@ -2384,6 +2443,8 @@ def subscribers_page():
         "config": ('<p class="notice warn">Automatic sending isn\'t set up, so nothing was sent. No problem: tap '
                    '<b>Preview email</b>, then <b>Open in my email app to send</b>, and send it yourself.</p>'),
         "manual": '<p class="notice ok">Marked as sent this week.</p>',
+        "full": ('<p class="notice warn">Can\'t resume: that trade and area already has the maximum number of firms. '
+                 'It stays on the waiting list.</p>'),
         "failed": '<p class="notice warn">Sending failed. Check the email settings in Render and the service logs.</p>',
     }.get(sent, "")
 
@@ -2403,13 +2464,28 @@ def subscribers_page():
             f' · {"Active" if s_["active"] else "Paused"}'
             f'{" · last email " + safe(display_date(s_["last_sent_at"])) if s_["last_sent_at"] else ""}</p>'
             f'<p><b>Planning:</b> {safe(s_["planning_trades"] or "none")}<br><b>Tenders:</b> {safe(s_["tender_trades"] or "none")}'
-            f'<br><b>Areas:</b> {safe(s_["areas"] or "All six")}</p>'
+            f'<br><b>Areas:</b> {safe(s_["areas"] or "All six")}'
+            f'<br><b>Team:</b> {safe(str(s_["team_size"]) + " tradespeople" if s_["team_size"] else "not given")}'
+            f' · gets {safe(", ".join(sorted(planning.sizes_for_team(s_["team_size"]), key=planning.JOB_SIZES.index)).lower())} jobs</p>'
+            + (f'<p class="meta"><b>{safe(s_["notes"][:200])}</b></p>' if (s_["notes"] or "").startswith("WAITING LIST") else "")
+            + ''
             f'<div class="row"><a class="btn" href="/subscribers/{int(s_["id"])}/preview">Preview email</a>'
             f'<form method="post" action="/subscribers/{int(s_["id"])}/send"><button>Send automatically</button></form>'
             f'<form method="post" action="/subscribers/{int(s_["id"])}/toggle"><button class="ghost">{"Pause" if s_["active"] else "Resume"}</button></form></div></article>'
         )
     if not cards:
         cards = '<p class="empty">No subscribers yet. Add your first tradesperson below.</p>'
+
+    live_areas = [a for a in planning.AREAS if a not in ("Liverpool", "Wirral")]
+    used_trades = [t for t in planning.TRADE_ORDER if any(taken.get((t, a)) for a in planning.AREAS)]
+    places_html = ""
+    if used_trades:
+        rows_html = "".join(
+            f"<li><b>{safe(t)}</b>: " + ", ".join(
+                f"{safe(a)} {taken.get((t, a), 0)}/{PLACES_PER_TRADE_AREA}" for a in live_areas) + "</li>"
+            for t in used_trades)
+        places_html = (f'<details class="places"><summary>Places taken (max {PLACES_PER_TRADE_AREA} firms per trade per council)</summary>'
+                       f'<ul>{rows_html}</ul></details>')
 
     def boxes(name, options, cols=""):
         return f'<div class="boxes {cols}">' + "".join(
@@ -2436,6 +2512,7 @@ def subscribers_page():
         '<h1>Subscribers</h1><p>Tradespeople who get a weekly email of matching jobs, every Monday from 6am.</p></header><main>'
         + message +
         f'<div class="facts"><p>Active subscribers<b>{len(active)}</b></p><p>Monthly income<b>£{income:,.0f}</b></p></div>'
+        + places_html
         + cards +
         '<details class="add"' + ("" if subs else " open") + '><summary>+ Add a subscriber</summary><form method="post">'
         '<label for="s-name">Name</label><input type="text" id="s-name" name="name" required maxlength="120" placeholder="e.g. Dave Jones">'
@@ -2444,6 +2521,8 @@ def subscribers_page():
         '<label>Planning leads they want</label>' + boxes("planning_trades", planning.TRADE_ORDER) +
         '<details><summary>Tender trades they want</summary>' + boxes("tender_trades", TRADE_CATEGORIES) + '</details>'
         '<label>Areas <span style="font-weight:normal;color:#53645a">(none ticked = all six)</span></label>' + boxes("areas", planning.AREAS) +
+        '<label for="s-team">How many tradespeople in their team?</label><input type="text" id="s-team" name="team_size" inputmode="numeric" maxlength="5" placeholder="e.g. 3">'
+        '<p class="meta">1-3 get small jobs only; 4-10 get small and medium; 11 or more get everything. Leave blank for small and medium.</p>'
         '<label for="s-fee">Monthly fee £</label><input type="text" id="s-fee" name="monthly_fee" inputmode="decimal" maxlength="20" placeholder="e.g. 20">'
         '<label for="s-notes">Notes</label><textarea id="s-notes" name="notes" rows="3"></textarea>'
         '<button type="submit">Add subscriber</button></form></details>'

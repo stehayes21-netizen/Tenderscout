@@ -59,15 +59,31 @@ def due(subscriber, now):
     return sent < week_start(now)
 
 
+def _get(row, key, default=None):
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return default
+
+
+def lead_size(lead):
+    import planning
+    return _get(lead, "job_size") or planning.job_size(lead["description"], _get(lead, "app_size"))
+
+
 def match_planning(subscriber, leads):
+    import planning
     trades = set(split_list(subscriber["planning_trades"]))
     areas = set(split_list(subscriber["areas"]))
+    sizes = planning.sizes_for_team(_get(subscriber, "team_size"))
     out = []
     for lead in leads:
         lead_trades = set(split_list(lead["trades"]))
         if trades and not (trades & lead_trades):
             continue
         if areas and lead["area"] not in areas:
+            continue
+        if lead_size(lead) not in sizes:
             continue
         out.append(lead)
     # Approved first (work likely soon), then newest.
@@ -121,12 +137,13 @@ def compose(subscriber, planning_leads, tenders, status_label, now=None):
                      '<p style="color:#53645a;font-size:14px">Approved applications are listed first: that work is likely to start soon.</p>')
         for l in planning_leads:
             stage = status_label(l["app_state"])
-            text += [f"- {l['description']}", f"  {l['address']}", f"  {stage}", f"  {l['council_url'] or l['planit_url'] or ''}", ""]
+            size = lead_size(l) + " job"
+            text += [f"- {l['description']}", f"  {l['address']}", f"  {stage} · {size}", f"  {l['council_url'] or l['planit_url'] or ''}", ""]
             link = l["council_url"] or l["planit_url"]
             parts.append(
                 '<div style="border:1px solid #d5e1d8;border-radius:8px;padding:12px;margin:10px 0">'
                 f'<b>{html.escape(l["description"] or "")}</b><br>{html.escape(l["address"] or "")}'
-                f'<br><span style="color:#08783c">{html.escape(stage)}</span>'
+                f'<br><span style="color:#08783c">{html.escape(stage)}</span> · {html.escape(size)}'
                 + (f'<br><a href="{html.escape(link)}">Council record</a>' if link else "")
                 + "</div>"
             )
