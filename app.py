@@ -2190,6 +2190,10 @@ def planning_page():
     elif check == "config":
         notice = ('<p class="notice warn">Planning checks are switched off until <b>PLANIT_CONTACT_EMAIL</b> is set in Render '
                   '(your service, Environment). PlanIt needs a contact email on every request.</p>')
+    elif infos and all(i.get("error") for i in infos):
+        notice = ('<p class="notice warn"><b>PlanIt turned down every request last time</b> '
+                  '(' + safe(infos[0].get("error", "")[:80]) + '). PlanIt itself is usually fine, so this is most likely a limit on '
+                  'the shared internet address this app uses. Try again later; if it keeps happening, PlanIt\'s owner needs to allow it.</p>')
     elif run and run["status"] == "failed":
         notice = '<p class="notice warn">The last check failed: ' + safe(run["error"] or "unknown error") + '. It will try again tonight.</p>'
 
@@ -2200,6 +2204,13 @@ def planning_page():
         'header{background:#143d2a;color:white;border-radius:14px;padding:20px;margin-bottom:16px}header a{color:white}nav{font-size:14px}'
         'main{background:white;border-radius:14px;padding:18px}a{color:#08783c}'
         'button{padding:13px 18px;background:#168447;color:white;border:0;border-radius:9px;font-weight:bold;font-size:16px;width:100%}'
+        '.push{display:flex;align-items:center;justify-content:center;gap:10px;min-height:64px;font-size:19px;border-radius:14px;'
+        'background:linear-gradient(#1fa35a,#147a40);box-shadow:0 6px 0 #0d5129,0 10px 18px rgba(0,0,0,.18);'
+        'transform:translateY(0);transition:transform .06s,box-shadow .06s;margin:4px 0 14px;cursor:pointer;-webkit-tap-highlight-color:transparent}'
+        '.push:active,.push.pressed{transform:translateY(6px);box-shadow:0 0 0 #0d5129,0 4px 8px rgba(0,0,0,.18)}'
+        '.push[disabled]{background:#6b8f7a;box-shadow:0 2px 0 #4d6a5a;transform:translateY(4px);cursor:default}'
+        '.push .ico{font-size:22px;line-height:1}'
+        '@media(prefers-reduced-motion:reduce){.push{transition:none}}'
         '.chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.chip{padding:8px 12px;border:1px solid #b8c6bd;border-radius:99px;text-decoration:none;color:#18251e;font-size:14px;background:#fff}'
         '.chip span{color:#53645a}.chip.on{background:#143d2a;color:#fff;border-color:#143d2a}.chip.on span{color:#cfe3d6}'
         'article.plan{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #9bb5a5;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
@@ -2214,7 +2225,14 @@ def planning_page():
         '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/subscribers">Subscribers</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Planning leads</h1><p>New extensions, loft conversions, new homes, shop refits and tree works in Merseyside, from public planning applications.</p></header><main>'
         + notice +
-        '<form method="post" action="/planning/refresh"><button type="submit">Check for new planning applications</button></form>'
+        '<form method="post" action="/planning/refresh" id="checkform">'
+        + ('<button type="submit" class="push" disabled><span class="ico">⏳</span> Checking now… reload in a few minutes</button>'
+           if planning_running(run) else
+           '<button type="submit" class="push" id="checkbtn"><span class="ico">🔍</span> Check for new planning applications</button>')
+        + '</form>'
+        '<script>(function(){var f=document.getElementById("checkform"),b=document.getElementById("checkbtn");'
+        'if(!f||!b)return;f.addEventListener("submit",function(){b.classList.add("pressed");b.disabled=true;'
+        'b.innerHTML="<span class=\\"ico\\">⏳</span> Starting…";});})();</script>'
         f'<p class="stage">{str(total)} leads saved{" · last checked " + safe(last_run) if last_run else ""}. Green cards are approved, so work is likely soon.</p>'
         + (f'<details><summary>Council coverage</summary><ul class="coverage">{coverage}</ul></details>' if coverage else "")
         + '<div class="chips">' + trade_chips + '</div><div class="chips">' + area_chips + '</div><div class="chips">' + status_chips + '</div>'

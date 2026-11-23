@@ -300,3 +300,27 @@ class KeepAwakeTests(PlanningPageTests):
         with mock.patch.dict(os.environ, {"RENDER_EXTERNAL_URL": ""}), \
              mock.patch.object(self.app, "urlopen", side_effect=AssertionError("should not ping")):
             self.app._ping_self()
+
+
+class PushButtonTests(PlanningPageTests):
+    def test_button_is_a_push_button_and_greys_out_while_running(self):
+        page = self.client.get("/planning").get_data(as_text=True)
+        self.assertIn('class="push" id="checkbtn"', page)
+        from datetime import datetime, timezone
+        db = self.app.connect_db()
+        now = datetime.now(timezone.utc).isoformat()
+        self.app._set_planning_run(db, status="running", started_at=now, heartbeat_at=now)
+        db.close()
+        page = self.client.get("/planning").get_data(as_text=True)
+        self.assertIn("Checking now", page)
+        self.assertIn('class="push" disabled', page)
+
+    def test_all_councils_refused_is_explained(self):
+        import json
+        db = self.app.connect_db()
+        infos = [{"area": a, "error": "HTTP Error 503: Service Temporarily Unavailable", "kept": 0, "total": 0, "newest": ""}
+                 for a in ("Sefton", "Knowsley")]
+        self.app._set_planning_run(db, status="done", infos_json=json.dumps(infos), ran_at="2026-11-23T19:45:00+00:00")
+        db.close()
+        page = self.client.get("/planning").get_data(as_text=True)
+        self.assertIn("PlanIt turned down every request", page)
