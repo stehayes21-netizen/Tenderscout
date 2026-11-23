@@ -257,3 +257,70 @@ class ExteriorTradeTests(unittest.TestCase):
         self.assertEqual(tenderscout.classify_trade_category("Gutter clearing and downpipe maintenance across council housing"), "Gutter cleaning")
         self.assertEqual(tenderscout.classify_trade_category("Replacement of fascia and soffit boards to 40 properties"), "Roofline, fascias and soffits")
         self.assertEqual(tenderscout.classify_trade_category("Re-roofing programme for sheltered housing blocks"), "Roofing and roof repairs")
+
+
+class KeepAwakeTests(PlanningPageTests):
+    def test_killed_check_frees_the_button_after_three_minutes(self):
+        from datetime import datetime, timedelta, timezone
+        now = datetime(2026, 11, 23, 19, 26, tzinfo=timezone.utc)
+        db = self.app.connect_db()
+        self.app._set_planning_run(db, status="running", started_at=now.isoformat(), heartbeat_at=now.isoformat())
+        row = self.app._planning_run(db)
+        db.close()
+        self.assertTrue(self.app.planning_running(row, now + timedelta(minutes=2)))
+        self.assertFalse(self.app.planning_running(row, now + timedelta(minutes=4)))
+
+    def test_waiting_between_requests_keeps_the_check_alive(self):
+        import os
+        from unittest import mock
+        pings, sleeps = [], []
+
+        class Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, n): return b"ok"
+
+        def fake_urlopen(req, timeout):
+            pings.append(req.full_url)
+            return Resp()
+
+        with mock.patch.dict(os.environ, {"RENDER_EXTERNAL_URL": "https://tenderscout-1qnz.onrender.com"}), \
+             mock.patch.object(self.app, "urlopen", fake_urlopen), \
+             mock.patch("time.sleep", sleeps.append):
+            self.app._keepalive_sleep(60)
+        self.assertEqual(sleeps, [30, 30])
+        self.assertEqual(pings, ["https://tenderscout-1qnz.onrender.com/health"] * 2)
+        db = self.app.connect_db()
+        self.assertTrue(self.app._planning_run(db)["heartbeat_at"])
+        db.close()
+
+    def test_no_render_address_means_no_ping(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"RENDER_EXTERNAL_URL": ""}), \
+             mock.patch.object(self.app, "urlopen", side_effect=AssertionError("should not ping")):
+            self.app._ping_self()
+
+
+class PushButtonTests(PlanningPageTests):
+    def test_button_is_a_push_button_and_greys_out_while_running(self):
+        page = self.client.get("/planning").get_data(as_text=True)
+        self.assertIn('class="push" id="checkbtn"', page)
+        from datetime import datetime, timezone
+        db = self.app.connect_db()
+        now = datetime.now(timezone.utc).isoformat()
+        self.app._set_planning_run(db, status="running", started_at=now, heartbeat_at=now)
+        db.close()
+        page = self.client.get("/planning").get_data(as_text=True)
+        self.assertIn("Checking now", page)
+        self.assertIn('class="push" disabled', page)
+
+    def test_all_councils_refused_is_explained(self):
+        import json
+        db = self.app.connect_db()
+        infos = [{"area": a, "error": "HTTP Error 503: Service Temporarily Unavailable", "kept": 0, "total": 0, "newest": ""}
+                 for a in ("Sefton", "Knowsley")]
+        self.app._set_planning_run(db, status="done", infos_json=json.dumps(infos), ran_at="2026-11-23T19:45:00+00:00")
+        db.close()
+        page = self.client.get("/planning").get_data(as_text=True)
+        self.assertIn("PlanIt turned down every request", page)
