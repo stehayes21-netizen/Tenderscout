@@ -16,6 +16,13 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 - Community sites such as Facebook and Nextdoor are **not scraped automatically**. HomeGuild reported no open jobs on its public jobs board when checked on 27 October 2026; BuildPair loads requests dynamically and the reviewed pages do not document a public feed/API. Add only genuine enquiries from sources where access and reuse are permitted; supplier portals may require registration and may not offer a public feed.
 - Council portals are listed as sources, not falsely described as connected live feeds. The Standstill UK North West RSS feed is connected as a discovery source; it is broad regional data, may use buyer location when delivery location is missing, and must be verified on the official notice. Automated ingestion from other portals should be added only where an official feed/API or written permission is available.
 
+## Planning leads
+`planning.py` reads recent applications for the six councils from UK PlanIt (planit.org.uk), a free aggregator of council planning registers. It drops paperwork-only applications (discharge of conditions, minor amendments, adverts, refusals) and labels each lead with likely trades: extensions and building work, new homes and conversions, roofing, trees and landscaping, shopfronts and fit-out, windows and doors, fencing and groundworks, demolition, solar/EV/electrical, and builders' cleans.
+
+- Coverage is shown on the page. When this was written, PlanIt was current for Sefton, Knowsley, St Helens and Halton, but had stopped updating Liverpool (July 2026) and Wirral (June 2026). Stale councils are flagged rather than shown as "no jobs".
+- A planning application is planned work, not a request for quotes. Addresses are public records; homeowners should be contacted by letter or leaflet only, never by cold call or unsolicited email.
+- PlanIt is rate limited and run by one person; ask them before relying on it for a paid service. `TENDERSCOUT_PLANNING_DAYS` sets the look-back window (default 30).
+
 ## Trades
 Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.
 
@@ -67,8 +74,10 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 - `POST /add` add a tender by hand (`title`, `buyer`, `notice_url`, `pipeline_status`)
 - `/export.csv` download public-sector tender records
 - `/sources` council procurement and community source directory
+- `/planning` planning-application leads (extensions, lofts, new homes, shop refits, tree works) sorted by trade, area and stage; **Check for new planning applications** refreshes them, and the scheduled refresh does too
 - `/leads` manually capture and view private customer enquiries separately
-- `/health` readiness check
+- `/health` instant liveness check for the host (never touches the database, so a slow first connection after waking can't make Render restart the app)
+- `/health/db` database check
 
 ## Tests
 ```bash

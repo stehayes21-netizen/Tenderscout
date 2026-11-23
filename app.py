@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 from flask import Flask, Response, redirect, request
 
 import tenderscout as collector
+import planning
 
 app = Flask(__name__)
 
@@ -153,6 +154,29 @@ def ensure_schema(db):
         location_status TEXT NOT NULL DEFAULT 'Potential local — verify',
         imported_at TEXT NOT NULL
     )""")
+    db.execute(f"""CREATE TABLE IF NOT EXISTS planning_leads (
+        id {id_column},
+        name TEXT NOT NULL UNIQUE,
+        area TEXT,
+        address TEXT,
+        postcode TEXT,
+        description TEXT,
+        app_type TEXT,
+        app_state TEXT,
+        app_size TEXT,
+        start_date TEXT,
+        decided_date TEXT,
+        trades TEXT,
+        household INTEGER DEFAULT 0,
+        council_url TEXT,
+        planit_url TEXT,
+        fetched_at TEXT NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS planning_runs (
+        id INTEGER PRIMARY KEY,
+        ran_at TEXT,
+        infos_json TEXT
+    )""")
     db.execute("""CREATE TABLE IF NOT EXISTS refresh_state (
         id INTEGER PRIMARY KEY,
         status TEXT NOT NULL,
@@ -255,7 +279,7 @@ class FTSCheckpointStore:
 @app.before_request
 def require_login():
     """Fail closed: dashboard and private customer leads are never public."""
-    if request.path == "/health":
+    if request.path in ("/health", "/health/db"):
         return None
     user = os.environ.get("DASHBOARD_USER", "")
     password = os.environ.get("DASHBOARD_PASSWORD", "")
@@ -293,13 +317,26 @@ def csv_safe(value):
 
 @app.route("/health")
 def health():
+    """Liveness check for the host. Answers instantly and never touches the database.
+
+    Render calls this while the free instance is waking up. If it waited on a slow
+    first database connection, Render would treat the app as broken and restart it
+    mid-load, which showed visitors a long blank screen. Use /health/db to check
+    the database itself.
+    """
+    return {"status": "ok", "database": "postgres" if USE_POSTGRES else "sqlite"}
+
+
+@app.route("/health/db")
+def health_db():
+    """Readiness check that also proves the database answers."""
     try:
         db = connect_db()
         db.execute("SELECT 1")
         db.close()
         return {"status": "ok", "database": "postgres" if USE_POSTGRES else "sqlite"}
     except Exception:
-        app.logger.exception("Health check failed")
+        app.logger.exception("Database health check failed")
         return {"status": "error"}, 503
 
 
@@ -802,7 +839,7 @@ def dashboard():
     @media(max-width:520px){{body{{padding:12px}}header{{padding:17px}}.card{{padding:14px}}.trade-browser{{padding:12px}}.board-facts{{grid-template-columns:1fr 1fr;gap:.4rem}}.board-facts p{{padding:.55rem}}.board-facts span{{font-size:.88rem}}}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
-    <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
+    <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/planning">Planning leads</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
     <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley and Wirral. Warrington and Cheshire West and Chester are excluded.</p>
     <form id="refresh-form" method="post" action="/refresh">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
@@ -1222,6 +1259,7 @@ def _run_background_refresh(refresh_token=None):
                 summary += " Coverage warning: " + warning_text
                 app.logger.warning("Refresh completed with possible source-cap warnings: %s", warning_text)
             _set_refresh_state("completed", summary=summary, refresh_token=refresh_token)
+        refresh_planning_leads_safely()
         return stats, None
     except Exception:
         app.logger.exception("Background tender refresh failed")
@@ -1569,7 +1607,7 @@ def sources():
         'li{margin:10px 0;padding:14px;background:#f5f8f6;border:1px solid #e0e8e2;border-radius:10px}'
         'a{color:#08783c;font-weight:600}p{line-height:1.5}.note{font-size:14px;color:#53645a}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
-        '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Council & community sources</h1><p>Use this directory to find official tender notices and permitted customer enquiry sources.</p></header><main>'
         '<p class="note">Public contracts and private customer leads are different opportunity types. Council portals may require supplier registration and may not expose an open feed.</p>'
         + sections +
@@ -1824,7 +1862,7 @@ def private_leads():
         'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
         '.helper{font-size:13px;color:#53645a;font-weight:normal}.project-board{background:#eef6f0;border:1px solid #c8dccd;border-radius:12px;padding:14px;margin:18px 0}.project-board h2{margin-top:0}.project-card{border-left-color:#2563eb}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.lead-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}.lead-facts p{margin:0;padding:10px;background:#f3f6f4;border-radius:8px}.lead-facts b,.lead-facts span{display:block}.lead-facts b{font-size:12px;color:#53645a;text-transform:uppercase}.status-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.status-form label{flex:1;min-width:180px;margin:0}.status-form button{width:auto;margin:0;white-space:nowrap}.share-actions a{min-height:40px}.source-warning{padding:12px;border:1px solid #d8c28b;background:#fff9e8;border-radius:9px}.lead-filters{display:grid;grid-template-columns:2fr 1fr auto auto;gap:10px;align-items:end;background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-filters label{margin:0}.lead-filters button{width:auto;margin:0}.lead-filters a{align-self:center}@media(max-width:620px){.lead-filters{grid-template-columns:1fr}.lead-facts{grid-template-columns:1fr 1fr}}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
-        '<header><nav><a href="/">Public tenders</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
         '<p><b>Private leads.</b> Each card shows the job, trade, location, requested work and contact so you can pass it to a suitable tradesperson. They stay separate from public tenders.</p>'
         '<div class="lead-facts"><p><b>Total captured leads</b><span>' + str(lead_counts["total"]) + '</span></p><p><b>New</b><span>' + str(lead_counts["new"]) + '</span></p><p><b>Passed to trade</b><span>' + str(lead_counts["passed"]) + '</span></p></div>'
@@ -1848,6 +1886,190 @@ def private_leads():
         '<label>What exactly does the customer want? <span class="helper">(required — copy the actual request, not just the trade)</span><textarea name="details" required rows="5" maxlength="4000" placeholder="Example: wants rear patio pressure-washed, approx. 20 m², at the address above; asks for a quote this week. Only include details stated in the original enquiry."></textarea></label>'
         '<button type="submit">Save private lead</button></form></details><hr><h2>Latest private job leads</h2><p class="helper">Job-board view · newest first · open the original source before contacting anyone.</p>' + cards +
         '<p><a href="/">Public tenders</a> · <a href="/sources">Council & community sources</a></p></main></body></html>'
+    )
+    return Response(page, mimetype="text/html")
+
+
+# --------------------------------------------------------- planning leads --
+
+PLANNING_KEEP_DAYS = 120
+
+
+def refresh_planning_leads(getter=None, now=None):
+    """Read recent planning applications for the target councils and save the useful ones."""
+    leads, infos = planning.fetch_all(days=env_int("TENDERSCOUT_PLANNING_DAYS", 30), getter=getter)
+    db = connect_db()
+    try:
+        for lead in leads:
+            db.execute(
+                "INSERT INTO planning_leads (name,area,address,postcode,description,app_type,app_state,app_size,"
+                "start_date,decided_date,trades,household,council_url,planit_url,fetched_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET "
+                "app_state=excluded.app_state, decided_date=excluded.decided_date, trades=excluded.trades, "
+                "description=excluded.description, fetched_at=excluded.fetched_at",
+                tuple(lead[k] for k in ("name", "area", "address", "postcode", "description", "app_type", "app_state",
+                                        "app_size", "start_date", "decided_date", "trades", "household",
+                                        "council_url", "planit_url", "fetched_at")),
+            )
+        cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=PLANNING_KEEP_DAYS)).date().isoformat()
+        db.execute("DELETE FROM planning_leads WHERE start_date < ?", (cutoff,))
+        db.execute(
+            "INSERT INTO planning_runs (id, ran_at, infos_json) VALUES (1, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET ran_at=excluded.ran_at, infos_json=excluded.infos_json",
+            (datetime.now(timezone.utc).isoformat(), json.dumps(infos)),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return leads, infos
+
+
+def refresh_planning_leads_safely():
+    try:
+        leads, infos = refresh_planning_leads()
+        app.logger.info("Planning leads refreshed: %s saved", len(leads))
+    except Exception:
+        app.logger.exception("Planning leads refresh failed")
+
+
+@app.route("/planning/refresh", methods=["POST"])
+def planning_refresh():
+    try:
+        leads, _infos = refresh_planning_leads()
+        return redirect("/planning?refreshed=" + str(len(leads)))
+    except Exception:
+        app.logger.exception("Planning leads refresh failed")
+        return redirect("/planning?refresh_error=1")
+
+
+@app.route("/planning")
+def planning_page():
+    trade = request.args.get("trade", "")
+    trade = trade if trade in planning.TRADE_ORDER else ""
+    area = request.args.get("area", "")
+    area = area if area in planning.AREAS else ""
+    status = request.args.get("status", "")
+    status = status if status in ("approved", "pending") else ""
+    db = connect_db()
+    try:
+        where, params = [], []
+        if trade:
+            where.append("trades LIKE ?")
+            params.append("%" + trade + "%")
+        if area:
+            where.append("area = ?")
+            params.append(area)
+        if status == "approved":
+            where.append("app_state IN ('Permitted', 'Conditions')")
+        elif status == "pending":
+            where.append("app_state = 'Undecided'")
+        sql = "SELECT * FROM planning_leads" + (" WHERE " + " AND ".join(where) if where else "")
+        rows = db.execute(sql + " ORDER BY start_date DESC LIMIT 200", tuple(params)).fetchall()
+        total = db.execute("SELECT COUNT(*) AS n FROM planning_leads").fetchone()["n"]
+        trade_counts = {t: db.execute("SELECT COUNT(*) AS n FROM planning_leads WHERE trades LIKE ?", ("%" + t + "%",)).fetchone()["n"]
+                        for t in planning.TRADE_ORDER}
+        run = db.execute("SELECT ran_at, infos_json FROM planning_runs WHERE id = 1").fetchone()
+    finally:
+        db.close()
+
+    infos = []
+    if run and run["infos_json"]:
+        try:
+            infos = json.loads(run["infos_json"])
+        except ValueError:
+            infos = []
+    coverage = ""
+    for info in infos:
+        if info.get("error"):
+            note, cls = "could not be read this time: " + safe(info["error"]), "warn"
+        elif planning.area_is_stale(info):
+            note, cls = ("not updating on PlanIt (newest application " + safe(display_date(info.get("newest")) or "none")
+                         + "). Check the council's own planning search."), "warn"
+        else:
+            note, cls = str(int(info.get("kept") or 0)) + " useful of " + str(int(info.get("total") or 0)) + " recent applications", "ok"
+        coverage += f'<li class="{cls}"><b>{safe(info.get("area"))}</b>: {note}</li>'
+    last_run = display_date(run["ran_at"]) if run and run["ran_at"] else ""
+
+    def chip(label, **query):
+        merged = {"trade": trade, "area": area, "status": status}
+        merged.update(query)
+        href = "/planning?" + urlencode({k: v for k, v in merged.items() if v})
+        current = all(merged[k] == {"trade": trade, "area": area, "status": status}[k] for k in merged)
+        return f'<a class="chip{" on" if current else ""}" href="{safe(href)}">{label}</a>'
+
+    trade_chips = chip("All trades", trade="") + "".join(
+        chip(f"{safe(t)} <span>{trade_counts[t]}</span>", trade=t) for t in planning.TRADE_ORDER if trade_counts[t])
+    area_chips = chip("All areas", area="") + "".join(chip(safe(a), area=a) for a in planning.AREAS)
+    status_chips = chip("Any stage", status="") + chip("Approved", status="approved") + chip("Awaiting decision", status="pending")
+
+    cards = ""
+    for row in rows:
+        approved = row["app_state"] in ("Permitted", "Conditions")
+        share = "\n".join([
+            "PLANNING LEAD: " + str(row["description"] or ""),
+            "WHERE: " + str(row["address"] or ""),
+            "STAGE: " + planning.status_label(row["app_state"]) + (" (" + display_date(row["decided_date"]) + ")" if row["decided_date"] else ""),
+            "LIKELY TRADES: " + str(row["trades"] or ""),
+            "COUNCIL RECORD: " + str(row["council_url"] or row["planit_url"] or ""),
+            "Contact the owner by letter or leaflet only. No cold calls or emails.",
+        ])
+        wa = "https://wa.me/?" + urlencode({"text": share})
+        em = "mailto:?" + urlencode({"subject": "Planning lead: " + str(row["address"] or "")[:80], "body": share})
+        link = row["council_url"] or row["planit_url"]
+        link_html = f'<a href="{safe(link)}" target="_blank" rel="noopener">Council record</a>' if link else ""
+        trades_html = "".join(f'<span class="tag">{safe(t.strip())}</span>' for t in str(row["trades"] or "").split(",") if t.strip())
+        cards += (
+            f'<article class="plan{" hot" if approved else ""}">'
+            f'<p class="kicker">{safe(row["area"])} · {"Household" if row["household"] else "Commercial / development"} · {safe(row["app_size"] or "Size not stated")}</p>'
+            f'<h3>{safe(row["description"])}</h3>'
+            f'<p class="where"><b>WHERE:</b> {safe(row["address"])}</p>'
+            f'<p class="stage {"ok" if approved else ""}">{safe(planning.status_label(row["app_state"]))}'
+            f'{" · decided " + safe(display_date(row["decided_date"])) if row["decided_date"] else ""} · submitted {safe(display_date(row["start_date"]) or "date not stated")}</p>'
+            f'<p class="tags">{trades_html}</p>'
+            f'<p class="actions">{link_html}'
+            f'<a href="{safe(wa)}" target="_blank" rel="noopener">Send by WhatsApp</a><a href="{safe(em)}">Send by email</a></p></article>'
+        )
+    if not cards:
+        cards = ('<p class="empty">No planning leads saved yet. Tap <b>Check for new planning applications</b> above.</p>'
+                 if not total else '<p class="empty">Nothing matches these filters. Try All trades or All areas.</p>')
+
+    notice = ""
+    if request.args.get("refreshed"):
+        notice = f'<p class="notice ok">Checked PlanIt. {safe(request.args.get("refreshed"))} useful applications found in the last 30 days.</p>'
+    elif request.args.get("refresh_error"):
+        notice = '<p class="notice warn">Couldn\'t reach PlanIt just now. Try again in a few minutes.</p>'
+
+    page = (
+        '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Tender Scout — planning leads</title><style>'
+        'body{font:16px Arial;max-width:960px;margin:0 auto;padding:16px;color:#18251e;background:#f3f6f4;line-height:1.45}'
+        'header{background:#143d2a;color:white;border-radius:14px;padding:20px;margin-bottom:16px}header a{color:white}nav{font-size:14px}'
+        'main{background:white;border-radius:14px;padding:18px}a{color:#08783c}'
+        'button{padding:13px 18px;background:#168447;color:white;border:0;border-radius:9px;font-weight:bold;font-size:16px;width:100%}'
+        '.chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.chip{padding:8px 12px;border:1px solid #b8c6bd;border-radius:99px;text-decoration:none;color:#18251e;font-size:14px;background:#fff}'
+        '.chip span{color:#53645a}.chip.on{background:#143d2a;color:#fff;border-color:#143d2a}.chip.on span{color:#cfe3d6}'
+        'article.plan{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #9bb5a5;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
+        'article.plan.hot{border-left-color:#168447}.kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:#53645a;margin:0}'
+        'article h3{font-size:18px;margin:8px 0}.where{background:#e8f2eb;padding:10px;border-radius:8px}.stage{font-size:14px;color:#53645a}.stage.ok{color:#08783c;font-weight:bold}'
+        '.tags{display:flex;flex-wrap:wrap;gap:6px}.tag{font-size:13px;background:#f3f6f4;border:1px solid #dce5de;border-radius:99px;padding:3px 9px}'
+        '.actions{display:flex;flex-wrap:wrap;gap:8px}.actions a{padding:10px 12px;background:#e8f2eb;border-radius:8px;text-decoration:none;font-weight:bold;min-height:40px}'
+        '.notice{padding:12px;border-radius:9px}.notice.ok{background:#e8f2eb}.notice.warn,.privacy{background:#fff9e8;border:1px solid #d8c28b;padding:12px;border-radius:9px}'
+        '.coverage{margin:6px 0 0;padding-left:18px;font-size:14px}.coverage .warn{color:#8a5a00}.empty{padding:20px;text-align:center;color:#53645a}'
+        'details summary{cursor:pointer;font-weight:bold;color:#145c35;padding:6px 0}'
+        '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<h1>Planning leads</h1><p>New extensions, loft conversions, new homes, shop refits and tree works in Merseyside, from public planning applications.</p></header><main>'
+        + notice +
+        '<form method="post" action="/planning/refresh"><button type="submit">Check for new planning applications</button></form>'
+        f'<p class="stage">{str(total)} leads saved{" · last checked " + safe(last_run) if last_run else ""}. Green cards are approved, so work is likely soon.</p>'
+        + (f'<details><summary>Council coverage</summary><ul class="coverage">{coverage}</ul></details>' if coverage else "")
+        + '<div class="chips">' + trade_chips + '</div><div class="chips">' + area_chips + '</div><div class="chips">' + status_chips + '</div>'
+        '<p class="privacy"><b>How to use these leads.</b> A planning application shows planned work, not a request for quotes. '
+        'Addresses are public planning records. Tradespeople should contact homeowners by letter or leaflet only, never by cold call or unsolicited email. '
+        'Businesses and developers can be approached directly.</p>'
+        + cards +
+        '<p class="stage">Source: UK PlanIt (planit.org.uk), which collects council planning registers. Always check the council record before acting.</p>'
+        '</main></body></html>'
     )
     return Response(page, mimetype="text/html")
 

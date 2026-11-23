@@ -1,0 +1,147 @@
+"""Offline tests for planning-application leads. Records are real PlanIt entries (November 2026), trimmed."""
+import unittest
+from datetime import date
+
+import planning
+
+REAL = [
+    {"name": "StHelens/P/2026/0539/HHFP", "uid": "P/2026/0539/HHFP", "area_name": "St Helens", "start_date": "2026-10-13", "decided_date": None, "app_state": "Undecided", "app_size": "Small", "app_type": "Full", "address": "25 Parkside Avenue Clock Face St Helens WA9 4DT", "postcode": "WA9 4DT", "description": "Single storey side extension.", "link": "https://www.planit.org.uk/planapplic/StHelens/P/2026/0539/HHFP/", "url": "https://publicaccess.sthelens.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=TMUBV0PELKU00"},
+    {"name": "StHelens/P/2026/0576/TPO", "uid": "P/2026/0576/TPO", "area_name": "St Helens", "start_date": "2026-11-09", "decided_date": None, "app_state": "Undecided", "app_size": "Small", "app_type": "Trees", "address": "31 View Road Rainhill St Helens L35 0LF", "postcode": "L35 0LF", "description": "Works to 2no beech trees under TPO.", "link": "https://www.planit.org.uk/planapplic/StHelens/P/2026/0576/TPO/", "url": "https://publicaccess.sthelens.gov.uk/online-applications/applicationDetails.do?keyVal=TO4XL6PELXI00&activeTab=summary"},
+    {"name": "StHelens/P/2026/0567/FUL", "uid": "P/2026/0567/FUL", "area_name": "St Helens", "start_date": "2026-10-30", "decided_date": None, "app_state": "Undecided", "app_size": "Small", "app_type": "Full", "address": "Land At Rear Of 71 Litherland Crescent St Helens WA11 9AJ", "postcode": "WA11 9AJ", "description": "Demolition of existing garage and construction of 1no bungalow with associated landscaping.", "link": "https://www.planit.org.uk/planapplic/StHelens/P/2026/0567/FUL/", "url": "https://publicaccess.sthelens.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=TNQB9YPE04I00"},
+    {"name": "StHelens/P/2026/0593/FUL", "uid": "P/2026/0593/FUL", "area_name": "St Helens", "start_date": "2026-11-12", "decided_date": None, "app_state": "Undecided", "app_size": "Large", "app_type": "Full", "address": "Land At Ullswater Avenue, St Helens", "postcode": None, "description": "Erection of 33no. dwellings (Class C3), construction of new vehicle access points, associated landscaping and infrastructure works", "link": "https://www.planit.org.uk/planapplic/StHelens/P/2026/0593/FUL/", "url": "https://publicaccess.sthelens.gov.uk/online-applications/applicationDetails.do?keyVal=TOE9T3PELZW00&activeTab=summary"},
+    {"name": "StHelens/A/2026/0037/NMA", "uid": "A/2026/0037/NMA", "area_name": "St Helens", "start_date": "2026-10-28", "decided_date": "2026-11-20", "app_state": "Permitted", "app_size": "Small", "app_type": "Amendment", "address": "90 Park Road South Newton Le Willows St Helens WA12 8PL", "postcode": "WA12 8PL", "description": "Non-material amendment to approved extension on application P/2026/0222/HHFP, to alter the window and doors at rear", "link": "https://www.planit.org.uk/planapplic/StHelens/A/2026/0037/NMA/", "url": ""},
+    {"name": "StHelens/C/2026/0164/CON", "uid": "C/2026/0164/CON", "area_name": "St Helens", "start_date": "2026-11-19", "decided_date": None, "app_state": "Undecided", "app_size": "Small", "app_type": "Conditions", "address": "Land West Of Mill Lane Newton Le Willows St Helens WA12 8DE", "postcode": "WA12 8DE", "description": "Discharge of condition 12 (Tree protection) on approval P/2023/0619/FUL.", "link": "https://www.planit.org.uk/planapplic/StHelens/C/2026/0164/CON/", "url": ""},
+    {"name": "StHelens/P/2026/0559/CLP", "uid": "P/2026/0559/CLP", "area_name": "St Helens", "start_date": "2026-10-19", "decided_date": "2026-11-20", "app_state": "Rejected", "app_size": "Small", "app_type": "Outline", "address": "FC St Helens Windleshaw Road Dentons Green St Helens WA10 6TE", "postcode": "WA10 6TE", "description": "Certificate of lawfulness for proposed replacement of current grass pitch with artificial grass pitch.", "link": "https://www.planit.org.uk/planapplic/StHelens/P/2026/0559/CLP/", "url": ""},
+    {"name": "StHelens/P/2026/0562/ADC", "uid": "P/2026/0562/ADC", "area_name": "St Helens", "start_date": "2026-10-15", "decided_date": None, "app_state": "Undecided", "app_size": "Small", "app_type": "Advertising", "address": "Tesco Stores James Roby Way St Helens WA9 5DT", "postcode": "WA9 5DT", "description": "Consent to display gym signage at premises.", "link": "https://www.planit.org.uk/planapplic/StHelens/P/2026/0562/ADC/", "url": ""},
+    {"name": "StHelens/P/2026/0599/FP3", "uid": "P/2026/0599/FP3", "area_name": "St Helens", "start_date": "2026-11-18", "decided_date": None, "app_state": "Undecided", "app_size": "Small", "app_type": "Full", "address": "Boathouse & Cafe Taylor Park Grosvenor Road St Helens", "postcode": None, "description": "Works to existing boathouse, including replacement of timber windows with UPVC, renewal of dormers, installation of new aluminium doors and metal roller shutters, removal of existing turnstile, replacement fencing, and creation of rear lakeside seating area, including new glazed balustrade.", "link": "https://www.planit.org.uk/planapplic/StHelens/P/2026/0599/FP3/", "url": ""},
+    {"name": "Knowsley/26/00543/KMBC1", "uid": "26/00543/KMBC1", "area_name": "Knowsley", "start_date": "2026-11-12", "decided_date": None, "app_state": "Undecided", "app_size": "Small", "app_type": "Other", "address": "60 St Chads Parade Kirkby Town Centre Knowsley L32 8UG", "postcode": "L32 8UG", "description": "EXTERNAL ALTERATIONS TO EXISTING COMMERCIAL UNITS, INCLUDING INCREASED SHOPFONT GLAZING, REMOVAL OF EXISTING CONCRETE CANOPY, REPLACEMENT OF EXISTING FIRST FLOOR WINDOWS OF UNITS 60 AND 62 TOGETHER WITH INTERNAL ALTERATIONS AND ASSOCIATED WORKS.", "link": "https://www.planit.org.uk/planapplic/Knowsley/26/00543/KMBC1/", "url": ""},
+    {"name": "Sefton/DC/2026/01869", "uid": "DC/2026/01869", "area_name": "Sefton", "start_date": "2026-10-30", "decided_date": None, "app_state": "Undecided", "app_size": None, "app_type": None, "address": "152 Sherwoods Lane Liverpool L10 1AB", "postcode": "L10 1AB", "description": "Neighbouring Authority Consultation from Liverpool City Council to erect 2 no. dormer extension to side with associated loft conversion", "link": "https://www.planit.org.uk/planapplic/Sefton/DC/2026/01869/", "url": ""},
+    {"name": "StHelens/P/2026/0572/O2DPA", "uid": "P/2026/0572/O2DPA", "area_name": "St Helens", "start_date": "2026-11-04", "decided_date": None, "app_state": "Undecided", "app_size": "Small", "app_type": "Outline", "address": "24 - 26 Ormskirk Street St Helens WA10 1BJ", "postcode": "WA10 1BJ", "description": "Prior approval for change of use from offices (E) to 4no apartments (C3) at ground floor.", "link": "https://www.planit.org.uk/planapplic/StHelens/P/2026/0572/O2DPA/", "url": ""},
+]
+
+
+class ClassifyTests(unittest.TestCase):
+    def leads(self):
+        return [l for l in (planning.normalise(r, "2026-11-23T00:00:00Z") for r in REAL) if l]
+
+    def test_paperwork_rejected_and_adverts_are_dropped(self):
+        names = {l["name"] for l in self.leads()}
+        for dropped in ["StHelens/A/2026/0037/NMA", "StHelens/C/2026/0164/CON", "StHelens/P/2026/0559/CLP",
+                        "StHelens/P/2026/0562/ADC", "Sefton/DC/2026/01869"]:
+            self.assertNotIn(dropped, names)
+        self.assertEqual(len(names), 7)
+
+    def test_trades_are_labelled_from_the_description(self):
+        by = {l["name"]: l["trades"] for l in self.leads()}
+        self.assertTrue(by["StHelens/P/2026/0539/HHFP"].startswith("Extensions and building work"))
+        self.assertEqual(by["StHelens/P/2026/0576/TPO"], "Trees and landscaping")
+        self.assertIn("New homes and conversions", by["StHelens/P/2026/0567/FUL"])
+        self.assertIn("Demolition and clearance", by["StHelens/P/2026/0567/FUL"])
+        self.assertIn("Builders' cleans", by["StHelens/P/2026/0593/FUL"])
+        self.assertIn("Windows and doors", by["StHelens/P/2026/0599/FP3"])
+        self.assertIn("Roofing", by["StHelens/P/2026/0599/FP3"])
+        self.assertIn("Shopfronts and commercial fit-out", by["Knowsley/26/00543/KMBC1"])
+        self.assertIn("New homes and conversions", by["StHelens/P/2026/0572/O2DPA"])
+
+    def test_household_flag_and_links(self):
+        lead = next(l for l in self.leads() if l["name"] == "StHelens/P/2026/0539/HHFP")
+        self.assertEqual(lead["household"], 1)
+        self.assertTrue(lead["council_url"].startswith("https://publicaccess.sthelens.gov.uk/"))
+        self.assertEqual(lead["postcode"], "WA9 4DT")
+        big = next(l for l in self.leads() if l["name"] == "StHelens/P/2026/0593/FUL")
+        self.assertEqual(big["household"], 0)
+
+    def test_status_labels(self):
+        self.assertTrue(planning.status_label("Permitted").startswith("Approved"))
+        self.assertTrue(planning.status_label("Undecided").startswith("Awaiting decision"))
+
+
+class FetchTests(unittest.TestCase):
+    def test_fetch_all_pages_and_reports_each_area(self):
+        calls = []
+
+        def getter(params, timeout):
+            calls.append((params["auth"], params["page"]))
+            if params["auth"] == "Wirral":
+                raise OSError("timed out")
+            if params["auth"] == "St Helens":
+                page = params["page"]
+                recs = REAL[:6] if page == 1 else REAL[6:]
+                return {"records": recs, "total": len(REAL), "from": 0 if page == 1 else 6, "to": 5 if page == 1 else len(REAL) - 1}
+            return {"records": [], "total": 0, "from": None, "to": None}
+
+        leads, infos = planning.fetch_all(areas=["St Helens", "Wirral", "Liverpool"], getter=getter)
+        self.assertIn(("St Helens", 2), calls)
+        self.assertEqual(len(leads), 7)
+        info = {i["area"]: i for i in infos}
+        self.assertEqual(info["St Helens"]["kept"], 7)
+        self.assertEqual(info["St Helens"]["newest"], "2026-11-19")
+        self.assertIn("timed out", info["Wirral"]["error"])
+        self.assertTrue(planning.area_is_stale(info["Liverpool"], today=date(2026, 11, 23)))
+        self.assertFalse(planning.area_is_stale(info["St Helens"], today=date(2026, 11, 23)))
+        self.assertFalse(planning.area_is_stale(info["Wirral"], today=date(2026, 11, 23)))
+
+    def test_old_newest_date_is_stale(self):
+        self.assertTrue(planning.area_is_stale({"newest": "2026-07-08", "error": ""}, today=date(2026, 11, 23)))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class PlanningPageTests(unittest.TestCase):
+    def setUp(self):
+        import base64, importlib, os, tempfile
+        from pathlib import Path
+        self.tmp = tempfile.TemporaryDirectory()
+        os.environ["TENDERSCOUT_DB"] = str(Path(self.tmp.name) / "test.db")
+        os.environ.pop("DATABASE_URL", None)
+        os.environ["DASHBOARD_USER"] = "u"
+        os.environ["DASHBOARD_PASSWORD"] = "p"
+        import app
+        self.app = importlib.reload(app)
+        self.client = self.app.app.test_client()
+        self.client.environ_base["HTTP_AUTHORIZATION"] = "Basic " + base64.b64encode(b"u:p").decode()
+
+    def tearDown(self):
+        import os
+        self.tmp.cleanup()
+        for name in ("TENDERSCOUT_DB", "DASHBOARD_USER", "DASHBOARD_PASSWORD"):
+            os.environ.pop(name, None)
+
+    def getter(self, params, timeout):
+        if params["auth"] == "St Helens":
+            return {"records": REAL, "total": len(REAL), "from": 0, "to": len(REAL) - 1}
+        if params["auth"] == "Knowsley":
+            return {"records": [REAL[9]], "total": 1, "from": 0, "to": 0}
+        return {"records": [], "total": 0, "from": None, "to": None}
+
+    def test_empty_page_invites_a_check(self):
+        page = self.client.get("/planning").get_data(as_text=True)
+        self.assertIn("Check for new planning applications", page)
+        self.assertIn("No planning leads saved yet", page)
+
+    def test_refresh_saves_leads_and_page_filters_them(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 11, 23, tzinfo=timezone.utc)
+        leads, infos = self.app.refresh_planning_leads(getter=self.getter, now=now)
+        self.assertEqual(len(leads), 7)  # the Knowsley record is in both samples: saved once
+        # Running twice updates rather than duplicates.
+        self.app.refresh_planning_leads(getter=self.getter, now=now)
+        page = self.client.get("/planning").get_data(as_text=True)
+        self.assertIn("7 leads saved", page)
+        self.assertIn("Single storey side extension.", page)
+        self.assertIn("Works to 2no beech trees under TPO.", page)
+        self.assertNotIn("Discharge of condition", page)
+        self.assertIn("not updating on PlanIt", page)  # Liverpool returned nothing
+        trees = self.client.get("/planning?trade=Trees+and+landscaping").get_data(as_text=True)
+        self.assertIn("beech trees", trees)
+        self.assertNotIn("Single storey side extension.", trees)
+        knowsley = self.client.get("/planning?area=Knowsley").get_data(as_text=True)
+        self.assertIn("ST CHADS PARADE", knowsley.upper())
+        self.assertNotIn("Parkside Avenue", knowsley)
+        self.assertIn("letter or leaflet only", page)
+
+    def test_planning_page_requires_login(self):
+        self.client.environ_base.pop("HTTP_AUTHORIZATION")
+        self.assertEqual(self.client.get("/planning").status_code, 401)
