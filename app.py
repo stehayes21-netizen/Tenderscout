@@ -175,7 +175,10 @@ def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS planning_runs (
         id INTEGER PRIMARY KEY,
         ran_at TEXT,
-        infos_json TEXT
+        infos_json TEXT,
+        status TEXT,
+        started_at TEXT,
+        error TEXT
     )""")
     db.execute("""CREATE TABLE IF NOT EXISTS refresh_state (
         id INTEGER PRIMARY KEY,
@@ -397,6 +400,18 @@ def format_money(value):
     except (TypeError, ValueError):
         return "Not stated in the feed"
     return f"£{amount:,.0f}" if amount.is_integer() else f"£{amount:,.2f}"
+
+
+def display_time(value):
+    """UK clock time for an ISO timestamp, e.g. '7:05pm'."""
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    local = parsed.astimezone(planning.LONDON)
+    return local.strftime("%I:%M%p").lstrip("0").lower()
 
 
 def display_date(value):
@@ -1893,11 +1908,44 @@ def private_leads():
 # --------------------------------------------------------- planning leads --
 
 PLANNING_KEEP_DAYS = 120
+PLANNING_AUTO_EVERY_HOURS = 20      # automatic check at most once a day
+PLANNING_RUNNING_STALE_MINUTES = 30  # a "running" flag older than this is a crashed run
 
 
-def refresh_planning_leads(getter=None, now=None):
+def _planning_run(db):
+    return db.execute("SELECT * FROM planning_runs WHERE id = 1").fetchone()
+
+
+def _set_planning_run(db, **fields):
+    db.execute("INSERT INTO planning_runs (id) VALUES (1) ON CONFLICT(id) DO NOTHING")
+    for key, value in fields.items():
+        db.execute(f"UPDATE planning_runs SET {key} = ? WHERE id = 1", (value,))
+    db.commit()
+
+
+def _hours_since(iso, now):
+    try:
+        then = datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return None
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return (now - then).total_seconds() / 3600
+
+
+def planning_running(row, now=None):
+    now = now or datetime.now(timezone.utc)
+    if not row or row["status"] != "running":
+        return False
+    hours = _hours_since(row["started_at"], now)
+    return hours is not None and hours * 60 < PLANNING_RUNNING_STALE_MINUTES
+
+
+def refresh_planning_leads(getter=None, now=None, sleep=None):
     """Read recent planning applications for the target councils and save the useful ones."""
-    leads, infos = planning.fetch_all(days=env_int("TENDERSCOUT_PLANNING_DAYS", 30), getter=getter)
+    import time as _time
+    leads, infos = planning.fetch_all(days=env_int("TENDERSCOUT_PLANNING_DAYS", 30), getter=getter,
+                                      sleep=sleep or _time.sleep)
     db = connect_db()
     try:
         for lead in leads:
@@ -1913,33 +1961,64 @@ def refresh_planning_leads(getter=None, now=None):
             )
         cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=PLANNING_KEEP_DAYS)).date().isoformat()
         db.execute("DELETE FROM planning_leads WHERE start_date < ?", (cutoff,))
-        db.execute(
-            "INSERT INTO planning_runs (id, ran_at, infos_json) VALUES (1, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET ran_at=excluded.ran_at, infos_json=excluded.infos_json",
-            (datetime.now(timezone.utc).isoformat(), json.dumps(infos)),
-        )
         db.commit()
+        _set_planning_run(db, ran_at=datetime.now(timezone.utc).isoformat(), infos_json=json.dumps(infos),
+                          status="done", error="")
     finally:
         db.close()
     return leads, infos
 
 
-def refresh_planning_leads_safely():
+def _planning_worker():
     try:
-        leads, infos = refresh_planning_leads()
+        leads, _infos = refresh_planning_leads()
         app.logger.info("Planning leads refreshed: %s saved", len(leads))
-    except Exception:
+    except Exception as exc:
         app.logger.exception("Planning leads refresh failed")
+        db = connect_db()
+        try:
+            _set_planning_run(db, status="failed", error=str(exc)[:300])
+        finally:
+            db.close()
+
+
+def start_planning_refresh(now=None, automatic=False):
+    """Start a background PlanIt check if allowed. Returns 'started' or the reason it didn't start."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        planning.user_agent()
+    except planning.PlanningConfigError:
+        return "config"
+    if not planning.in_quiet_hours(now):
+        return "daytime"
+    db = connect_db()
+    try:
+        row = _planning_run(db)
+        if planning_running(row, now):
+            return "running"
+        if automatic and row and row["ran_at"]:
+            hours = _hours_since(row["ran_at"], now)
+            if hours is not None and hours < PLANNING_AUTO_EVERY_HOURS:
+                return "recent"
+        _set_planning_run(db, status="running", started_at=now.isoformat(), error="")
+    finally:
+        db.close()
+    threading.Thread(target=_planning_worker, daemon=True, name="tenderscout-planning").start()
+    return "started"
+
+
+def refresh_planning_leads_safely():
+    """Called after the scheduled tender refresh. Never affects the tender refresh status."""
+    try:
+        result = start_planning_refresh(automatic=True)
+        app.logger.info("Planning leads automatic check: %s", result)
+    except Exception:
+        app.logger.exception("Planning leads refresh could not start")
 
 
 @app.route("/planning/refresh", methods=["POST"])
 def planning_refresh():
-    try:
-        leads, _infos = refresh_planning_leads()
-        return redirect("/planning?refreshed=" + str(len(leads)))
-    except Exception:
-        app.logger.exception("Planning leads refresh failed")
-        return redirect("/planning?refresh_error=1")
+    return redirect("/planning?check=" + start_planning_refresh())
 
 
 @app.route("/planning")
@@ -1968,7 +2047,7 @@ def planning_page():
         total = db.execute("SELECT COUNT(*) AS n FROM planning_leads").fetchone()["n"]
         trade_counts = {t: db.execute("SELECT COUNT(*) AS n FROM planning_leads WHERE trades LIKE ?", ("%" + t + "%",)).fetchone()["n"]
                         for t in planning.TRADE_ORDER}
-        run = db.execute("SELECT ran_at, infos_json FROM planning_runs WHERE id = 1").fetchone()
+        run = _planning_run(db)
     finally:
         db.close()
 
@@ -2033,11 +2112,19 @@ def planning_page():
         cards = ('<p class="empty">No planning leads saved yet. Tap <b>Check for new planning applications</b> above.</p>'
                  if not total else '<p class="empty">Nothing matches these filters. Try All trades or All areas.</p>')
 
+    check = request.args.get("check", "")
     notice = ""
-    if request.args.get("refreshed"):
-        notice = f'<p class="notice ok">Checked PlanIt. {safe(request.args.get("refreshed"))} useful applications found in the last 30 days.</p>'
-    elif request.args.get("refresh_error"):
-        notice = '<p class="notice warn">Couldn\'t reach PlanIt just now. Try again in a few minutes.</p>'
+    if planning_running(run):
+        notice = ('<p class="notice ok"><b>Checking PlanIt now</b> (started ' + safe(display_time(run["started_at"]))
+                  + '). It waits a minute between councils, so it takes about 6 minutes. Reload this page later.</p>')
+    elif check == "daytime":
+        notice = ('<p class="notice warn">PlanIt asks for checks between 6pm and 6am, so it isn\'t checked during the day. '
+                  'It checks automatically overnight, or tap the button after 6pm.</p>')
+    elif check == "config":
+        notice = ('<p class="notice warn">Planning checks are switched off until <b>PLANIT_CONTACT_EMAIL</b> is set in Render '
+                  '(your service, Environment). PlanIt needs a contact email on every request.</p>')
+    elif run and run["status"] == "failed":
+        notice = '<p class="notice warn">The last check failed: ' + safe(run["error"] or "unknown error") + '. It will try again tonight.</p>'
 
     page = (
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'

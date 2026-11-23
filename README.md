@@ -21,7 +21,8 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 
 - Coverage is shown on the page. When this was written, PlanIt was current for Sefton, Knowsley, St Helens and Halton, but had stopped updating Liverpool (July 2026) and Wirral (June 2026). Stale councils are flagged rather than shown as "no jobs".
 - A planning application is planned work, not a request for quotes. Addresses are public records; homeowners should be contacted by letter or leaflet only, never by cold call or unsolicited email.
-- PlanIt is rate limited and run by one person; ask them before relying on it for a paid service. `TENDERSCOUT_PLANNING_DAYS` sets the look-back window (default 30).
+- PlanIt's acceptable-use rules are built in: checks run only between 18:00 and 06:00 UK time (automatically at most once a day, after the scheduled refresh), with 60 seconds between requests, Retry-After honoured, and well under 300 requests a day. **Set `PLANIT_CONTACT_EMAIL`** in Render: PlanIt requires a contact email in every request, and planning checks stay off until it is set. The check button runs in the background (about 6 minutes).
+- PlanIt is a free hobby service run by one person, with no service guarantee. `TENDERSCOUT_PLANNING_DAYS` sets the look-back window (default 30).
 
 ## Trades
 Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.

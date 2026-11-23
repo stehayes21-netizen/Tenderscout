@@ -70,7 +70,10 @@ class FetchTests(unittest.TestCase):
                 return {"records": recs, "total": len(REAL), "from": 0 if page == 1 else 6, "to": 5 if page == 1 else len(REAL) - 1}
             return {"records": [], "total": 0, "from": None, "to": None}
 
-        leads, infos = planning.fetch_all(areas=["St Helens", "Wirral", "Liverpool"], getter=getter)
+        waits = []
+        leads, infos = planning.fetch_all(areas=["St Helens", "Wirral", "Liverpool"], getter=getter, sleep=waits.append)
+        # One minute between requests, none before the first: 4 requests -> 3 waits.
+        self.assertEqual(waits, [60, 60, 60])
         self.assertIn(("St Helens", 2), calls)
         self.assertEqual(len(leads), 7)
         info = {i["area"]: i for i in infos}
@@ -124,10 +127,10 @@ class PlanningPageTests(unittest.TestCase):
     def test_refresh_saves_leads_and_page_filters_them(self):
         from datetime import datetime, timezone
         now = datetime(2026, 11, 23, tzinfo=timezone.utc)
-        leads, infos = self.app.refresh_planning_leads(getter=self.getter, now=now)
+        leads, infos = self.app.refresh_planning_leads(getter=self.getter, now=now, sleep=lambda s: None)
         self.assertEqual(len(leads), 7)  # the Knowsley record is in both samples: saved once
         # Running twice updates rather than duplicates.
-        self.app.refresh_planning_leads(getter=self.getter, now=now)
+        self.app.refresh_planning_leads(getter=self.getter, now=now, sleep=lambda s: None)
         page = self.client.get("/planning").get_data(as_text=True)
         self.assertIn("7 leads saved", page)
         self.assertIn("Single storey side extension.", page)
@@ -145,3 +148,91 @@ class PlanningPageTests(unittest.TestCase):
     def test_planning_page_requires_login(self):
         self.client.environ_base.pop("HTTP_AUTHORIZATION")
         self.assertEqual(self.client.get("/planning").status_code, 401)
+
+
+class PoliteUseTests(unittest.TestCase):
+    def test_contact_email_is_required_and_sent(self):
+        import os
+        os.environ.pop("PLANIT_CONTACT_EMAIL", None)
+        with self.assertRaises(planning.PlanningConfigError):
+            planning.user_agent()
+        os.environ["PLANIT_CONTACT_EMAIL"] = "someone@example.com"
+        try:
+            self.assertIn("someone@example.com", planning.user_agent())
+        finally:
+            os.environ.pop("PLANIT_CONTACT_EMAIL", None)
+
+    def test_quiet_hours_follow_uk_time(self):
+        from datetime import datetime, timezone
+        self.assertTrue(planning.in_quiet_hours(datetime(2026, 11, 23, 19, 0, tzinfo=timezone.utc)))
+        self.assertTrue(planning.in_quiet_hours(datetime(2026, 11, 23, 5, 30, tzinfo=timezone.utc)))
+        self.assertFalse(planning.in_quiet_hours(datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)))
+        # British Summer Time: 17:30 UTC is 18:30 in London.
+        self.assertTrue(planning.in_quiet_hours(datetime(2026, 7, 1, 17, 30, tzinfo=timezone.utc)))
+
+    def test_retry_after_is_honoured_once(self):
+        import io
+        from unittest import mock
+        from urllib.error import HTTPError
+        import os
+        os.environ["PLANIT_CONTACT_EMAIL"] = "someone@example.com"
+        calls, waits = [], []
+
+        def fake_urlopen(req, timeout):
+            calls.append(req.get_header("User-agent"))
+            if len(calls) == 1:
+                raise HTTPError(req.full_url, 429, "Too Many", {"Retry-After": "120"}, io.BytesIO(b""))
+            return io.BytesIO(b'{"records": [], "total": 0}')
+
+        try:
+            with mock.patch.object(planning, "urlopen", fake_urlopen):
+                data = planning._get({"auth": "Sefton"}, 5, sleep=waits.append)
+        finally:
+            os.environ.pop("PLANIT_CONTACT_EMAIL", None)
+        self.assertEqual(data["total"], 0)
+        self.assertEqual(waits, [120])
+        self.assertIn("someone@example.com", calls[0])
+
+
+class PlanningScheduleTests(PlanningPageTests):
+    def test_button_refuses_in_daytime_and_without_email(self):
+        import os
+        from datetime import datetime, timezone
+        noon = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
+        evening = datetime(2026, 11, 23, 19, 0, tzinfo=timezone.utc)
+        os.environ.pop("PLANIT_CONTACT_EMAIL", None)
+        self.assertEqual(self.app.start_planning_refresh(now=evening), "config")
+        os.environ["PLANIT_CONTACT_EMAIL"] = "someone@example.com"
+        try:
+            self.assertEqual(self.app.start_planning_refresh(now=noon), "daytime")
+            page = self.client.get("/planning?check=daytime").get_data(as_text=True)
+            self.assertIn("between 6pm and 6am", page)
+        finally:
+            os.environ.pop("PLANIT_CONTACT_EMAIL", None)
+
+    def test_automatic_check_runs_at_most_once_a_day(self):
+        import os
+        from datetime import datetime, timedelta, timezone
+        from unittest import mock
+        # Real "now" so the page's 30-minute running window is current; quiet hours forced on.
+        evening = datetime.now(timezone.utc)
+        os.environ["PLANIT_CONTACT_EMAIL"] = "someone@example.com"
+        quiet = mock.patch.object(planning, "in_quiet_hours", return_value=True)
+        quiet.start()
+        self.addCleanup(quiet.stop)
+        try:
+            with mock.patch.object(self.app.threading, "Thread") as thread:
+                self.assertEqual(self.app.start_planning_refresh(now=evening, automatic=True), "started")
+                self.assertEqual(self.app.start_planning_refresh(now=evening, automatic=True), "running")
+                thread.return_value.start.assert_called_once()
+            page = self.client.get("/planning").get_data(as_text=True)
+            self.assertIn("Checking PlanIt now", page)
+            # Pretend it finished an hour later; the next automatic check that night is skipped.
+            db = self.app.connect_db()
+            self.app._set_planning_run(db, status="done", ran_at=(evening + timedelta(hours=1)).isoformat())
+            db.close()
+            with mock.patch.object(self.app.threading, "Thread"):
+                self.assertEqual(self.app.start_planning_refresh(now=evening + timedelta(hours=5), automatic=True), "recent")
+                self.assertEqual(self.app.start_planning_refresh(now=evening + timedelta(hours=23), automatic=True), "started")
+        finally:
+            os.environ.pop("PLANIT_CONTACT_EMAIL", None)

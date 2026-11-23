@@ -9,16 +9,45 @@ and labels each one with the trades likely to be needed.
 These are leads, not confirmed jobs: an application shows work that is planned, not that
 the owner has asked for quotes. Addresses are public planning records; trades should contact
 homeowners only by letter or leaflet, never by cold call or unsolicited email.
+
+PlanIt acceptable use (planit.org.uk/faq): run between 18:00 and 06:00, leave at least
+60 seconds between requests and honour Retry-After, stay under 300 requests a day, and put
+a contact email in the User-Agent. This module follows all four; set PLANIT_CONTACT_EMAIL.
 """
 
 import json
+import os
 import re
+import time
 from datetime import date, datetime, timezone
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 PLANIT_API = "https://www.planit.org.uk/api/applics/json"
-USER_AGENT = "TenderScout/1.0 (Merseyside trade leads; weekly read of recent applications)"
+REQUEST_GAP_SECONDS = 60
+MAX_RETRY_AFTER_SECONDS = 300
+LONDON = ZoneInfo("Europe/London")
+
+
+class PlanningConfigError(RuntimeError):
+    """Raised when the app is not set up to call PlanIt politely."""
+
+
+def user_agent():
+    contact = (os.environ.get("PLANIT_CONTACT_EMAIL") or "").strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", contact):
+        raise PlanningConfigError(
+            "Set PLANIT_CONTACT_EMAIL in Render (Environment) to your email. PlanIt requires a contact address on every request."
+        )
+    return f"TenderScout/1.0 (Merseyside trade leads; contact {contact})"
+
+
+def in_quiet_hours(now=None):
+    """PlanIt asks automated users to run between 18:00 and 06:00 UK time."""
+    local = (now or datetime.now(timezone.utc)).astimezone(LONDON)
+    return local.hour >= 18 or local.hour < 6
 
 # PlanIt area names for the six target councils.
 AREAS = ["Liverpool", "Sefton", "Knowsley", "St Helens", "Halton", "Wirral"]
@@ -151,20 +180,35 @@ def normalise(record, fetched_at=None):
     }
 
 
-def _get(params, timeout):
+def _get(params, timeout, sleep=time.sleep):
     url = PLANIT_API + "?" + urlencode(params)
-    req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    with urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read(3_000_000).decode("utf-8"))
+    req = Request(url, headers={"User-Agent": user_agent(), "Accept": "application/json"})
+    for attempt in range(2):
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read(3_000_000).decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code != 429 or attempt:
+                raise
+            try:
+                wait = int(exc.headers.get("Retry-After") or REQUEST_GAP_SECONDS)
+            except (TypeError, ValueError):
+                wait = REQUEST_GAP_SECONDS
+            sleep(min(max(wait, REQUEST_GAP_SECONDS), MAX_RETRY_AFTER_SECONDS))
 
 
-def fetch_area(area, days=30, page_size=200, max_pages=3, timeout=30, getter=None):
-    """Read recent applications for one council. Returns (records, info)."""
+def fetch_area(area, days=30, page_size=200, max_pages=3, timeout=30, getter=None, pace=None):
+    """Read recent applications for one council. Returns (records, info).
+
+    `pace` is called before every request so callers can keep the 60-second gap PlanIt asks for.
+    """
     getter = getter or _get
     params = {"auth": area, "recent": days, "pg_sz": page_size, "compress": "on", "select": ",".join(FIELDS)}
     records, info = [], {"area": area, "total": 0, "newest": "", "error": ""}
     try:
         for page in range(1, max_pages + 1):
+            if pace:
+                pace()
             data = getter(dict(params, page=page), timeout)
             if data.get("error"):
                 raise RuntimeError(str(data["error"])[:200])
@@ -194,12 +238,24 @@ def area_is_stale(info, today=None):
     return (today - newest).days > STALE_AFTER_DAYS
 
 
-def fetch_all(days=30, areas=None, getter=None):
-    """Fetch and normalise leads for every target council. Returns (leads, infos)."""
+def fetch_all(days=30, areas=None, getter=None, sleep=time.sleep):
+    """Fetch and normalise leads for every target council. Returns (leads, infos).
+
+    Waits REQUEST_GAP_SECONDS between requests (not before the first).
+    """
+    if getter is None:
+        user_agent()  # fail fast, before any request, if the contact email is missing
     fetched_at = datetime.now(timezone.utc).isoformat()
     leads, infos, seen = [], [], set()
+    made = {"n": 0}
+
+    def pace():
+        if made["n"]:
+            sleep(REQUEST_GAP_SECONDS)
+        made["n"] += 1
+
     for area in areas or AREAS:
-        records, info = fetch_area(area, days=days, getter=getter)
+        records, info = fetch_area(area, days=days, getter=getter, pace=pace)
         kept = 0
         for record in records:
             lead = normalise(record, fetched_at)
