@@ -10,7 +10,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
@@ -2249,7 +2249,8 @@ def api_digest_send():
     try:
         result = send_weekly_digests()
     except digest.DigestConfigError as exc:
-        return Response(str(exc), 503, mimetype="text/plain")
+        # Not an error: until email settings are added, emails are sent by hand from the preview page.
+        return Response(json.dumps({"skipped": str(exc)}), mimetype="application/json")
     return Response(json.dumps(result), mimetype="application/json")
 
 
@@ -2285,20 +2286,52 @@ def subscriber_preview(sub_id):
         if not sub:
             return Response("Subscriber not found", 404)
         built = build_digest(db, sub)
+        saved_leads = db.execute("SELECT COUNT(*) AS n FROM planning_leads").fetchone()["n"]
     finally:
         db.close()
+    actions = ""
     if not built:
-        body = ('<p>No matching leads this week for these trades and areas. Try more trades or areas, '
-                'or check for new planning applications first.</p>')
+        if not saved_leads:
+            body = ('<p><b>No planning leads loaded yet.</b> After 6pm, open <a href="/planning">Planning leads</a> and tap '
+                    '<b>Check for new planning applications</b>. It takes about 6 minutes. Then come back here.</p>')
+        else:
+            body = ('<p>No matching leads this week for these trades and areas. Try more trades or areas '
+                    '(Sefton has the most), or check for new planning applications first.</p>')
         subject = "Nothing to send yet"
     else:
-        subject, _text, body = built
+        subject, text, body = built
+        mailto = "mailto:" + quote(sub["email"]) + "?" + urlencode({"subject": subject, "body": text}, quote_via=quote)
+        actions = (
+            '<div style="display:grid;gap:10px;margin:0 0 14px">'
+            f'<a href="{safe(mailto)}" style="display:block;text-align:center;padding:14px;background:#168447;color:#fff;border-radius:10px;font:bold 17px Arial;text-decoration:none">Open in my email app to send</a>'
+            '<button type="button" id="copy" style="padding:12px;border:0;border-radius:10px;background:#e8f2eb;color:#145c35;font:bold 16px Arial">Copy email text</button>'
+            f'<form method="post" action="/subscribers/{int(sub_id)}/mark-sent" style="margin:0">'
+            '<button style="width:100%;padding:12px;border:1px solid #b8c6bd;border-radius:10px;background:#fff;color:#18251e;font:bold 16px Arial">I\'ve sent it</button></form>'
+            '<p style="font:13px Arial;color:#53645a;margin:0">Opens your email app with everything filled in: just press send, then tap "I\'ve sent it". '
+            'If the email app shows it cut short, use Copy email text and paste it instead.</p></div>'
+            f'<textarea id="plain" readonly style="position:absolute;left:-9999px">{safe(text)}</textarea>'
+            '<script>document.getElementById("copy").onclick=function(){var t=document.getElementById("plain");var b=this;'
+            'function sel(){t.style.position="static";t.style.width="100%";t.style.height="200px";t.select();b.textContent="Selected: copy it now";}'
+            'try{navigator.clipboard.writeText(t.value).then(function(){b.textContent="Copied";},sel);}catch(e){sel();}};</script>'
+        )
     page = ('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>Email preview</title></head><body style="margin:0;padding:12px;background:#f3f6f4">'
             '<p style="font:14px Arial"><a href="/subscribers">Back to subscribers</a></p>'
             f'<p style="font:14px Arial;color:#53645a">To: {safe(sub["email"])}<br>Subject: <b>{safe(subject)}</b></p>'
+            + actions +
             f'<div style="background:#fff;border-radius:12px;padding:14px">{body}</div></body></html>')
     return Response(page, mimetype="text/html")
+
+
+@app.route("/subscribers/<int:sub_id>/mark-sent", methods=["POST"])
+def subscriber_mark_sent(sub_id):
+    db = connect_db()
+    try:
+        db.execute("UPDATE subscribers SET last_sent_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), sub_id))
+        db.commit()
+    finally:
+        db.close()
+    return redirect("/subscribers?sent=manual")
 
 
 @app.route("/subscribers/<int:sub_id>/send", methods=["POST"])
@@ -2348,8 +2381,9 @@ def subscribers_page():
     message += {
         "sent": '<p class="notice ok">Email sent.</p>',
         "empty": '<p class="notice ok">Nothing matched this week, so no email was sent.</p>',
-        "config": ('<p class="notice warn">Email isn\'t set up yet. In Render, add SMTP_USER (your Gmail address) and '
-                   'SMTP_PASSWORD (a Gmail app password).</p>'),
+        "config": ('<p class="notice warn">Automatic sending isn\'t set up, so nothing was sent. No problem: tap '
+                   '<b>Preview email</b>, then <b>Open in my email app to send</b>, and send it yourself.</p>'),
+        "manual": '<p class="notice ok">Marked as sent this week.</p>',
         "failed": '<p class="notice warn">Sending failed. Check the email settings in Render and the service logs.</p>',
     }.get(sent, "")
 
@@ -2371,7 +2405,7 @@ def subscribers_page():
             f'<p><b>Planning:</b> {safe(s_["planning_trades"] or "none")}<br><b>Tenders:</b> {safe(s_["tender_trades"] or "none")}'
             f'<br><b>Areas:</b> {safe(s_["areas"] or "All six")}</p>'
             f'<div class="row"><a class="btn" href="/subscribers/{int(s_["id"])}/preview">Preview email</a>'
-            f'<form method="post" action="/subscribers/{int(s_["id"])}/send"><button>Send now</button></form>'
+            f'<form method="post" action="/subscribers/{int(s_["id"])}/send"><button>Send automatically</button></form>'
             f'<form method="post" action="/subscribers/{int(s_["id"])}/toggle"><button class="ghost">{"Pause" if s_["active"] else "Resume"}</button></form></div></article>'
         )
     if not cards:
@@ -2413,7 +2447,7 @@ def subscribers_page():
         '<label for="s-fee">Monthly fee £</label><input type="text" id="s-fee" name="monthly_fee" inputmode="decimal" maxlength="20" placeholder="e.g. 20">'
         '<label for="s-notes">Notes</label><textarea id="s-notes" name="notes" rows="3"></textarea>'
         '<button type="submit">Add subscriber</button></form></details>'
-        '<p class="meta">Emails are sent from your Gmail account. Set SMTP_USER and SMTP_PASSWORD (a Gmail app password) in Render.</p>'
+        '<p class="meta">Easiest way: tap Preview email, then Open in my email app to send. Automatic Monday sending only works once SMTP_USER and SMTP_PASSWORD are set in Render.</p>'
         '</main></body></html>'
     )
     return Response(page, mimetype="text/html")

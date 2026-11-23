@@ -139,7 +139,31 @@ class SubscriberPageTests(PlanningPageTests):
         self.assertEqual(outbox, [])
         with mock.patch.dict(os.environ, {"SMTP_USER": "", "SMTP_PASSWORD": ""}):
             r = self.client.post("/subscribers/1/send", follow_redirects=True)
-        self.assertIn("isn&#x27;t set up yet", r.get_data(as_text=True).replace("isn't", "isn&#x27;t"))
+        self.assertIn("Open in my email app to send", r.get_data(as_text=True))
+
+    def test_preview_explains_empty_board_and_offers_phone_sending(self):
+        self.add()
+        empty = self.client.get("/subscribers/1/preview").get_data(as_text=True)
+        self.assertIn("No planning leads loaded yet", empty)
+        self.seed()
+        today = datetime.now(timezone.utc).date().isoformat()
+        db = self.app.connect_db()
+        db.execute("UPDATE planning_leads SET start_date = ?", (today,))
+        db.commit()
+        db.close()
+        page = self.client.get("/subscribers/1/preview").get_data(as_text=True)
+        self.assertIn("mailto:dave%40example.com?subject=", page)
+        self.assertIn("Copy email text", page)
+        r = self.client.post("/subscribers/1/mark-sent", follow_redirects=True).get_data(as_text=True)
+        self.assertIn("Marked as sent this week", r)
+        self.assertIn("last email", r)
+
+    def test_weekly_endpoint_skips_quietly_without_email_settings(self):
+        with mock.patch.dict(os.environ, {"SMTP_USER": "", "SMTP_PASSWORD": ""}), \
+             mock.patch.object(self.app.digest, "is_send_window", return_value=True):
+            r = self.client.post("/api/digest/send")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("skipped", r.get_json())
 
 
 if __name__ == "__main__":
