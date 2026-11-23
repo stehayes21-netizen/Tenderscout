@@ -304,7 +304,7 @@ class FTSCheckpointStore:
 @app.before_request
 def require_login():
     """Fail closed: dashboard and private customer leads are never public."""
-    if request.path in ("/health", "/health/db"):
+    if request.path in ("/health", "/health/db", "/join", "/join/thanks"):
         return None
     user = os.environ.get("DASHBOARD_USER", "")
     password = os.environ.get("DASHBOARD_PASSWORD", "")
@@ -2449,6 +2449,7 @@ def subscribers_page():
     }.get(sent, "")
 
     active = [s for s in subs if s["active"]]
+    new_signups = sum(1 for s_ in subs if not s_["active"] and "NEW SIGN-UP" in (s_["notes"] or ""))
     income = 0.0
     for s_ in active:
         try:
@@ -2467,7 +2468,7 @@ def subscribers_page():
             f'<br><b>Areas:</b> {safe(s_["areas"] or "All six")}'
             f'<br><b>Team:</b> {safe(str(s_["team_size"]) + " tradespeople" if s_["team_size"] else "not given")}'
             f' · gets {safe(", ".join(sorted(planning.sizes_for_team(s_["team_size"]), key=planning.JOB_SIZES.index)).lower())} jobs</p>'
-            + (f'<p class="meta"><b>{safe(s_["notes"][:200])}</b></p>' if (s_["notes"] or "").startswith("WAITING LIST") else "")
+            + (f'<p class="meta"><b>{safe(s_["notes"][:200])}</b></p>' if ((s_["notes"] or "").startswith("WAITING LIST") or "NEW SIGN-UP" in (s_["notes"] or "")) else "")
             + ''
             f'<div class="row"><a class="btn" href="/subscribers/{int(s_["id"])}/preview">Preview email</a>'
             f'<form method="post" action="/subscribers/{int(s_["id"])}/send"><button>Send automatically</button></form>'
@@ -2510,7 +2511,10 @@ def subscribers_page():
         '</style></head><body>'
         '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/subscribers">Subscribers</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Subscribers</h1><p>Tradespeople who get a weekly email of matching jobs, every Monday from 6am.</p></header><main>'
-        + message +
+        + message
+        + (f'<p class="notice warn"><b>{new_signups} new sign-up{"s" if new_signups != 1 else ""}</b> from your sign-up page. '
+           'Check them below (marked NEW SIGN-UP), email them, then tap Resume to start their trial.</p>' if new_signups else "")
+        + '<p class="meta">Your public sign-up page to share: <a href="/join">' + safe(request.host_url.rstrip("/")) + '/join</a></p>'
         f'<div class="facts"><p>Active subscribers<b>{len(active)}</b></p><p>Monthly income<b>£{income:,.0f}</b></p></div>'
         + places_html
         + cards +
@@ -2528,6 +2532,184 @@ def subscribers_page():
         '<button type="submit">Add subscriber</button></form></details>'
         '<p class="meta">Easiest way: tap Preview email, then Open in my email app to send. Automatic Monday sending only works once SMTP_USER and SMTP_PASSWORD are set in Render.</p>'
         '</main></body></html>'
+    )
+    return Response(page, mimetype="text/html")
+
+
+# ------------------------------------------------------- public sign-up --
+# The only pages anyone can open without the dashboard login. Sign-ups are saved
+# as PAUSED subscribers with a note, and nothing is emailed to them until you
+# check them and tap Resume on the Subscribers page.
+
+JOIN_TRADES = [t for t in planning.TRADE_ORDER]
+JOIN_COMPANY_TYPES = ["Limited company", "Sole trader", "Partnership", "Other"]
+_JOIN_HITS = {}
+JOIN_LIMIT_PER_HOUR = 5
+
+
+def _join_rate_ok(ip, now=None):
+    import time as _t
+    now = now or _t.time()
+    hits = [t for t in _JOIN_HITS.get(ip, []) if now - t < 3600]
+    if len(hits) >= JOIN_LIMIT_PER_HOUR:
+        _JOIN_HITS[ip] = hits
+        return False
+    hits.append(now)
+    _JOIN_HITS[ip] = hits
+    return True
+
+
+JOIN_CSS = (
+    'body{font:17px Arial,sans-serif;max-width:640px;margin:0 auto;padding:16px;color:#18251e;background:#f3f6f4;line-height:1.5}'
+    'header{background:#143d2a;color:#fff;border-radius:16px;padding:22px 20px;margin-bottom:16px}'
+    'header h1{margin:6px 0 8px;font-size:28px;line-height:1.15}header p{margin:0;opacity:.92}'
+    '.kick{font-size:13px;letter-spacing:.06em;text-transform:uppercase;opacity:.8}'
+    'main{background:#fff;border-radius:16px;padding:20px;display:grid;gap:16px}'
+    '.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}'
+    '.stat{background:#e8f2eb;border-radius:12px;padding:12px}.stat b{display:block;font-size:26px;color:#145c35}'
+    '.stat span{font-size:14px;color:#3d5246}'
+    'ul.how{margin:0;padding-left:20px;display:grid;gap:6px}'
+    'label{display:block;font-weight:bold;margin:0 0 6px}'
+    'input[type=text],input[type=email],select{box-sizing:border-box;width:100%;padding:13px;border:1px solid #b8c6bd;border-radius:9px;font:inherit;background:#fff}'
+    '.boxes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}'
+    '.box{font-weight:normal;margin:0;padding:10px;background:#f7faf8;border:1px solid #dce5de;border-radius:9px}'
+    '.field{display:grid;gap:4px}.hint{font-size:14px;color:#53645a;margin:0}'
+    'button{width:100%;padding:15px;background:#168447;color:#fff;border:0;border-radius:10px;font:bold 18px Arial,sans-serif;min-height:52px}'
+    '.err{background:#fff0f0;color:#a11;padding:12px;border-radius:9px}.hp{position:absolute;left:-9999px}'
+    '.small{font-size:13px;color:#53645a}'
+    '@media(max-width:480px){.boxes{grid-template-columns:1fr}body{padding:10px}}'
+)
+
+
+def _join_stats(db):
+    since = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
+    live = [a for a in planning.AREAS if a not in ("Liverpool", "Wirral")]
+    marks = ",".join("?" for _ in live)
+    rows = db.execute(f"SELECT trades FROM planning_leads WHERE start_date >= ? AND area IN ({marks})",
+                      (since, *live)).fetchall()
+    counts = {}
+    for row in rows:
+        for t in digest.split_list(row["trades"]):
+            counts[t] = counts.get(t, 0) + 1
+    return counts
+
+
+@app.route("/join", methods=["GET", "POST"])
+def join_page():
+    error = ""
+    form = request.form if request.method == "POST" else {}
+    if request.method == "POST":
+        if (form.get("website") or "").strip():           # hidden field only robots fill in
+            return redirect("/join/thanks")
+        ip = (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "?")
+        name = (form.get("name") or "").strip()[:120]
+        business = (form.get("business") or "").strip()[:160]
+        email = (form.get("email") or "").strip()[:200]
+        trade = form.get("trade") or ""
+        areas = [a for a in request.form.getlist("areas") if a in planning.AREAS]
+        company_type = form.get("company_type") or ""
+        team = _int_or_none(form.get("team_size"))
+        if not name or not business or not EMAIL_RE.match(email):
+            error = "Please fill in your name, business name and a valid email address."
+        elif trade not in JOIN_TRADES:
+            error = "Please choose your trade."
+        elif not areas:
+            error = "Please tick at least one area you cover."
+        elif company_type not in JOIN_COMPANY_TYPES:
+            error = "Please choose your business type."
+        elif form.get("consent") != "yes":
+            error = "Please tick the box to say you're happy to receive the weekly email."
+        elif not _join_rate_ok(ip):
+            error = "Too many sign-ups from this connection. Please try again later."
+        else:
+            db = connect_db()
+            try:
+                full = full_places(db, trade, ", ".join(areas))
+                note = (f"NEW SIGN-UP {datetime.now(timezone.utc).date().isoformat()}: check and tap Resume to start their trial. "
+                        f"Business type: {company_type}.")
+                if full:
+                    note = "WAITING LIST: full for " + "; ".join(full) + ". " + note
+                db.execute(
+                    "INSERT INTO subscribers (name,business,email,planning_trades,tender_trades,areas,monthly_fee,active,notes,team_size,created_at) "
+                    "VALUES (?,?,?,?,?,?,?,0,?,?,?)",
+                    (name, business, email, trade, "", ", ".join(areas), "", note, team, datetime.now(timezone.utc).isoformat()),
+                )
+                db.commit()
+            finally:
+                db.close()
+            return redirect("/join/thanks")
+
+    db = connect_db()
+    try:
+        counts = _join_stats(db)
+    finally:
+        db.close()
+    shown = [(t, counts.get(t, 0)) for t in ("Extensions and building work", "Trees and landscaping", "Roofing",
+                                              "Roofline, gutters and exterior") if counts.get(t)]
+    stats = ""
+    if shown:
+        stats = ('<section><p class="hint">New jobs in planning across Sefton, Knowsley, St Helens and Halton in the last 30 days:</p>'
+                 '<div class="stats">' + "".join(f'<div class="stat"><b>{n}</b><span>{safe(t)}</span></div>' for t, n in shown)
+                 + '</div></section>')
+
+    def val(key):
+        return safe(form.get(key) or "") if form else ""
+
+    trade_opts = '<option value="">Choose your trade</option>' + "".join(
+        f'<option value="{safe(t)}"{" selected" if form and form.get("trade") == t else ""}>{safe(t)}</option>' for t in JOIN_TRADES)
+    type_opts = '<option value="">Choose one</option>' + "".join(
+        f'<option{" selected" if form and form.get("company_type") == t else ""}>{safe(t)}</option>' for t in JOIN_COMPANY_TYPES)
+    ticked = set(request.form.getlist("areas")) if form else set()
+    area_boxes = "".join(
+        f'<label class="box"><input type="checkbox" name="areas" value="{safe(a)}"{" checked" if a in ticked else ""}> {safe(a)}'
+        + (' <span class="small">(waiting list)</span>' if a in ("Liverpool", "Wirral") else "") + '</label>'
+        for a in planning.AREAS)
+
+    page = (
+        '<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Merseyside Trade Leads: free 4-week trial</title>'
+        '<meta name="description" content="Every Monday, the planned building and tree work near you, straight from council planning applications.">'
+        f'<style>{JOIN_CSS}</style></head><body>'
+        '<header><div class="kick">Merseyside Trade Leads</div>'
+        '<h1>Every Monday, the planned jobs near you, before they go out to quote.</h1>'
+        '<p>Extensions, lofts, roofs, new homes and tree work, straight from council planning applications, plus council contracts for your trade.</p></header>'
+        '<main>' + stats +
+        '<section><ul class="how">'
+        '<li><b>One email a week</b>, sorted for your trade and area.</li>'
+        '<li><b>Only jobs your team can take on</b>: small firms get household jobs, bigger firms get bigger sites.</li>'
+        '<li><b>Limited places</b>: no more than 5 firms per trade in each council area.</li>'
+        '<li><b>Free for 4 weeks.</b> No card needed. Stop any time.</li>'
+        '</ul></section>'
+        + (f'<p class="err" role="alert">{safe(error)}</p>' if error else "") +
+        '<form method="post" action="/join" style="display:grid;gap:14px">'
+        f'<div class="field"><label for="j-name">Your name</label><input type="text" id="j-name" name="name" required maxlength="120" value="{val("name")}" autocomplete="name"></div>'
+        f'<div class="field"><label for="j-biz">Business name</label><input type="text" id="j-biz" name="business" required maxlength="160" value="{val("business")}" autocomplete="organization"></div>'
+        f'<div class="field"><label for="j-email">Email</label><input type="email" id="j-email" name="email" required maxlength="200" value="{val("email")}" autocomplete="email"></div>'
+        f'<div class="field"><label for="j-trade">Your trade</label><select id="j-trade" name="trade" required>{trade_opts}</select></div>'
+        f'<div class="field"><label>Areas you cover</label><div class="boxes">{area_boxes}</div></div>'
+        f'<div class="field"><label for="j-team">How many tradespeople in your team?</label><input type="text" id="j-team" name="team_size" inputmode="numeric" maxlength="5" value="{val("team_size")}" placeholder="e.g. 3"></div>'
+        f'<div class="field"><label for="j-type">Business type</label><select id="j-type" name="company_type" required>{type_opts}</select></div>'
+        '<div class="hp" aria-hidden="true"><label for="j-web">Leave this empty</label><input type="text" id="j-web" name="website" tabindex="-1" autocomplete="off"></div>'
+        '<label class="box"><input type="checkbox" name="consent" value="yes" required> I\'m happy to receive a weekly email of job leads. I can stop any time by replying "stop".</label>'
+        '<button type="submit">Start my free 4-week trial</button>'
+        '</form>'
+        '<p class="small">We use your details only to send your weekly leads and to contact you about your trial. '
+        'Planning addresses are public records: contact homeowners by letter or leaflet only, never by cold call or email.</p>'
+        '</main></body></html>'
+    )
+    return Response(page, mimetype="text/html")
+
+
+@app.route("/join/thanks")
+def join_thanks():
+    page = (
+        '<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>Thanks: Merseyside Trade Leads</title><style>{JOIN_CSS}</style></head><body>'
+        '<header><div class="kick">Merseyside Trade Leads</div><h1>Thanks, you\'re on the list.</h1>'
+        '<p>We\'ll email you within 2 working days to start your free 4-week trial.</p></header>'
+        '<main><p>Your first email will list the planned jobs for your trade in your area. If your area is full, '
+        'we\'ll tell you and keep your place on the waiting list.</p>'
+        '<p class="small">Questions? Just reply to any of our emails.</p></main></body></html>'
     )
     return Response(page, mimetype="text/html")
 
