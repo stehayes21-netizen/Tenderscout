@@ -18,6 +18,7 @@ from flask import Flask, Response, redirect, request
 
 import tenderscout as collector
 import planning
+import digest
 
 app = Flask(__name__)
 
@@ -179,6 +180,20 @@ def ensure_schema(db):
         status TEXT,
         started_at TEXT,
         error TEXT
+    )""")
+    db.execute(f"""CREATE TABLE IF NOT EXISTS subscribers (
+        id {id_column},
+        name TEXT NOT NULL,
+        business TEXT,
+        email TEXT NOT NULL,
+        planning_trades TEXT DEFAULT '',
+        tender_trades TEXT DEFAULT '',
+        areas TEXT DEFAULT '',
+        monthly_fee TEXT,
+        active INTEGER DEFAULT 1,
+        notes TEXT,
+        last_sent_at TEXT,
+        created_at TEXT NOT NULL
     )""")
     db.execute("""CREATE TABLE IF NOT EXISTS refresh_state (
         id INTEGER PRIMARY KEY,
@@ -854,7 +869,7 @@ def dashboard():
     @media(max-width:520px){{body{{padding:12px}}header{{padding:17px}}.card{{padding:14px}}.trade-browser{{padding:12px}}.board-facts{{grid-template-columns:1fr 1fr;gap:.4rem}}.board-facts p{{padding:.55rem}}.board-facts span{{font-size:.88rem}}}}
     </style></head><body>
     <header><h1>Tender Scout</h1>
-    <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/planning">Planning leads</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
+    <p><a style="color:white" href="/">Public tenders</a> · <a style="color:white" href="/planning">Planning leads</a> · <a style="color:white" href="/subscribers">Subscribers</a> · <a style="color:white" href="/leads">Private trade leads</a> · <a style="color:white" href="/sources">Council & community sources</a></p>
     <p>Coverage: Liverpool, Sefton, St Helens, Halton, Knowsley and Wirral. Warrington and Cheshire West and Chester are excluded.</p>
     <form id="refresh-form" method="post" action="/refresh">
     <button type="submit" class="btn">&#8635; Refresh tenders</button></form>
@@ -1622,7 +1637,7 @@ def sources():
         'li{margin:10px 0;padding:14px;background:#f5f8f6;border:1px solid #e0e8e2;border-radius:10px}'
         'a{color:#08783c;font-weight:600}p{line-height:1.5}.note{font-size:14px;color:#53645a}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
-        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/subscribers">Subscribers</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Council & community sources</h1><p>Use this directory to find official tender notices and permitted customer enquiry sources.</p></header><main>'
         '<p class="note">Public contracts and private customer leads are different opportunity types. Council portals may require supplier registration and may not expose an open feed.</p>'
         + sections +
@@ -1877,7 +1892,7 @@ def private_leads():
         'a{color:#08783c}.error{color:#a11;background:#fff0f0;padding:10px;border-radius:8px}'
         '.helper{font-size:13px;color:#53645a;font-weight:normal}.project-board{background:#eef6f0;border:1px solid #c8dccd;border-radius:12px;padding:14px;margin:18px 0}.project-board h2{margin-top:0}.project-card{border-left-color:#2563eb}.lead-entry{background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-entry summary{font-weight:bold;color:#145c35;padding:8px;cursor:pointer}.lead-card{background:#fff;border:1px solid #d5e1d8;border-left:5px solid #168447;box-shadow:0 2px 6px rgba(0,0,0,.04)}.lead-card h3{font-size:20px;margin:8px 0}.lead-kicker{font-size:13px;text-transform:uppercase;letter-spacing:.03em}.lead-request p{margin-bottom:0}.lead-location{font-weight:600}.lead-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}.lead-facts p{margin:0;padding:10px;background:#f3f6f4;border-radius:8px}.lead-facts b,.lead-facts span{display:block}.lead-facts b{font-size:12px;color:#53645a;text-transform:uppercase}.status-form{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.status-form label{flex:1;min-width:180px;margin:0}.status-form button{width:auto;margin:0;white-space:nowrap}.share-actions a{min-height:40px}.source-warning{padding:12px;border:1px solid #d8c28b;background:#fff9e8;border-radius:9px}.lead-filters{display:grid;grid-template-columns:2fr 1fr auto auto;gap:10px;align-items:end;background:#f7faf8;border:1px solid #dce5de;border-radius:10px;padding:12px}.lead-filters label{margin:0}.lead-filters button{width:auto;margin:0}.lead-filters a{align-self:center}@media(max-width:620px){.lead-filters{grid-template-columns:1fr}.lead-facts{grid-template-columns:1fr 1fr}}h1{margin-top:10px}hr{border:0;border-top:1px solid #dce5de;margin:22px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
-        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/subscribers">Subscribers</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Private trade leads</h1><p>Save genuine customer enquiries separately from council tenders.</p></header><main>'
         '<p><b>Private leads.</b> Each card shows the job, trade, location, requested work and contact so you can pass it to a suitable tradesperson. They stay separate from public tenders.</p>'
         '<div class="lead-facts"><p><b>Total captured leads</b><span>' + str(lead_counts["total"]) + '</span></p><p><b>New</b><span>' + str(lead_counts["new"]) + '</span></p><p><b>Passed to trade</b><span>' + str(lead_counts["passed"]) + '</span></p></div>'
@@ -2144,7 +2159,7 @@ def planning_page():
         '.coverage{margin:6px 0 0;padding-left:18px;font-size:14px}.coverage .warn{color:#8a5a00}.empty{padding:20px;text-align:center;color:#53645a}'
         'details summary{cursor:pointer;font-weight:bold;color:#145c35;padding:6px 0}'
         '@media(max-width:520px){body{padding:10px}header,main{padding:14px}}</style></head><body>'
-        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/subscribers">Subscribers</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
         '<h1>Planning leads</h1><p>New extensions, loft conversions, new homes, shop refits and tree works in Merseyside, from public planning applications.</p></header><main>'
         + notice +
         '<form method="post" action="/planning/refresh"><button type="submit">Check for new planning applications</button></form>'
@@ -2156,6 +2171,249 @@ def planning_page():
         'Businesses and developers can be approached directly.</p>'
         + cards +
         '<p class="stage">Source: UK PlanIt (planit.org.uk), which collects council planning registers. Always check the council record before acting.</p>'
+        '</main></body></html>'
+    )
+    return Response(page, mimetype="text/html")
+
+
+# ------------------------------------------------------ subscriber emails --
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def digest_candidates(db, now):
+    """New planning leads and open local tenders from the last fortnight."""
+    since = (now - timedelta(days=14)).date().isoformat()
+    week = (now - timedelta(days=7)).date().isoformat()
+    today = now.date().isoformat()
+    leads = db.execute(
+        "SELECT * FROM planning_leads WHERE start_date >= ? OR decided_date >= ? ORDER BY start_date DESC LIMIT 500",
+        (since, week),
+    ).fetchall()
+    tenders = db.execute(
+        "SELECT * FROM tenders WHERE region_match = 'LOCAL' AND opportunity_stage = 'Open for bids' "
+        "AND COALESCE(notice_status, '') != 'cancelled' AND (deadline IS NULL OR deadline = '' OR deadline >= ?) "
+        "AND (published_date IS NULL OR published_date = '' OR published_date >= ?) ORDER BY deadline LIMIT 500",
+        (today, since),
+    ).fetchall()
+    return leads, tenders
+
+
+def build_digest(db, subscriber, now=None):
+    now = now or datetime.now(timezone.utc)
+    leads, tenders = digest_candidates(db, now)
+    return digest.compose(subscriber, digest.match_planning(subscriber, leads),
+                          digest.match_tenders(subscriber, tenders), planning.status_label, now)
+
+
+def send_digest(db, subscriber, now=None, sender=None):
+    """Send one subscriber's email. Returns 'sent', 'empty' or raises."""
+    now = now or datetime.now(timezone.utc)
+    built = build_digest(db, subscriber, now)
+    if not built:
+        db.execute("UPDATE subscribers SET last_sent_at = ? WHERE id = ?", (now.isoformat(), subscriber["id"]))
+        db.commit()
+        return "empty"
+    subject, text, body = built
+    (sender or digest.send)(subscriber["email"], subject, text, body)
+    db.execute("UPDATE subscribers SET last_sent_at = ? WHERE id = ?", (now.isoformat(), subscriber["id"]))
+    db.commit()
+    return "sent"
+
+
+def send_weekly_digests(now=None, sender=None):
+    """Monday-morning run: email every active subscriber who hasn't had this week's email."""
+    now = now or datetime.now(timezone.utc)
+    if not digest.is_send_window(now):
+        return {"skipped": "Weekly emails go out on Mondays from 6am UK time."}
+    if sender is None:
+        digest.smtp_settings()  # fail early with a clear message
+    db = connect_db()
+    result = {"sent": 0, "empty": 0, "failed": 0}
+    try:
+        for sub in db.execute("SELECT * FROM subscribers WHERE active = 1").fetchall():
+            if not digest.due(sub, now):
+                continue
+            try:
+                result[send_digest(db, sub, now, sender)] += 1
+            except Exception:
+                app.logger.exception("Weekly email failed for subscriber %s", sub["id"])
+                result["failed"] += 1
+    finally:
+        db.close()
+    return result
+
+
+@app.route("/api/digest/send", methods=["POST"])
+def api_digest_send():
+    try:
+        result = send_weekly_digests()
+    except digest.DigestConfigError as exc:
+        return Response(str(exc), 503, mimetype="text/plain")
+    return Response(json.dumps(result), mimetype="application/json")
+
+
+def _subscriber_form_values(form):
+    return {
+        "name": (form.get("name") or "").strip()[:120],
+        "business": (form.get("business") or "").strip()[:160],
+        "email": (form.get("email") or "").strip()[:200],
+        "planning_trades": ", ".join(t for t in form.getlist("planning_trades") if t in planning.TRADE_ORDER),
+        "tender_trades": ", ".join(t for t in form.getlist("tender_trades") if t in TRADE_CATEGORIES),
+        "areas": ", ".join(a for a in form.getlist("areas") if a in planning.AREAS),
+        "monthly_fee": (form.get("monthly_fee") or "").strip()[:20],
+        "notes": (form.get("notes") or "").strip()[:2000],
+    }
+
+
+@app.route("/subscribers/<int:sub_id>/toggle", methods=["POST"])
+def subscriber_toggle(sub_id):
+    db = connect_db()
+    try:
+        db.execute("UPDATE subscribers SET active = CASE WHEN active = 1 THEN 0 ELSE 1 END WHERE id = ?", (sub_id,))
+        db.commit()
+    finally:
+        db.close()
+    return redirect("/subscribers")
+
+
+@app.route("/subscribers/<int:sub_id>/preview")
+def subscriber_preview(sub_id):
+    db = connect_db()
+    try:
+        sub = db.execute("SELECT * FROM subscribers WHERE id = ?", (sub_id,)).fetchone()
+        if not sub:
+            return Response("Subscriber not found", 404)
+        built = build_digest(db, sub)
+    finally:
+        db.close()
+    if not built:
+        body = ('<p>No matching leads this week for these trades and areas. Try more trades or areas, '
+                'or check for new planning applications first.</p>')
+        subject = "Nothing to send yet"
+    else:
+        subject, _text, body = built
+    page = ('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Email preview</title></head><body style="margin:0;padding:12px;background:#f3f6f4">'
+            '<p style="font:14px Arial"><a href="/subscribers">Back to subscribers</a></p>'
+            f'<p style="font:14px Arial;color:#53645a">To: {safe(sub["email"])}<br>Subject: <b>{safe(subject)}</b></p>'
+            f'<div style="background:#fff;border-radius:12px;padding:14px">{body}</div></body></html>')
+    return Response(page, mimetype="text/html")
+
+
+@app.route("/subscribers/<int:sub_id>/send", methods=["POST"])
+def subscriber_send(sub_id):
+    db = connect_db()
+    try:
+        sub = db.execute("SELECT * FROM subscribers WHERE id = ?", (sub_id,)).fetchone()
+        if not sub:
+            return Response("Subscriber not found", 404)
+        try:
+            outcome = send_digest(db, sub)
+        except digest.DigestConfigError:
+            outcome = "config"
+        except Exception:
+            app.logger.exception("Email send failed")
+            outcome = "failed"
+    finally:
+        db.close()
+    return redirect("/subscribers?sent=" + outcome)
+
+
+@app.route("/subscribers", methods=["GET", "POST"])
+def subscribers_page():
+    db = connect_db()
+    message = ""
+    try:
+        if request.method == "POST":
+            values = _subscriber_form_values(request.form)
+            if not values["name"] or not EMAIL_RE.match(values["email"]):
+                message = '<p class="notice warn">Please enter a name and a valid email address.</p>'
+            elif not values["planning_trades"] and not values["tender_trades"]:
+                message = '<p class="notice warn">Pick at least one planning lead type or tender trade.</p>'
+            else:
+                db.execute(
+                    "INSERT INTO subscribers (name,business,email,planning_trades,tender_trades,areas,monthly_fee,active,notes,created_at) "
+                    "VALUES (?,?,?,?,?,?,?,1,?,?)",
+                    (values["name"], values["business"], values["email"], values["planning_trades"], values["tender_trades"],
+                     values["areas"], values["monthly_fee"], values["notes"], datetime.now(timezone.utc).isoformat()),
+                )
+                db.commit()
+                message = '<p class="notice ok">Subscriber added. Tap Preview to see their email.</p>'
+        subs = db.execute("SELECT * FROM subscribers ORDER BY active DESC, name").fetchall()
+    finally:
+        db.close()
+
+    sent = request.args.get("sent", "")
+    message += {
+        "sent": '<p class="notice ok">Email sent.</p>',
+        "empty": '<p class="notice ok">Nothing matched this week, so no email was sent.</p>',
+        "config": ('<p class="notice warn">Email isn\'t set up yet. In Render, add SMTP_USER (your Gmail address) and '
+                   'SMTP_PASSWORD (a Gmail app password).</p>'),
+        "failed": '<p class="notice warn">Sending failed. Check the email settings in Render and the service logs.</p>',
+    }.get(sent, "")
+
+    active = [s for s in subs if s["active"]]
+    income = 0.0
+    for s_ in active:
+        try:
+            income += float(str(s_["monthly_fee"] or "0").replace("£", ""))
+        except ValueError:
+            pass
+    cards = ""
+    for s_ in subs:
+        cards += (
+            f'<article class="sub{"" if s_["active"] else " off"}"><h3>{safe(s_["name"])}'
+            f'{" · " + safe(s_["business"]) if s_["business"] else ""}</h3>'
+            f'<p class="meta">{safe(s_["email"])}{" · £" + safe(str(s_["monthly_fee"]).replace("£", "")) + "/month" if s_["monthly_fee"] else ""}'
+            f' · {"Active" if s_["active"] else "Paused"}'
+            f'{" · last email " + safe(display_date(s_["last_sent_at"])) if s_["last_sent_at"] else ""}</p>'
+            f'<p><b>Planning:</b> {safe(s_["planning_trades"] or "none")}<br><b>Tenders:</b> {safe(s_["tender_trades"] or "none")}'
+            f'<br><b>Areas:</b> {safe(s_["areas"] or "All six")}</p>'
+            f'<div class="row"><a class="btn" href="/subscribers/{int(s_["id"])}/preview">Preview email</a>'
+            f'<form method="post" action="/subscribers/{int(s_["id"])}/send"><button>Send now</button></form>'
+            f'<form method="post" action="/subscribers/{int(s_["id"])}/toggle"><button class="ghost">{"Pause" if s_["active"] else "Resume"}</button></form></div></article>'
+        )
+    if not cards:
+        cards = '<p class="empty">No subscribers yet. Add your first tradesperson below.</p>'
+
+    def boxes(name, options, cols=""):
+        return f'<div class="boxes {cols}">' + "".join(
+            f'<label class="box"><input type="checkbox" name="{name}" value="{safe(o)}"> {safe(o)}</label>' for o in options) + "</div>"
+
+    page = (
+        '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Tender Scout — subscribers</title><style>'
+        'body{font:16px Arial;max-width:960px;margin:0 auto;padding:16px;color:#18251e;background:#f3f6f4;line-height:1.45}'
+        'header{background:#143d2a;color:white;border-radius:14px;padding:20px;margin-bottom:16px}header a{color:white}nav{font-size:14px}'
+        'main{background:white;border-radius:14px;padding:18px}a{color:#08783c}'
+        '.facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.facts p{margin:0;padding:12px;background:#f3f6f4;border-radius:10px}'
+        '.facts b{display:block;font-size:24px}.sub{border:1px solid #d5e1d8;border-left:5px solid #168447;border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}'
+        '.sub.off{border-left-color:#b8c6bd;opacity:.75}.sub h3{margin:0 0 4px}.meta{color:#53645a;font-size:14px;margin:0}'
+        '.row{display:flex;flex-wrap:wrap;gap:8px}.row form{margin:0}button,.btn{display:inline-block;padding:11px 14px;background:#168447;color:#fff;border:0;border-radius:9px;font-weight:bold;font-size:15px;text-decoration:none;min-height:44px;box-sizing:border-box}'
+        'button.ghost{background:#e8f2eb;color:#145c35}.btn{background:#e8f2eb;color:#145c35}'
+        'label{display:block;margin:12px 0 4px;font-weight:600}input[type=text],input[type=email],textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b8c6bd;border-radius:8px;font:inherit}'
+        '.boxes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.box{font-weight:normal;margin:0;padding:8px;background:#f7faf8;border:1px solid #dce5de;border-radius:8px}'
+        '.notice{padding:12px;border-radius:9px}.notice.ok{background:#e8f2eb}.notice.warn{background:#fff9e8;border:1px solid #d8c28b}'
+        'details summary{cursor:pointer;font-weight:bold;color:#145c35;padding:8px 0}.empty{color:#53645a;text-align:center;padding:16px}'
+        '.add button{width:100%;margin-top:14px}@media(max-width:520px){body{padding:10px}header,main{padding:14px}.boxes{grid-template-columns:1fr}}'
+        '</style></head><body>'
+        '<header><nav><a href="/">Public tenders</a> · <a href="/planning">Planning leads</a> · <a href="/subscribers">Subscribers</a> · <a href="/leads">Private leads</a> · <a href="/sources">Sources</a></nav>'
+        '<h1>Subscribers</h1><p>Tradespeople who get a weekly email of matching jobs, every Monday from 6am.</p></header><main>'
+        + message +
+        f'<div class="facts"><p>Active subscribers<b>{len(active)}</b></p><p>Monthly income<b>£{income:,.0f}</b></p></div>'
+        + cards +
+        '<details class="add"' + ("" if subs else " open") + '><summary>+ Add a subscriber</summary><form method="post">'
+        '<label for="s-name">Name</label><input type="text" id="s-name" name="name" required maxlength="120" placeholder="e.g. Dave Jones">'
+        '<label for="s-biz">Business</label><input type="text" id="s-biz" name="business" maxlength="160" placeholder="e.g. DJ Building Services">'
+        '<label for="s-email">Email</label><input type="email" id="s-email" name="email" required maxlength="200">'
+        '<label>Planning leads they want</label>' + boxes("planning_trades", planning.TRADE_ORDER) +
+        '<details><summary>Tender trades they want</summary>' + boxes("tender_trades", TRADE_CATEGORIES) + '</details>'
+        '<label>Areas <span style="font-weight:normal;color:#53645a">(none ticked = all six)</span></label>' + boxes("areas", planning.AREAS) +
+        '<label for="s-fee">Monthly fee £</label><input type="text" id="s-fee" name="monthly_fee" inputmode="decimal" maxlength="20" placeholder="e.g. 20">'
+        '<label for="s-notes">Notes</label><textarea id="s-notes" name="notes" rows="3"></textarea>'
+        '<button type="submit">Add subscriber</button></form></details>'
+        '<p class="meta">Emails are sent from your Gmail account. Set SMTP_USER and SMTP_PASSWORD (a Gmail app password) in Render.</p>'
         '</main></body></html>'
     )
     return Response(page, mimetype="text/html")

@@ -121,3 +121,19 @@ jobs:
           done
           echo "TenderScout refresh was still running after fourteen minutes."
           exit 1
+
+      # Weekly subscriber emails. The app only sends on Mondays from 6am UK time, at most once a
+      # week per subscriber, so calling this on every scheduled run is safe.
+      - name: Send weekly subscriber emails
+        if: ${{ always() && vars.TENDERSCOUT_APP_URL != '' && github.event_name == 'schedule' }}
+        env:
+          APP_URL: ${{ vars.TENDERSCOUT_APP_URL }}
+          APP_USER: ${{ secrets.TENDERSCOUT_APP_USER }}
+          APP_PASSWORD: ${{ secrets.TENDERSCOUT_APP_PASSWORD }}
+        run: |
+          for attempt in $(seq 1 12); do
+            curl --fail --silent --max-time 10 "$APP_URL/health" >/dev/null && break
+            sleep 5
+          done
+          curl --fail --show-error --silent --max-time 170 \
+            -X POST -u "$APP_USER:$APP_PASSWORD" "$APP_URL/api/digest/send"

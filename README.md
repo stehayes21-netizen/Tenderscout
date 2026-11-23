@@ -24,6 +24,21 @@ A small dashboard that finds UK public-sector tenders for **commercial cleaning,
 - PlanIt's acceptable-use rules are built in: checks run only between 18:00 and 06:00 UK time (automatically at most once a day, after the scheduled refresh), with 60 seconds between requests, Retry-After honoured, and well under 300 requests a day. **Set `PLANIT_CONTACT_EMAIL`** in Render: PlanIt requires a contact email in every request, and planning checks stay off until it is set. The check button runs in the background (about 6 minutes).
 - PlanIt is a free hobby service run by one person, with no service guarantee. `TENDERSCOUT_PLANNING_DAYS` sets the look-back window (default 30).
 
+## Weekly subscriber emails
+`/subscribers` lists tradespeople who pay for a weekly email of matching jobs. Each subscriber picks planning-lead types, tender trades and areas; **Preview email** shows exactly what they'd get and **Send now** sends it.
+
+Every Monday from 6am UK time, active subscribers get one email with new planning leads (submitted in the last 14 days or approved in the last 7) and open local tenders that match. The scheduled GitHub job calls `POST /api/digest/send`; the app sends at most once a week per subscriber, so repeated calls are safe.
+
+Email is sent through SMTP; a free Gmail account works (up to about 500 emails a day). Set in Render:
+
+| Name | Purpose |
+| --- | --- |
+| `SMTP_USER` | The Gmail address that sends the emails |
+| `SMTP_PASSWORD` | A Gmail **app password** (Google Account > Security > 2-Step Verification > App passwords), not your normal password |
+| `DIGEST_SENDER_NAME` | Optional name shown as the sender, e.g. "Merseyside Trade Leads" |
+| `DIGEST_REPLY_TO` | Optional reply-to address |
+| `SMTP_HOST`, `SMTP_PORT` | Optional, default `smtp.gmail.com` and `587` |
+
 ## Trades
 Each tender is labelled with the first trade that matches: Cleaning, Facilities management, Property maintenance (repairs, void works, decorating, roofing, plumbing, gas and electrical servicing) or Construction (refurbishment, new build, demolition, groundworks, retrofit). The keyword lists are at the top of `tenderscout.py` and the dashboard can filter by trade.
 
@@ -76,6 +91,7 @@ Open `http://localhost:5000`. Without `DATABASE_URL` it uses a local SQLite file
 - `/export.csv` download public-sector tender records
 - `/sources` council procurement and community source directory
 - `/planning` planning-application leads (extensions, lofts, new homes, shop refits, tree works) sorted by trade, area and stage; **Check for new planning applications** refreshes them, and the scheduled refresh does too
+- `/subscribers` weekly job emails for paying tradespeople: add, preview, send now, pause
 - `/leads` manually capture and view private customer enquiries separately
 - `/health` instant liveness check for the host (never touches the database, so a slow first connection after waking can't make Render restart the app)
 - `/health/db` database check
