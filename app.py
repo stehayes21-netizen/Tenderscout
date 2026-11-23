@@ -195,7 +195,8 @@ def ensure_schema(db):
         last_sent_at TEXT,
         created_at TEXT NOT NULL
     )""")
-    for table, column, ddl in (("planning_leads", "job_size", "TEXT"), ("subscribers", "team_size", "INTEGER")):
+    for table, column, ddl in (("planning_leads", "job_size", "TEXT"), ("subscribers", "team_size", "INTEGER"),
+                               ("planning_runs", "heartbeat_at", "TEXT")):
         if USE_POSTGRES:
             db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}")
         else:
@@ -1931,7 +1932,8 @@ def private_leads():
 
 PLANNING_KEEP_DAYS = 120
 PLANNING_AUTO_EVERY_HOURS = 20      # automatic check at most once a day
-PLANNING_RUNNING_STALE_MINUTES = 30  # a "running" flag older than this is a crashed run
+PLANNING_RUNNING_STALE_MINUTES = 3   # no heartbeat for this long = the check was killed (e.g. the free instance slept)
+KEEPALIVE_EVERY_SECONDS = 30
 
 
 def _planning_run(db):
@@ -1956,18 +1958,57 @@ def _hours_since(iso, now):
 
 
 def planning_running(row, now=None):
+    """True while a check is alive: it writes a heartbeat at least every 30 seconds."""
     now = now or datetime.now(timezone.utc)
     if not row or row["status"] != "running":
         return False
-    hours = _hours_since(row["started_at"], now)
+    try:
+        beat = row["heartbeat_at"] or row["started_at"]
+    except (KeyError, IndexError):
+        beat = row["started_at"]
+    hours = _hours_since(beat, now)
     return hours is not None and hours * 60 < PLANNING_RUNNING_STALE_MINUTES
+
+
+def _planning_heartbeat():
+    db = connect_db()
+    try:
+        _set_planning_run(db, heartbeat_at=datetime.now(timezone.utc).isoformat())
+    finally:
+        db.close()
+
+
+def _ping_self():
+    """Visit our own public address so Render's free plan sees traffic and doesn't put the app to sleep mid-check."""
+    base = (os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+    if not base.startswith("https://"):
+        return
+    try:
+        with urlopen(Request(base + "/health", headers={"User-Agent": "TenderScout keep-awake"}), timeout=10) as r:
+            r.read(200)
+    except Exception:
+        pass
+
+
+def _keepalive_sleep(seconds):
+    """Wait between PlanIt requests while keeping the check visibly alive and the instance awake."""
+    import time as _time
+    remaining = float(seconds)
+    while remaining > 0:
+        chunk = min(KEEPALIVE_EVERY_SECONDS, remaining)
+        try:
+            _planning_heartbeat()
+        except Exception:
+            app.logger.exception("Planning heartbeat failed")
+        _ping_self()
+        _time.sleep(chunk)
+        remaining -= chunk
 
 
 def refresh_planning_leads(getter=None, now=None, sleep=None):
     """Read recent planning applications for the target councils and save the useful ones."""
-    import time as _time
     leads, infos = planning.fetch_all(days=env_int("TENDERSCOUT_PLANNING_DAYS", 30), getter=getter,
-                                      sleep=sleep or _time.sleep)
+                                      sleep=sleep or _keepalive_sleep)
     db = connect_db()
     try:
         for lead in leads:
@@ -1992,11 +2033,15 @@ def refresh_planning_leads(getter=None, now=None, sleep=None):
 
 
 def _planning_worker():
+    # Logged as warnings so the lines show in Render's logs (info is hidden there).
+    app.logger.warning("PLANNING: check started")
     try:
-        leads, _infos = refresh_planning_leads()
-        app.logger.info("Planning leads refreshed: %s saved", len(leads))
+        leads, infos = refresh_planning_leads()
+        app.logger.warning("PLANNING: check finished, %s useful leads saved; %s", len(leads),
+                           "; ".join(f"{i.get('area')}={i.get('kept', 0)}/{i.get('total', 0)}"
+                                     + (f" ERROR {i['error']}" if i.get("error") else "") for i in infos))
     except Exception as exc:
-        app.logger.exception("Planning leads refresh failed")
+        app.logger.exception("PLANNING: check failed")
         db = connect_db()
         try:
             _set_planning_run(db, status="failed", error=str(exc)[:300])
@@ -2022,7 +2067,7 @@ def start_planning_refresh(now=None, automatic=False):
             hours = _hours_since(row["ran_at"], now)
             if hours is not None and hours < PLANNING_AUTO_EVERY_HOURS:
                 return "recent"
-        _set_planning_run(db, status="running", started_at=now.isoformat(), error="")
+        _set_planning_run(db, status="running", started_at=now.isoformat(), heartbeat_at=now.isoformat(), error="")
     finally:
         db.close()
     threading.Thread(target=_planning_worker, daemon=True, name="tenderscout-planning").start()
@@ -2033,7 +2078,7 @@ def refresh_planning_leads_safely():
     """Called after the scheduled tender refresh. Never affects the tender refresh status."""
     try:
         result = start_planning_refresh(automatic=True)
-        app.logger.info("Planning leads automatic check: %s", result)
+        app.logger.warning("PLANNING: automatic check after tender refresh: %s", result)
     except Exception:
         app.logger.exception("Planning leads refresh could not start")
 
