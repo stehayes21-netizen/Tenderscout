@@ -229,3 +229,77 @@ class JobSizeAndPlacesTests(SubscriberPageTests):
         page = self.add(team_size="3").get_data(as_text=True)
         self.assertIn("3 tradespeople", page)
         self.assertIn("gets small jobs", page)
+
+
+class JoinPageTests(SubscriberPageTests):
+    def form(self, **kw):
+        data = {"name": "Jo Smith", "business": "J&S Exterior Solutions", "email": "jo@example.com",
+                "trade": "Roofline, gutters and exterior", "areas": ["Sefton", "Knowsley"], "team_size": "3",
+                "company_type": "Limited company", "consent": "yes"}
+        data.update(kw)
+        return data
+
+    def anon(self):
+        c = self.app.app.test_client()
+        return c
+
+    def test_page_is_public_and_everything_else_stays_locked(self):
+        c = self.anon()
+        r = c.get("/join")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Start my free 4-week trial", r.get_data(as_text=True))
+        self.assertEqual(c.get("/join/thanks").status_code, 200)
+        self.assertEqual(c.get("/subscribers").status_code, 401)
+        self.assertEqual(c.get("/planning").status_code, 401)
+
+    def test_signup_is_saved_paused_for_approval(self):
+        r = self.anon().post("/join", data=self.form())
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(r.headers["Location"].endswith("/join/thanks"))
+        db = self.app.connect_db()
+        row = db.execute("SELECT * FROM subscribers WHERE email = 'jo@example.com'").fetchone()
+        db.close()
+        self.assertEqual(row["active"], 0)
+        self.assertEqual(row["team_size"], 3)
+        self.assertEqual(row["areas"], "Sefton, Knowsley")
+        self.assertIn("NEW SIGN-UP", row["notes"])
+        self.assertIn("Limited company", row["notes"])
+        page = self.client.get("/subscribers").get_data(as_text=True)
+        self.assertIn("1 new sign-up", page)
+        # Approving = Resume.
+        self.client.post(f"/subscribers/{row['id']}/toggle")
+        db = self.app.connect_db()
+        self.assertEqual(db.execute("SELECT active FROM subscribers WHERE id = ?", (row["id"],)).fetchone()["active"], 1)
+        db.close()
+
+    def test_mistakes_are_explained_and_answers_kept(self):
+        page = self.anon().post("/join", data=self.form(email="nope", consent="")).get_data(as_text=True)
+        self.assertIn("valid email", page)
+        self.assertIn("J&amp;S Exterior Solutions", page)
+        page = self.anon().post("/join", data=self.form(areas=[])).get_data(as_text=True)
+        self.assertIn("at least one area", page)
+        page = self.anon().post("/join", data=self.form(consent="")).get_data(as_text=True)
+        self.assertIn("happy to receive", page)
+
+    def test_robots_and_floods_are_ignored(self):
+        self.anon().post("/join", data=self.form(website="http://spam.example"))
+        db = self.app.connect_db()
+        self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM subscribers").fetchone()["n"], 0)
+        db.close()
+        self.app._JOIN_HITS.clear()
+        for i in range(7):
+            self.anon().post("/join", data=self.form(email=f"x{i}@example.com"))
+        db = self.app.connect_db()
+        self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM subscribers").fetchone()["n"], self.app.JOIN_LIMIT_PER_HOUR)
+        db.close()
+
+    def test_page_shows_this_months_job_counts(self):
+        self.seed()
+        today = datetime.now(timezone.utc).date().isoformat()
+        db = self.app.connect_db()
+        db.execute("UPDATE planning_leads SET start_date = ?", (today,))
+        db.commit()
+        db.close()
+        page = self.anon().get("/join").get_data(as_text=True)
+        self.assertIn("in the last 30 days", page)
+        self.assertIn("Extensions and building work", page)
