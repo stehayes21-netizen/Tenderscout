@@ -103,18 +103,15 @@ jobs:
               exit 0
             fi
             if [ "$status" = "incomplete" ]; then
+              # Some results were saved; usually one source asked us to slow down
+              # (HTTP 429). That is not a breakage, so warn instead of failing.
               printf '%s\n' "$state_json"
-              echo "TenderScout refresh finished with incomplete collection."
-              exit 1
+              echo "::warning title=Some tender sources were cut short::Results were saved. A source was busy or rate-limited; the next run catches up."
+              exit 0
             fi
             if [ "$status" = "failed" ]; then
               printf '%s\n' "$state_json"
               echo "TenderScout refresh failed."
-              exit 1
-            fi
-            if [ "$status" = "incomplete" ]; then
-              printf '%s\n' "$state_json"
-              echo "TenderScout refresh saved some results, but collection was incomplete."
               exit 1
             fi
             sleep 10
