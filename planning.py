@@ -82,6 +82,11 @@ LEAD_TRADES = {
         "hmo", "residential units", "self contained", "self-contained",
     ],
     "Roofing": ["roof", "roofs", "dormer", "dormers", "roof lantern", "flat roof", "pitched roof"],
+    "Roofline, gutters and exterior": [
+        "gutter", "gutters", "guttering", "fascia", "fascias", "soffit", "soffits", "bargeboard", "bargeboards",
+        "rainwater goods", "downpipe", "downpipes", "re roof", "re roofing", "reroof", "reroofing", "replacement roof",
+        "roof covering", "roof tiles", "slates", "render", "rendering", "cladding", "external wall insulation", "chimney",
+    ],
     "Trees and landscaping": [
         "tree", "trees", "tpo", "tree preservation order", "pollard", "pollarding", "fell", "felling",
         "crown reduction", "hedge", "hedgerow", "landscaping", "community garden", "garden",

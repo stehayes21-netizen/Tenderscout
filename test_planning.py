@@ -236,3 +236,24 @@ class PlanningScheduleTests(PlanningPageTests):
                 self.assertEqual(self.app.start_planning_refresh(now=evening + timedelta(hours=23), automatic=True), "started")
         finally:
             os.environ.pop("PLANIT_CONTACT_EMAIL", None)
+
+
+class ExteriorTradeTests(unittest.TestCase):
+    """Roofline, gutters and exterior work (gutter, fascia and soffit firms, roof cleaners and repairers)."""
+
+    def test_exterior_planning_jobs_are_labelled(self):
+        cases = [
+            "Replacement of existing timber fascias, soffits and guttering with uPVC",
+            "Re-roofing of existing dwelling with replacement slates and new rainwater goods",
+            "Application for Non Material Amendment to planning permission 26/00024/FUL for the proposed rendering of existing property",
+            "External wall insulation and render to front and side elevations",
+        ]
+        for text in cases:
+            self.assertIn("Roofline, gutters and exterior", planning.classify(text), text)
+        self.assertNotIn("Roofline, gutters and exterior", planning.classify("Single storey side extension."))
+
+    def test_exterior_tenders_are_labelled(self):
+        import tenderscout
+        self.assertEqual(tenderscout.classify_trade_category("Gutter clearing and downpipe maintenance across council housing"), "Gutter cleaning")
+        self.assertEqual(tenderscout.classify_trade_category("Replacement of fascia and soffit boards to 40 properties"), "Roofline, fascias and soffits")
+        self.assertEqual(tenderscout.classify_trade_category("Re-roofing programme for sheltered housing blocks"), "Roofing and roof repairs")
