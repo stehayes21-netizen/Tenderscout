@@ -2434,6 +2434,11 @@ def subscriber_preview(sub_id):
     return Response(page, mimetype="text/html")
 
 
+def smtp_ready():
+    """True when automatic email sending is configured (SMTP_USER and SMTP_PASSWORD set)."""
+    return bool(os.environ.get("SMTP_USER", "").strip() and os.environ.get("SMTP_PASSWORD", "").strip())
+
+
 @app.route("/subscribers/<int:sub_id>/mark-sent", methods=["POST"])
 def subscriber_mark_sent(sub_id):
     db = connect_db()
@@ -2534,8 +2539,8 @@ def subscribers_page():
             + (f'<p class="meta"><b>{safe(s_["notes"][:200])}</b></p>' if ((s_["notes"] or "").startswith("WAITING LIST") or "NEW SIGN-UP" in (s_["notes"] or "")) else "")
             + ''
             f'<div class="row"><a class="btn" href="/subscribers/{int(s_["id"])}/preview">Preview email</a>'
-            f'<form method="post" action="/subscribers/{int(s_["id"])}/send"><button>Send automatically</button></form>'
-            f'<form method="post" action="/subscribers/{int(s_["id"])}/toggle"><button class="ghost">{"Pause" if s_["active"] else "Resume"}</button></form></div></article>'
+            + (f'<form method="post" action="/subscribers/{int(s_["id"])}/send"><button>Send automatically</button></form>' if smtp_ready() else '')
+            + f'<form method="post" action="/subscribers/{int(s_["id"])}/toggle"><button class="ghost">{"Pause" if s_["active"] else "Resume"}</button></form></div></article>'
         )
     if not cards:
         cards = '<p class="empty">No subscribers yet. Add your first tradesperson below.</p>'
