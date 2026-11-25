@@ -165,6 +165,16 @@ class SubscriberPageTests(PlanningPageTests):
         self.assertEqual(r.status_code, 200)
         self.assertIn("skipped", r.get_json())
 
+    def test_send_automatically_button_only_when_email_is_set_up(self):
+        self.add()
+        with mock.patch.dict(os.environ, {"SMTP_USER": "", "SMTP_PASSWORD": ""}):
+            page = self.client.get("/subscribers").get_data(as_text=True)
+        self.assertNotIn("Send automatically", page)
+        self.assertIn("Preview email", page)
+        with mock.patch.dict(os.environ, {"SMTP_USER": "me@example.com", "SMTP_PASSWORD": "app-pass"}):
+            page = self.client.get("/subscribers").get_data(as_text=True)
+        self.assertIn("Send automatically", page)
+
 
 if __name__ == "__main__":
     unittest.main()
