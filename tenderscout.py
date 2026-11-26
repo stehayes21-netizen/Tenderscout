@@ -856,8 +856,13 @@ def _fts_windows(days, recent_days=10):
 
 
 def _page_through(base_url, params, source, max_pages, started, max_seconds, stats,
-                 initial_cursor=None, initial_results=None, on_page=None):
-    """Read a search window, optionally resuming and checkpointing every page."""
+                 initial_cursor=None, initial_results=None, on_page=None, keep=None):
+    """Read a search window, optionally resuming and checkpointing every page.
+
+    ``keep`` is an optional test applied to each page as it arrives. Records it
+    rejects are dropped straight away, so a long national feed never has to sit
+    in memory in full. Page counts in ``stats`` still include every record read.
+    """
     results = list(initial_results or [])
     cursor = initial_cursor
     for _ in range(max_pages):
@@ -874,6 +879,8 @@ def _page_through(base_url, params, source, max_pages, started, max_seconds, sta
             return results
         batch = extract_records(payload, source)
         _note_page(stats, batch)
+        if keep:
+            batch = [record for record in batch if keep(record)]
         results.extend(batch)
         cursor = _next_cursor(payload)
         stats["last_page_had_cursor"] = bool(cursor)
@@ -908,7 +915,7 @@ def fetch_fts_notice(notice_id):
     return records
 
 
-def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
+def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None, keep=None):
     stats = _start_stats(stats)
     results = []
     started = time.monotonic()
@@ -928,6 +935,8 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
         # older completed windows are stable and can be safely reused.
         if saved and saved.get("complete") and window_index >= 2:
             window_results = list(saved.get("records") or [])
+            if keep:
+                window_results = [record for record in window_results if keep(record)]
             stats["windows"] += 1
             # Include reused records in the source total without counting them
             # as newly fetched pages.
@@ -953,6 +962,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
             initial_cursor=(resume_state or {}).get("cursor"),
             initial_results=(resume_state or {}).get("records"),
             on_page=persist if checkpoint else None,
+            **({"keep": keep} if keep else {}),
         )
         results.extend(window_results)
         if stats["error"]:
@@ -961,7 +971,7 @@ def fetch_fts(days, max_pages, max_seconds=None, stats=None, checkpoint=None):
     return results
 
 
-def fetch_contracts_finder(days, max_pages, max_seconds=None, stats=None):
+def fetch_contracts_finder(days, max_pages, max_seconds=None, stats=None, keep=None):
     stats = _start_stats(stats)
     results = []
     started = time.monotonic()
@@ -976,7 +986,8 @@ def fetch_contracts_finder(days, max_pages, max_seconds=None, stats=None):
             "limit": "100",
         }
         results.extend(_page_through(CF_URL, params, "Contracts Finder", max_pages,
-                                     started, max_seconds, stats))
+                                     started, max_seconds, stats,
+                                     **({"keep": keep} if keep else {})))
         if stats["error"]:
             break
     _print_source_coverage("Contracts Finder", stats)

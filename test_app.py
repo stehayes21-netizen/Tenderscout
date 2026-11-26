@@ -1197,17 +1197,44 @@ class RefreshSummaryTests(AppTestCase):
         self.assertIn("1 confirmed in your area", status.json["summary"])
 
 
+class RefreshMemoryTests(AppTestCase):
+    def test_national_feeds_drop_irrelevant_notices_while_paging(self):
+        tenderscout = self.app_module.collector
+        keep = self.app_module._worth_keeping
+        relevant = feed_record("liv", "Liverpool L2 2DH")
+        irrelevant = dict(relevant, notice_url="https://example.test/n/pens",
+                          title="Supply of ballpoint pens", description="Stationery supply.",
+                          trade_context="", ocid="ocds-pens")
+        cancelled = dict(irrelevant, notice_url="https://example.test/n/cancel",
+                         ocid="ocds-cancel", notice_status="cancelled")
+        payload = {"releases": []}
+        stats = tenderscout._start_stats({})
+        with patch.object(tenderscout, "get_json", return_value=payload), \
+             patch.object(tenderscout, "extract_records", return_value=[relevant, irrelevant, cancelled]), \
+             patch.object(tenderscout, "_next_cursor", return_value=None):
+            rows = tenderscout._page_through("https://example.test", {}, "Contracts Finder", 1,
+                                             0, None, stats, keep=keep)
+        urls = [row["notice_url"] for row in rows]
+        self.assertIn(relevant["notice_url"], urls)
+        self.assertIn(cancelled["notice_url"], urls)
+        self.assertNotIn(irrelevant["notice_url"], urls)
+        # The page count still reports everything the feed returned.
+        self.assertEqual(stats["records"], 3)
+        # Checking a record must not change it.
+        self.assertNotIn("region_match", relevant)
+
+
 class FeedDiagnosticsTests(AppTestCase):
     def test_dashboard_shows_what_each_feed_returned(self):
         collector = self.app_module.collector
 
-        def fake_fts(days, pages, limit, stats, checkpoint=None):
+        def fake_fts(days, pages, limit, stats, checkpoint=None, keep=None):
             stats.update({"pages": 1, "records": 100, "last_batch": 100, "more": False,
                           "error": "", "stopped": "", "first_date": "2026-10-11",
                           "last_date": "2026-10-12"})
             return [feed_record("liv", "Liverpool L2 2DH")]
 
-        def fake_cf(days, pages, limit, stats):
+        def fake_cf(days, pages, limit, stats, keep=None):
             stats.update({"pages": 3, "records": 250, "last_batch": 50, "more": False,
                           "error": "", "stopped": "time limit"})
             return []
