@@ -944,6 +944,22 @@ def reclassify_saved_geography(db):
             changed += 1
     return changed
 
+def _worth_keeping(record):
+    """True if a fetched record could ever be saved or affect a saved tender.
+
+    The national feeds return every UK notice. Holding all of them until the end
+    of a refresh pushed the free Render instance past its 512 MB memory limit.
+    Keep only notices that pass the trade check (the same rule run_refresh
+    applies later) plus cancellations, which can close a tender already saved.
+    The check runs on a copy so the record itself is not changed here.
+    """
+    if record.get("notice_status") == "cancelled":
+        return True
+    probe = dict(record)
+    collector.score_record(probe, SERVICES, collector.TARGET_AREA_LABEL, None, None)
+    return "region_match" in probe
+
+
 def run_refresh():
     """Fetch official feeds and save matching tenders. Returns a dict of counts."""
     days = env_int("TENDERSCOUT_DAYS", 60)
@@ -960,8 +976,10 @@ def run_refresh():
     # Run independent free sources concurrently. Bearings and Standstill are
     # discovery sources, not delivery-site proof; uncertain records stay REVIEW.
     with ThreadPoolExecutor(max_workers=4) as pool:
-        fts_job = pool.submit(collector.fetch_fts, days, pages, fts_limit, fts_stats, fts_checkpoint)
-        cf_job = pool.submit(collector.fetch_contracts_finder, days, pages, limit, cf_stats)
+        fts_job = pool.submit(collector.fetch_fts, days, pages, fts_limit, fts_stats, fts_checkpoint,
+                              keep=_worth_keeping)
+        cf_job = pool.submit(collector.fetch_contracts_finder, days, pages, limit, cf_stats,
+                             keep=_worth_keeping)
         bearings_job = pool.submit(collector.fetch_bearings, limit, bearings_stats)
         standstill_job = pool.submit(collector.fetch_standstill_northwest, limit, standstill_stats)
         records = collector.dedupe(
